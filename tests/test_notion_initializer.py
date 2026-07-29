@@ -144,6 +144,14 @@ class FakeNotion:
             **dict(payload),
         }
         self.views[view_id] = view
+        parent_page_id = str(create_database["parent"]["page_id"])
+        self.blocks.setdefault(parent_page_id, []).append(
+            {
+                "id": linked_database_id,
+                "type": "child_database",
+                "child_database": {"title": str(payload["name"])},
+            }
+        )
         return view
 
     def update_view(self, view_id: str, payload: Mapping[str, Any]) -> JsonObject:

@@ -579,28 +579,24 @@ class NotionInitializer:
         self.api.append_block_children(self.root_page_id, home_blocks())
         return True
 
-    def _managed_view(
-        self,
-        spec: ViewSpec,
-        source: NotionResource,
-    ) -> JsonObject | None:
-        for reference in self.api.list_views(data_source_id=source.data_source_id):
-            view_id = reference.get("id")
-            if not view_id:
+    def _managed_views(self) -> dict[tuple[str, str], JsonObject]:
+        """Index the first visible linked view for each data source and name."""
+        result: dict[tuple[str, str], JsonObject] = {}
+        for block in self.api.list_block_children(self.root_page_id):
+            if block.get("type") != "child_database" or not block.get("id"):
                 continue
-            view = self.api.retrieve_view(str(view_id))
-            if view.get("name") != spec.name:
-                continue
-            parent = view.get("parent")
-            if not isinstance(parent, dict) or not parent.get("database_id"):
-                continue
-            parent_database_id = str(parent["database_id"])
-            if parent_database_id == source.database_id:
-                continue
-            linked_database = self.api.retrieve_database(parent_database_id)
-            if _parent_page_id(linked_database) == self.root_page_id:
-                return view
-        return None
+            database_id = str(block["id"])
+            for reference in self.api.list_views(database_id=database_id):
+                view_id = reference.get("id")
+                if not view_id:
+                    continue
+                view = self.api.retrieve_view(str(view_id))
+                data_source_id = view.get("data_source_id")
+                name = view.get("name")
+                if not data_source_id or not name:
+                    continue
+                result.setdefault((str(data_source_id), str(name)), view)
+        return result
 
     def _view_payload(
         self,
@@ -634,11 +630,13 @@ class NotionInitializer:
     def _ensure_views(self, resources: dict[str, NotionResource]) -> tuple[int, int]:
         created = 0
         updated = 0
+        managed_views = self._managed_views()
         for spec in VIEW_SPECS:
             source = resources[spec.source]
-            existing = self._managed_view(spec, source)
+            existing = managed_views.get((source.data_source_id, spec.name))
             if existing is None:
-                self.api.create_view(self._view_payload(spec, source, creating=True))
+                view = self.api.create_view(self._view_payload(spec, source, creating=True))
+                managed_views[(source.data_source_id, spec.name)] = view
                 created += 1
             else:
                 self.api.update_view(
