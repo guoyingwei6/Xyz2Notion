@@ -4,15 +4,15 @@ from collections.abc import Callable
 import httpx
 import pytest
 
-from xyz2notion.enrichment.dashscope import (
-    DASHSCOPE_CHAT_URL,
-    CompletionUsage,
-    DashScopeSummaryClient,
-)
 from xyz2notion.enrichment.schema import EnrichmentPayload
+from xyz2notion.enrichment.siliconflow import (
+    SILICONFLOW_CHAT_URL,
+    CompletionUsage,
+    SiliconFlowSummaryClient,
+)
 from xyz2notion.models import ProviderError, ProviderErrorCategory
 
-API_KEY = "dashscope-fixture-secret"
+API_KEY = "siliconflow-fixture-secret"
 
 
 def payload(summary: str = "摘要") -> dict[str, object]:
@@ -51,8 +51,8 @@ def client_for(
     *,
     max_retries: int = 0,
     sleeps: list[float] | None = None,
-) -> DashScopeSummaryClient:
-    return DashScopeSummaryClient(
+) -> SiliconFlowSummaryClient:
+    return SiliconFlowSummaryClient(
         API_KEY,
         client=httpx.Client(transport=httpx.MockTransport(handler)),
         max_retries=max_retries,
@@ -63,17 +63,16 @@ def client_for(
 
 def test_structured_completion_uses_official_json_mode() -> None:
     def handle(request: httpx.Request) -> httpx.Response:
-        assert str(request.url) == DASHSCOPE_CHAT_URL
+        assert str(request.url) == SILICONFLOW_CHAT_URL
         assert request.headers["Authorization"] == f"Bearer {API_KEY}"
         body = json.loads(request.content)
         assert body["response_format"] == {"type": "json_object"}
         assert body["enable_thinking"] is False
-        assert body["model"] == "qwen-flash"
+        assert body["model"] == "Qwen/Qwen3-8B"
         return completion(json.dumps(payload(), ensure_ascii=False))
 
     value, usage = client_for(handle).generate_structured(
         EnrichmentPayload,
-        model="qwen-flash",
         system="system",
         user="输出 JSON",
         max_output_tokens=1000,
@@ -95,7 +94,6 @@ def test_invalid_json_is_repaired_once_and_usage_is_accumulated() -> None:
     )
     value, usage = client_for(lambda _request: next(responses)).generate_structured(
         EnrichmentPayload,
-        model="qwen-flash",
         system="system",
         user="user",
         max_output_tokens=1000,
@@ -115,7 +113,6 @@ def test_semantic_failure_is_repaired_and_second_failure_is_final() -> None:
     with pytest.raises(ProviderError) as caught:
         client.generate_structured(
             EnrichmentPayload,
-            model="qwen-flash",
             system="system",
             user="user",
             max_output_tokens=1000,
@@ -127,7 +124,6 @@ def test_semantic_failure_is_repaired_and_second_failure_is_final() -> None:
     with pytest.raises(ProviderError) as invalid:
         client_for(lambda _request: next(invalid_responses)).generate_structured(
             EnrichmentPayload,
-            model="qwen-flash",
             system="system",
             user="user",
             max_output_tokens=1000,
@@ -150,7 +146,6 @@ def test_retry_after_and_transport_retry() -> None:
 
     value, _ = client_for(handle, max_retries=2, sleeps=sleeps).generate_structured(
         EnrichmentPayload,
-        model="qwen-flash",
         system="system",
         user="user",
         max_output_tokens=1000,
@@ -177,7 +172,7 @@ def test_retry_after_and_transport_retry() -> None:
             httpx.Response(403, json={"error": {"code": "AccessDenied"}}),
             ProviderErrorCategory.AUTHENTICATION,
         ),
-        (httpx.Response(404), ProviderErrorCategory.UNSUPPORTED),
+        (httpx.Response(404), ProviderErrorCategory.UNAVAILABLE),
         (httpx.Response(400, text="private body"), ProviderErrorCategory.INVALID_INPUT),
         (httpx.Response(503), ProviderErrorCategory.UNAVAILABLE),
         (
@@ -193,7 +188,6 @@ def test_api_failures_are_safe(
     with pytest.raises(ProviderError) as caught:
         client_for(lambda _request: response).generate_structured(
             EnrichmentPayload,
-            model="qwen-flash",
             system="system",
             user="user",
             max_output_tokens=1000,
@@ -210,7 +204,6 @@ def test_transport_exhaustion_and_client_validation() -> None:
     with pytest.raises(ProviderError) as caught:
         client_for(timeout).generate_structured(
             EnrichmentPayload,
-            model="qwen-flash",
             system="system",
             user="user",
             max_output_tokens=1000,
@@ -218,24 +211,57 @@ def test_transport_exhaustion_and_client_validation() -> None:
     assert caught.value.failure.category is ProviderErrorCategory.NETWORK
 
     with pytest.raises(ValueError, match="cannot be empty"):
-        DashScopeSummaryClient("")
+        SiliconFlowSummaryClient("")
     with pytest.raises(ValueError, match="negative"):
-        DashScopeSummaryClient("key", max_retries=-1)
+        SiliconFlowSummaryClient("key", max_retries=-1)
 
 
 def test_context_manager_with_external_client() -> None:
     transport = httpx.MockTransport(
         lambda _request: completion(json.dumps(payload(), ensure_ascii=False))
     )
-    with DashScopeSummaryClient(
+    with SiliconFlowSummaryClient(
         "key",
         client=httpx.Client(transport=transport),
     ) as client:
         value, _ = client.generate_structured(
             EnrichmentPayload,
-            model="qwen-flash",
             system="system",
             user="user",
             max_output_tokens=1000,
         )
     assert value.summary == "摘要"
+
+
+def test_model_fallback_pins_the_first_working_free_model() -> None:
+    requested: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        requested.append(body["model"])
+        if body["model"] == "Qwen/Qwen3-8B":
+            return httpx.Response(404)
+        return completion(json.dumps(payload(), ensure_ascii=False))
+
+    client = client_for(handle)
+    value, _ = client.generate_structured(
+        EnrichmentPayload,
+        system="system",
+        user="user",
+        max_output_tokens=1000,
+    )
+    assert value.summary == "摘要"
+    assert client.active_model == "Qwen/Qwen2.5-7B-Instruct"
+    assert requested == ["Qwen/Qwen3-8B", "Qwen/Qwen2.5-7B-Instruct"]
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "Pro/Qwen/Qwen2.5-7B-Instruct",
+        "Qwen/Qwen2.5-14B-Instruct",
+    ],
+)
+def test_models_outside_free_allowlist_are_rejected(model: str) -> None:
+    with pytest.raises(ValueError, match="free allowlist"):
+        SiliconFlowSummaryClient("key", models=(model,))

@@ -22,12 +22,8 @@ updated: 2026-07-29
    - API 稳定性和可维护性远高于网页 Cookie。
    - 但当前接口只返回 `text`，没有说话人标签或句级时间戳；长音频还必须切片。
 
-3. **可选最终保险：阿里云正式 ASR API**
-   - 默认关闭，由用户主动配置预算后才启用。
-   - 可选通义听悟 OpenAPI（0.6 元/小时）或百炼 `fun-asr` / `paraformer-v2`。
-   - 用于 Cookie 失效且 SiliconFlow 免费模型下线、限流或长期失败的情况。
-
-项目默认可只启用前两层，不会产生 ASR API 费用；第三层只是为了避免未来两个免费入口同时不可用。
+项目只实现上面两层，不接入正式付费 ASR。Cookie 和两个免费模型都不可用时，
+保留任务状态并等待下一次 GitHub Actions 重试。
 
 ## 二、截图中的 1708 小时到底是什么
 
@@ -189,13 +185,10 @@ flowchart TD
     H --> I["按静音切成 25–30 分钟片段"]
     I --> J["SenseVoiceSmall 或 TeleSpeechASR"]
     J --> K["合并文字并生成粗粒度时间轴"]
-    K --> L["千问生成摘要、章节和脑图"]
-    J -- "持续失败" --> M{"允许付费保险？"}
-    M -- "否" --> N["标记待重试并通知"]
-    M -- "是且预算允许" --> O["正式通义/百炼 ASR"]
+    K --> L["SiliconFlow 免费模型生成摘要、章节和脑图"]
+    J -- "持续失败" --> N["标记待重试并通知"]
     F --> P["写入 Notion"]
     L --> P
-    O --> P
 ```
 
 ### Provider 接口
@@ -251,13 +244,13 @@ TranscriptResult
 | 听悟任务明确失败 | 降级 |
 | SiliconFlow 429 | 延迟并在下一次工作流继续，不要立即重复轰炸 |
 | SiliconFlow 某个模型 404/下线 | 自动尝试另一个免费 ASR 模型 |
-| 两个 SiliconFlow 模型均失败 | 若启用付费保险且预算允许，调用正式 API；否则保留待重试状态 |
+| 两个 SiliconFlow 模型均失败 | 保留可重试状态，等待下一次工作流，不调用付费模型 |
 
 ## 九、Notion 中需要补充的状态字段
 
 在原计划的 Episodes 数据库中增加：
 
-- `ASR Provider`：tingwu_web / siliconflow / dashscope
+- `ASR Provider`：tingwu_web / siliconflow
 - `ASR Model`
 - `ASR Quality`：full / coarse_timestamps / text_only
 - `ASR Task ID`
@@ -272,7 +265,7 @@ TranscriptResult
 
 ## 十、实施顺序调整
 
-原计划中的“正式 DashScope ASR 优先”调整为：
+最终方案调整为只使用听悟网页额度和 SiliconFlow 免费模型：
 
 ### Phase 1：SiliconFlow 官方免费 API
 
@@ -281,7 +274,7 @@ TranscriptResult
 - 音频下载、FFmpeg 规范化和切片；
 - SenseVoiceSmall / TeleSpeechASR；
 - 文本合并；
-- 千问摘要、章节和脑图；
+- SiliconFlow 免费摘要、章节和脑图；
 - Notion 写入。
 
 ### Phase 2：听悟 Cookie Provider
@@ -295,13 +288,6 @@ TranscriptResult
 - 失败熔断与自动降级。
 
 虽然最终运行顺序是 Cookie 优先，但开发顺序应先完成 SiliconFlow。这样调试 Cookie 时始终有一条可用的官方 API 链路，不会把所有进度卡在一个未公开接口上。
-
-### Phase 3：可选付费保险
-
-- 通义听悟 OpenAPI 或百炼 Fun-ASR / Paraformer；
-- 用户显式开启；
-- 设单集、每日和每月预算上限；
-- 超预算绝不自动调用。
 
 ## 十一、验收标准
 
@@ -323,7 +309,7 @@ TranscriptResult
 6. Notion 明确显示实际 Provider 和结果精度；
 7. 用户笔记不会被自动内容覆盖；
 8. 所有日志中都不存在 Cookie、API Key 和 Notion Token；
-9. 未启用付费保险时，任何失败都不会产生 ASR 费用；
+9. 任何失败都不会自动调用付费 ASR 或付费摘要模型；
 10. 免费模型不可用时，任务进入可恢复失败状态，而不是静默丢失。
 
 ## 十二、最终建议
@@ -332,20 +318,19 @@ TranscriptResult
 
 ```yaml
 asr:
-  providers:
-    - tingwu_web
+  provider_order:
+    - tingwu_cookie
     - siliconflow
-  tingwu:
-    enabled: true
-  siliconflow:
-    model: FunAudioLLM/SenseVoiceSmall
-    dialect_model: TeleAI/TeleSpeechASR
-    chunk_minutes: 30
-  paid_fallback:
-    enabled: false
-    monthly_budget_cny: 0
+  siliconflow_models:
+    - FunAudioLLM/SenseVoiceSmall
+    - TeleAI/TeleSpeechASR
+summary:
+  enabled: true
+  siliconflow_models:
+    - Qwen/Qwen3-8B
+    - Qwen/Qwen2.5-7B-Instruct
 ```
 
 这套默认行为就是：
 
-> 先尽量消耗你现有的通义听悟网页免费时长；Cookie 或网页接口不可用时，自动改用 SiliconFlow 的免费 ASR API；只有用户主动配置预算，才允许使用正式付费 ASR。
+> 先尽量消耗你现有的通义听悟网页免费时长；Cookie 或网页接口不可用时，自动改用 SiliconFlow 的免费 ASR API；免费模型仍不可用时保存状态并等待重试，绝不自动调用付费模型。

@@ -17,8 +17,7 @@ Xyz2Notion 的定时任务只运行在用户自己 Fork 的 GitHub 仓库中。�
 | `NOTION_PAGE_ID` | 是 | 已授权给 Integration 的空白根页面 ID |
 | `NOTION_MIGRATION_PAGE_ID` | 否 | 旧模板副本页面；仅维护工作流迁移操作使用 |
 | `TINGWU_COOKIE` | 否 | 优先使用用户已有的听悟网页额度 |
-| `SILICONFLOW_API_KEY` | 建议 | 听悟 Cookie 终态失效后的免费 ASR 降级 |
-| `DASHSCOPE_API_KEY` | 条件必需 | 没有听悟原生摘要时调用千问生成摘要 |
+| `SILICONFLOW_API_KEY` | 建议 | 免费 ASR 降级与免费结构化摘要 |
 
 在 **Repository variables** 可选添加：
 
@@ -30,9 +29,12 @@ Xyz2Notion 的定时任务只运行在用户自己 Fork 的 GitHub 仓库中。�
 
 ### 小宇宙 Refresh Token
 
-登录 `https://xyzfm.link/` 后，在浏览器开发者工具的
-`Network → Fetch/XHR → Request Headers` 中复制 `X-Jike-Refresh-Token`。
-这里要的是 **Refresh Token**，不是 Access Token，也不是整段 Cookie。
+打开 `https://xyzfm.link/login`，通过手机号或小宇宙 App 扫码完成统一身份认证。
+登录后优先在浏览器开发者工具的
+`Application → Cookies → namecard.xiaoyuzhoufm.com` 中查找
+`x-jike-refresh-token`；若当前版本仍把令牌附加到 API 请求，也可在
+`Network → Fetch/XHR → Headers` 中复制 `X-Jike-Refresh-Token`。
+这里要的是 **Refresh Token 的值**，不是 Access Token，也不是整段 Cookie。
 
 ### Notion
 
@@ -47,12 +49,11 @@ OAuth 回调或作者生成的 Token。
 可能变化；它只被发送到允许的阿里域名。详细边界见
 [听悟 Cookie Provider](tingwu-cookie.md)。
 
-### SiliconFlow 和 DashScope
+### SiliconFlow
 
 `SILICONFLOW_API_KEY` 来自用户自己的 SiliconFlow 账户，用于调用配置中的免费
-ASR 模型。`DASHSCOPE_API_KEY` 来自用户自己的阿里云百炼账户，用于
-`qwen-flash` 结构化摘要。免费额度和价格可能调整，项目不会替用户开通付费 ASR，
-也不会绕过服务商的额度规则。
+ASR 和免费文本模型。项目只接受代码已核对的免费模型白名单，不使用 DashScope，
+也不实现付费 ASR。免费模型清单可能调整，升级项目版本前应重新核对价格页。
 
 ## 工作流
 
@@ -75,7 +76,7 @@ ASR 模型。`DASHSCOPE_API_KEY` 来自用户自己的阿里云百炼账户，�
 4. 查看工作流摘要中的聚合计数，以及 Notion Episode 的 `ASR Status`。
 
 如果 Fork 中存在公开的 `config.yaml`，AI 工作流使用它；否则使用
-`config.example.yaml`。配置文件只能包含模型顺序、额度上限等非秘密设置。
+`config.example.yaml`。配置文件只能包含模型顺序、运行上限等非秘密设置。
 
 ## 维护工作流
 
@@ -93,7 +94,7 @@ ASR 模型。`DASHSCOPE_API_KEY` 来自用户自己的阿里云百炼账户，�
 ## 中断与重试
 
 听悟的解析 ID、Task ID、文字稿和摘要检查点作为 JSON 文件保存在用户自己的
-Notion Episode 中。每个可能产生调用费用的阶段完成后都会先保存检查点。因此
+Notion Episode 中。每个外部 AI 阶段完成后都会先保存检查点。因此
 Actions 被取消或超时后，下次运行继续查询或发布，不重复提交已完成的 ASR。
 
 临时网络、限流或服务不可用会进入 `FAILED_RETRYABLE`。修复凭证或等待服务恢复后，

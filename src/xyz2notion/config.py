@@ -28,7 +28,20 @@ class AsrProvider(StrEnum):
 
     TINGWU_COOKIE = "tingwu_cookie"
     SILICONFLOW = "siliconflow"
-    DASHSCOPE_PAID = "dashscope_paid"
+
+
+FREE_SILICONFLOW_ASR_MODELS = frozenset(
+    {
+        "FunAudioLLM/SenseVoiceSmall",
+        "TeleAI/TeleSpeechASR",
+    }
+)
+FREE_SILICONFLOW_SUMMARY_MODELS = frozenset(
+    {
+        "Qwen/Qwen3-8B",
+        "Qwen/Qwen2.5-7B-Instruct",
+    }
+)
 
 
 class StrictConfigModel(BaseModel):
@@ -38,14 +51,12 @@ class StrictConfigModel(BaseModel):
 
 
 class AsrConfig(StrictConfigModel):
-    """Speech recognition provider and budget policy."""
+    """Free speech recognition provider policy."""
 
     provider_order: tuple[AsrProvider, ...] = (
         AsrProvider.TINGWU_COOKIE,
         AsrProvider.SILICONFLOW,
     )
-    paid_enabled: bool = False
-    paid_budget_cny: float = Field(default=0, ge=0)
     siliconflow_models: tuple[str, ...] = (
         "FunAudioLLM/SenseVoiceSmall",
         "TeleAI/TeleSpeechASR",
@@ -61,13 +72,11 @@ class AsrConfig(StrictConfigModel):
             raise ValueError("asr.siliconflow_models must contain non-empty model names")
         if len(set(self.siliconflow_models)) != len(self.siliconflow_models):
             raise ValueError("asr.siliconflow_models cannot contain duplicates")
-        paid_is_selected = AsrProvider.DASHSCOPE_PAID in self.provider_order
-        if self.paid_enabled and self.paid_budget_cny <= 0:
-            raise ValueError("paid ASR requires asr.paid_budget_cny greater than zero")
-        if not self.paid_enabled and self.paid_budget_cny != 0:
-            raise ValueError("asr.paid_budget_cny must be zero while paid ASR is disabled")
-        if paid_is_selected and not self.paid_enabled:
-            raise ValueError("dashscope_paid cannot be selected while paid ASR is disabled")
+        if unknown := set(self.siliconflow_models) - FREE_SILICONFLOW_ASR_MODELS:
+            raise ValueError(
+                f"asr.siliconflow_models contains models outside the free allowlist: "
+                f"{', '.join(sorted(unknown))}"
+            )
         return self
 
 
@@ -87,16 +96,32 @@ class LimitConfig(StrictConfigModel):
 
 
 class SummaryConfig(StrictConfigModel):
-    """Qwen summary generation and transparent cost-estimation settings."""
+    """Free SiliconFlow summary generation settings."""
 
     enabled: bool = True
-    model: str = Field(default="qwen-flash", min_length=1)
+    siliconflow_models: tuple[str, ...] = (
+        "Qwen/Qwen3-8B",
+        "Qwen/Qwen2.5-7B-Instruct",
+    )
     prompt_version: str = Field(default="summary-v1", min_length=1)
     chunk_tokens: int = Field(default=24_000, ge=1_000, le=100_000)
     chunk_minutes: int = Field(default=30, ge=5, le=120)
     max_output_tokens: int = Field(default=8_192, ge=512, le=32_768)
-    input_cny_per_million_tokens: float = Field(default=0.15, ge=0)
-    output_cny_per_million_tokens: float = Field(default=1.5, ge=0)
+
+    @model_validator(mode="after")
+    def validate_models(self) -> Self:
+        if not self.siliconflow_models or any(
+            not model.strip() for model in self.siliconflow_models
+        ):
+            raise ValueError("summary.siliconflow_models must contain non-empty model names")
+        if len(set(self.siliconflow_models)) != len(self.siliconflow_models):
+            raise ValueError("summary.siliconflow_models cannot contain duplicates")
+        if unknown := set(self.siliconflow_models) - FREE_SILICONFLOW_SUMMARY_MODELS:
+            raise ValueError(
+                f"summary.siliconflow_models contains models outside the free allowlist: "
+                f"{', '.join(sorted(unknown))}"
+            )
+        return self
 
 
 class AppConfig(StrictConfigModel):
@@ -120,7 +145,6 @@ class RuntimeCredentials(BaseModel):
     notion_page_id: str | None = None
     tingwu_cookie: SecretStr | None = None
     siliconflow_api_key: SecretStr | None = None
-    dashscope_api_key: SecretStr | None = None
 
     def require(self, *names: str) -> Self:
         """Require named credentials before a network operation."""
@@ -213,5 +237,4 @@ def load_runtime_credentials(
         notion_page_id=env.get("NOTION_PAGE_ID", "").strip() or None,
         tingwu_cookie=secret("TINGWU_COOKIE"),
         siliconflow_api_key=secret("SILICONFLOW_API_KEY"),
-        dashscope_api_key=secret("DASHSCOPE_API_KEY"),
     )

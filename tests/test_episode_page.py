@@ -121,7 +121,7 @@ def summary() -> SummaryResult:
             ),
         ),
         prompt_version="summary-v1",
-        model="qwen-flash",
+        model="Qwen/Qwen3-8B",
     )
 
 

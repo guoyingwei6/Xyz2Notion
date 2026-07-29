@@ -42,7 +42,7 @@ def full_state() -> EpisodeAIState:
         summary="摘要",
         mindmap=MindmapNode(node_id="root", title="主题"),
         prompt_version="summary-v1",
-        model="qwen-flash",
+        model="Qwen/Qwen3-8B",
     )
     record = PipelineRecord(eid="episode").transition(PipelineState.TRANSCRIBED)
     return EpisodeAIState(

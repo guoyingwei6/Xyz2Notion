@@ -18,7 +18,8 @@ Actions 摘要只显示聚合数量。具体单集状态在 Notion Episode 的 `
 
 ### 小宇宙认证失败
 
-必须复制 `X-Jike-Refresh-Token`，不是 Access Token、Cookie 或文章中误写的
+打开 `https://xyzfm.link/login` 重新登录，必须复制
+`X-Jike-Refresh-Token` 的值，不是 Access Token、整段 Cookie 或文章中误写的
 `X-Jike-Access-Token`。重新登录后覆盖 GitHub Secret。Device ID 可不填；若频繁
 切换设备环境，可固定 `XIAOYUZHOU_DEVICE_ID` Repository Variable。
 
@@ -42,8 +43,8 @@ Actions 摘要只显示聚合数量。具体单集状态在 Notion Episode 的 `
 
 ### 已有文字稿但没有摘要
 
-通常是未配置 `DASHSCOPE_API_KEY`、摘要被关闭，或千问额度不可用。文字稿已经保存在
-Notion 检查点中；补 Key 后再次运行，不会重复 ASR。
+通常是未配置 `SILICONFLOW_API_KEY`、摘要被关闭，或免费文本模型正在限流。文字稿
+已经保存在 Notion 检查点中；补 Key 或稍后重试不会重复 ASR。
 
 ### 只重试失败单集
 
@@ -66,5 +67,5 @@ uv run xyz2notion redo-episode --eid <EID>
 - 小宇宙接口没有公开稳定契约，字段变化时需更新适配；
 - GitHub Actions 单 Job 有运行时长限制，长节目可能跨多次运行完成；
 - Notion API 有速率和单请求块数量限制，长文字稿会分批写入；
-- 当前版本不实现任何付费 ASR Provider；
+- 当前版本不实现任何付费 AI Provider；
 - 真实视觉截图、真实六类音频质量和定时任务验收需要用户自己的账户凭证。

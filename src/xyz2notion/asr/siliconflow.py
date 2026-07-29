@@ -31,6 +31,7 @@ DEFAULT_MODELS = (
     "FunAudioLLM/SenseVoiceSmall",
     "TeleAI/TeleSpeechASR",
 )
+FREE_MODELS = frozenset(DEFAULT_MODELS)
 MAX_FILE_BYTES = 50 * 1024 * 1024
 MAX_DURATION_MS = 60 * 60 * 1000
 
@@ -99,6 +100,11 @@ class SiliconFlowClient:
         normalized_models = tuple(model.strip() for model in models if model.strip())
         if not normalized_models:
             raise ValueError("at least one SiliconFlow model is required")
+        if unknown := set(normalized_models) - FREE_MODELS:
+            raise ValueError(
+                f"SiliconFlow ASR models outside the free allowlist are not allowed: "
+                f"{', '.join(sorted(unknown))}"
+            )
         if max_retries < 0:
             raise ValueError("max_retries cannot be negative")
         validate_credential_destination(SILICONFLOW_API_URL, CredentialKind.SILICONFLOW)

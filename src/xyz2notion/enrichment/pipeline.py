@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from xyz2notion.enrichment.dashscope import CompletionUsage, DashScopeSummaryClient
 from xyz2notion.enrichment.prompts import (
     CHUNK_PROMPT,
     FULL_PROMPT,
@@ -14,6 +13,7 @@ from xyz2notion.enrichment.prompts import (
     SYSTEM_PROMPT,
 )
 from xyz2notion.enrichment.schema import EnrichmentPayload
+from xyz2notion.enrichment.siliconflow import CompletionUsage, SiliconFlowSummaryClient
 from xyz2notion.enrichment.text import chunk_transcript
 from xyz2notion.models import (
     MindmapNode,
@@ -27,25 +27,12 @@ from xyz2notion.models import (
 
 @dataclass(frozen=True)
 class SummaryPolicy:
-    """Model, chunk, and price snapshot used for one summary run."""
+    """Chunking policy used for one free summary run."""
 
-    model: str = "qwen-flash"
     prompt_version: str = PROMPT_VERSION
     chunk_tokens: int = 24_000
     chunk_minutes: int = 30
     max_output_tokens: int = 8_192
-    input_cny_per_million_tokens: float = 0.15
-    output_cny_per_million_tokens: float = 1.5
-
-    def estimated_cost(self, usage: CompletionUsage) -> float:
-        return round(
-            (
-                usage.input_tokens * self.input_cny_per_million_tokens
-                + usage.output_tokens * self.output_cny_per_million_tokens
-            )
-            / 1_000_000,
-            6,
-        )
 
 
 def _node_ids(root: MindmapNode) -> tuple[str, ...]:
@@ -69,7 +56,7 @@ def validate_payload(payload: EnrichmentPayload, duration_ms: int) -> bool:
 def _provider_error(message: str) -> ProviderError:
     return ProviderError(
         ProviderFailure(
-            provider="dashscope",
+            provider="siliconflow_summary",
             category=ProviderErrorCategory.INVALID_INPUT,
             message=message,
         )
@@ -81,7 +68,7 @@ class TranscriptEnricher:
 
     def __init__(
         self,
-        client: DashScopeSummaryClient,
+        client: SiliconFlowSummaryClient,
         *,
         policy: SummaryPolicy | None = None,
     ) -> None:
@@ -97,7 +84,6 @@ class TranscriptEnricher:
     ) -> tuple[EnrichmentPayload, CompletionUsage]:
         return self.client.generate_structured(
             EnrichmentPayload,
-            model=self.policy.model,
             system=SYSTEM_PROMPT,
             user=user,
             max_output_tokens=self.policy.max_output_tokens,
@@ -164,8 +150,8 @@ class TranscriptEnricher:
             questions=payload.questions,
             mindmap=payload.mindmap,
             prompt_version=self.policy.prompt_version,
-            model=self.policy.model,
+            model=self.client.active_model or self.client.models[0],
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
-            estimated_cost_cny=self.policy.estimated_cost(usage),
+            estimated_cost_cny=0,
         )

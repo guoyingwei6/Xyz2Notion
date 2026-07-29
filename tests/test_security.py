@@ -17,7 +17,7 @@ from xyz2notion.security import (
         (CredentialKind.TINGWU_COOKIE, "https://qianwen.biz.aliyun.com/api/test"),
         (CredentialKind.TINGWU_COOKIE, "https://tw-efficiency.biz.aliyun.com/api/test"),
         (CredentialKind.SILICONFLOW, "https://api.siliconflow.cn/v1/audio/transcriptions"),
-        (CredentialKind.DASHSCOPE, "https://dashscope.aliyuncs.com/api/v1/test"),
+        (CredentialKind.SILICONFLOW, "https://api.siliconflow.cn/v1/chat/completions"),
     ],
 )
 def test_allows_only_declared_service_hosts(kind: CredentialKind, url: str) -> None:

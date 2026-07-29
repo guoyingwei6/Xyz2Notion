@@ -29,7 +29,7 @@ ASR 准确率。真实效果必须用用户自己的音频和 Provider 凭证验
 | 音频 URL 失效/私网 | `test_audio_processing.py` | 下载前拒绝或安全失败 |
 | Action 中途取消 | `test_state.py`, `test_ai_processor.py` | 从精确阶段恢复，不重复 ASR |
 | Notion 429/529 | `test_notion_client.py` | 限速或过载退避重试 |
-| AI JSON 无效 | `test_dashscope_summary.py` | 只修复一次，再失败为 Schema 错误 |
+| AI JSON 无效 | `test_siliconflow_summary.py` | 只修复一次，再失败为 Schema 错误 |
 
 ## 每次发布质量门
 

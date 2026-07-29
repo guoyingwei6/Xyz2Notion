@@ -25,7 +25,7 @@ updated: 2026-07-29
 - [x] 确认小宇宙使用 `X-Jike-Refresh-Token`，不是 Cookie。
 - [x] 确认通义听悟网页转写使用 Cookie 和网页内部接口。
 - [x] 确认 SiliconFlow 当前免费 ASR 模型与接口限制。
-- [x] 明确 Cookie 优先、SiliconFlow 免费降级、付费 ASR 默认关闭。
+- [x] 明确 Cookie 优先、SiliconFlow 免费降级，不实现付费 Provider。
 - [x] 拆解作者 Notion Demo 的首页模块和统计结构。
 - [x] 确认采用自主重建，不复制和再分发作者模板。
 - [x] 确认运行环境仅为 GitHub Actions + Notion + 用户自己的服务凭证。
@@ -85,7 +85,7 @@ P0 当前状态：已完成。公开仓库、质量检查、类型检查、19 �
 - [x] 支持可选 `XIAOYUZHOU_DEVICE_ID`。
 - [x] 未填写 Device ID 时根据安装身份生成稳定 UUID。
 - [x] 支持 ASR Provider 顺序配置，默认听悟 Cookie → SiliconFlow。
-- [x] 付费 ASR 默认关闭且预算为 0，未显式预算时拒绝启用。
+- [x] 配置和客户端只接受已核对的免费 ASR 与摘要模型白名单。
 - [x] 配置单次 Episode 数、每日/月度 ASR 分钟数和轮询次数上限。
 
 ### 领域模型
@@ -446,9 +446,9 @@ Cookie，不阻塞 P8。网页接口属于非公开契约，变更时会安全�
 - [x] 生成问题回顾。
 - [x] 生成思维导图树。
 - [x] 校验失败时只修复 JSON。
-- [x] 记录模型、Prompt 版本和成本。
-- [x] 听悟原生摘要和脑图完整时归一化复用，额外模型成本为 0。
-- [x] 识别 `AllocationQuota.FreeTierOnly`，支持百炼“免费额度用完即停”。
+- [x] 记录模型、Prompt 版本和 Token 用量，免费模型估算成本固定为 0。
+- [x] 听悟原生摘要和脑图完整时归一化复用，不调用额外模型。
+- [x] SiliconFlow 免费摘要模型不可用时按候选顺序回退，全部失败则等待重试。
 
 ### P8 验收
 
@@ -456,12 +456,11 @@ Cookie，不阻塞 P8。网页接口属于非公开契约，变更时会安全�
 - [x] JSON Schema 校验通过。
 - [x] 章节时间不超出音频总时长。
 - [x] 不因总结失败而重新扣 ASR 费用。
-- [ ] 使用真实 `DASHSCOPE_API_KEY` 验证普通和超长文字稿（等待凭证）。
-- [ ] 在百炼控制台确认“免费额度用完即停”并保存用户侧验收证据（等待用户操作）。
+- [ ] 使用真实 `SILICONFLOW_API_KEY` 验证普通和超长文字稿摘要（等待凭证）。
 
-P8 当前状态：Provider 无关的清理/分段、听悟原生结果归一化、千问
-`qwen-flash` 结构化生成、长文本 map/reduce、单次 JSON 修复、语义约束和
-Token/费用记录已通过模拟验收；真实百炼调用等待用户 API Key。摘要模块只接受
+P8 当前状态：Provider 无关的清理/分段、听悟原生结果归一化、SiliconFlow
+免费模型结构化生成、长文本 map/reduce、单次 JSON 修复、语义约束和
+Token 记录已通过模拟验收；真实 SiliconFlow 调用等待用户 API Key。摘要模块只接受
 已经持久化的 `TranscriptResult`，没有调用 ASR 的能力，因此摘要失败不会重复
 转写。GitHub CI
 [运行 30421110087](https://github.com/guoyingwei6/Xyz2Notion/actions/runs/30421110087)
@@ -536,7 +535,6 @@ P9 当前状态：程序托管根块、先建后换、用户块保护、播放�
 - [x] `NOTION_MIGRATION_PAGE_ID` 可选旧模板副本。
 - [x] `TINGWU_COOKIE` 可选。
 - [x] `SILICONFLOW_API_KEY`。
-- [x] `DASHSCOPE_API_KEY` 条件必需。
 
 ### P10 验收
 
@@ -630,13 +628,13 @@ Embed 清理、Schema v0→v1、dry-run、单集重做、统计/热力图重建�
 - [x] 代码和工作流不需要 VPS、插件、激活码或作者服务。
 - [x] 模拟端到端证明元数据、统计、转写、摘要、脑图流程可运行。
 - [x] 故障注入证明 Cookie 明确终态失败时自动使用 SiliconFlow。
-- [x] 付费 ASR 未显式开启时费用为 0，当前版本未实现付费 Provider。
+- [x] 当前版本不实现任何付费 Provider，免费模型失败时只进入可恢复重试。
 - [x] 模拟 Notion 首页和单集页包含公开 Demo 的主要结构。
 - [x] 架构与安全测试确认用户数据和凭证保持在用户自己的账户体系内。
 - [ ] 使用真实账户完成端到端验收并确认视觉效果（等待全部凭证）。
 
 P12 当前状态：六类合成下游样本、十类故障注入、README 三步开始、配置、凭证、
-成本、安全、限制、排错、迁移和 Changelog 已完成；244 个测试通过，覆盖率
+成本、安全、限制、排错、迁移和 Changelog 已完成；246 个测试通过，覆盖率
 90.18%，sdist、wheel 和隔离安装冒烟测试通过；v0.1.0 已作为诚实标注真实验收
 边界的 GitHub 预发布版发布。所有不依赖用户凭证的项目均已完成；真实音频、真实
 Notion 截图和定时运行验收等待用户凭证。

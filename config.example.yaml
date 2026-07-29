@@ -4,22 +4,19 @@ asr:
   provider_order:
     - tingwu_cookie
     - siliconflow
-  paid_enabled: false
-  paid_budget_cny: 0
   siliconflow_models:
     - FunAudioLLM/SenseVoiceSmall
     - TeleAI/TeleSpeechASR
 
 summary:
   enabled: true
-  model: qwen-flash
+  siliconflow_models:
+    - Qwen/Qwen3-8B
+    - Qwen/Qwen2.5-7B-Instruct
   prompt_version: summary-v1
   chunk_tokens: 24000
   chunk_minutes: 30
   max_output_tokens: 8192
-  # 2026-07-29 Beijing list-price snapshot, configurable when pricing changes.
-  input_cny_per_million_tokens: 0.15
-  output_cny_per_million_tokens: 1.5
 
 limits:
   episodes_per_run: 3

@@ -6,8 +6,8 @@ from xyz2notion.asr.tingwu import (
     TingwuTask,
     TingwuTaskState,
 )
-from xyz2notion.enrichment.dashscope import CompletionUsage
 from xyz2notion.enrichment.schema import EnrichmentPayload
+from xyz2notion.enrichment.siliconflow import CompletionUsage
 from xyz2notion.models import (
     MindmapNode,
     ProviderError,
@@ -92,6 +92,9 @@ class FakeNotion:
 
 
 class FakeSummaryClient:
+    models = ("Qwen/Qwen3-8B",)
+    active_model = "Qwen/Qwen3-8B"
+
     def generate_structured(
         self,
         _model_type: object,
@@ -187,7 +190,7 @@ def test_siliconflow_summary_and_publish_are_checkpointed() -> None:
         FakeNotion(),
         store,
         siliconflow=object(),
-        dashscope=FakeSummaryClient(),
+        summary_client=FakeSummaryClient(),
     )
     outcome = processor.process(CANDIDATE, {})
     assert outcome.state is PipelineState.PUBLISHED
@@ -255,7 +258,7 @@ def test_tingwu_processing_is_persisted_and_not_fallen_back() -> None:
     assert store.state.source_task_id == "source"
 
 
-def test_tingwu_native_success_publishes_without_dashscope() -> None:
+def test_tingwu_native_success_publishes_without_summary_api() -> None:
     task = TingwuTask(
         provider_task_id="record",
         state=TingwuTaskState.SUCCEEDED,
@@ -288,7 +291,7 @@ def test_expired_tingwu_falls_back_to_siliconflow() -> None:
         store,
         tingwu=FakeTingwu(task, fail_auth=True),
         siliconflow=object(),
-        dashscope=FakeSummaryClient(),
+        summary_client=FakeSummaryClient(),
     )
     outcome = processor.process(CANDIDATE, {})
     assert outcome.state is PipelineState.PUBLISHED
@@ -302,7 +305,7 @@ def test_retryable_failure_resumes_exact_stage_on_manual_retry() -> None:
         FakeNotion(),
         store,
         siliconflow=object(),
-        dashscope=FakeSummaryClient(),
+        summary_client=FakeSummaryClient(),
         failures=1,
     )
     failed = processor.process(CANDIDATE, {})

@@ -20,7 +20,6 @@ class CredentialKind(StrEnum):
     NOTION = "notion"
     TINGWU_COOKIE = "tingwu_cookie"
     SILICONFLOW = "siliconflow"
-    DASHSCOPE = "dashscope"
 
 
 _ALLOWED_HOSTS: Mapping[CredentialKind, frozenset[str]] = MappingProxyType(
@@ -34,12 +33,6 @@ _ALLOWED_HOSTS: Mapping[CredentialKind, frozenset[str]] = MappingProxyType(
             }
         ),
         CredentialKind.SILICONFLOW: frozenset({"api.siliconflow.cn"}),
-        CredentialKind.DASHSCOPE: frozenset(
-            {
-                "dashscope.aliyuncs.com",
-                "dashscope-intl.aliyuncs.com",
-            }
-        ),
     }
 )
 

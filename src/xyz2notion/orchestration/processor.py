@@ -17,9 +17,9 @@ from xyz2notion.asr.tingwu import (
     TingwuTask,
     TingwuTaskState,
 )
-from xyz2notion.enrichment.dashscope import DashScopeSummaryClient
 from xyz2notion.enrichment.native import normalize_tingwu_enrichment
 from xyz2notion.enrichment.pipeline import SummaryPolicy, TranscriptEnricher
+from xyz2notion.enrichment.siliconflow import SiliconFlowSummaryClient
 from xyz2notion.models import (
     ProviderError,
     ProviderErrorCategory,
@@ -122,7 +122,7 @@ class EpisodeAIProcessor:
         *,
         tingwu: TingwuClient | None = None,
         siliconflow: SiliconFlowClient | None = None,
-        dashscope: DashScopeSummaryClient | None = None,
+        summary_client: SiliconFlowSummaryClient | None = None,
         summary_policy: SummaryPolicy | None = None,
         summary_enabled: bool = True,
         tingwu_directory: str = "Xyz2Notion 播客",
@@ -131,7 +131,7 @@ class EpisodeAIProcessor:
         self.state_store = state_store
         self.tingwu = tingwu
         self.siliconflow = siliconflow
-        self.dashscope = dashscope
+        self.summary_client = summary_client
         self.summary_policy = summary_policy or SummaryPolicy()
         self.summary_enabled = summary_enabled
         self.tingwu_directory = tingwu_directory
@@ -314,14 +314,14 @@ class EpisodeAIProcessor:
                     )
                 summary = state.summary
                 if summary is None:
-                    if self.dashscope is None:
+                    if self.summary_client is None:
                         return ProcessingOutcome(
                             candidate.eid,
                             ("waiting_summary_key" if self.summary_enabled else "summary_paused"),
                             state.record.state,
                         )
                     summary = TranscriptEnricher(
-                        self.dashscope,
+                        self.summary_client,
                         policy=self.summary_policy,
                     ).summarize(state.transcript)
                 state = state.model_copy(
@@ -362,15 +362,21 @@ class EpisodeAIProcessor:
 def build_provider_clients(
     *,
     tingwu_cookie: SecretStr | None,
-    siliconflow_api_key: SecretStr | None,
-    dashscope_api_key: SecretStr | None,
-    siliconflow_models: tuple[str, ...],
-) -> tuple[TingwuClient | None, SiliconFlowClient | None, DashScopeSummaryClient | None]:
+    siliconflow_asr_api_key: SecretStr | None,
+    siliconflow_summary_api_key: SecretStr | None,
+    siliconflow_asr_models: tuple[str, ...],
+    siliconflow_summary_models: tuple[str, ...],
+) -> tuple[TingwuClient | None, SiliconFlowClient | None, SiliconFlowSummaryClient | None]:
     """Construct only explicitly configured user-owned providers."""
     return (
         TingwuClient(tingwu_cookie) if tingwu_cookie is not None else None,
-        SiliconFlowClient(siliconflow_api_key, models=siliconflow_models)
-        if siliconflow_api_key is not None
+        SiliconFlowClient(siliconflow_asr_api_key, models=siliconflow_asr_models)
+        if siliconflow_asr_api_key is not None
         else None,
-        DashScopeSummaryClient(dashscope_api_key) if dashscope_api_key is not None else None,
+        SiliconFlowSummaryClient(
+            siliconflow_summary_api_key,
+            models=siliconflow_summary_models,
+        )
+        if siliconflow_summary_api_key is not None
+        else None,
     )

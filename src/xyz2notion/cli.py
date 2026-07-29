@@ -121,13 +121,10 @@ def build_parser() -> argparse.ArgumentParser:
 def _summary_policy(config: object) -> SummaryPolicy:
     summary = config.summary  # type: ignore[attr-defined]
     return SummaryPolicy(
-        model=summary.model,
         prompt_version=summary.prompt_version,
         chunk_tokens=summary.chunk_tokens,
         chunk_minutes=summary.chunk_minutes,
         max_output_tokens=summary.max_output_tokens,
-        input_cny_per_million_tokens=summary.input_cny_per_million_tokens,
-        output_cny_per_million_tokens=summary.output_cny_per_million_tokens,
     )
 
 
@@ -146,10 +143,12 @@ def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
 
         selected = set(config.asr.provider_order)
         tingwu_cookie = credentials.tingwu_cookie if AsrProvider.TINGWU_COOKIE in selected else None
-        siliconflow_api_key = (
+        siliconflow_asr_api_key = (
             credentials.siliconflow_api_key if AsrProvider.SILICONFLOW in selected else None
         )
-        dashscope_api_key = credentials.dashscope_api_key if config.summary.enabled else None
+        siliconflow_summary_api_key = (
+            credentials.siliconflow_api_key if config.summary.enabled else None
+        )
 
         with ExitStack() as stack:
             notion = stack.enter_context(NotionClient(credentials.notion_token))
@@ -159,13 +158,14 @@ def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
                 {"page_size": 100},
             )
             candidates = episode_candidates(pages)[: config.limits.episodes_per_run]
-            tingwu, siliconflow, dashscope = build_provider_clients(
+            tingwu, siliconflow, summary_client = build_provider_clients(
                 tingwu_cookie=tingwu_cookie,
-                siliconflow_api_key=siliconflow_api_key,
-                dashscope_api_key=dashscope_api_key,
-                siliconflow_models=config.asr.siliconflow_models,
+                siliconflow_asr_api_key=siliconflow_asr_api_key,
+                siliconflow_summary_api_key=siliconflow_summary_api_key,
+                siliconflow_asr_models=config.asr.siliconflow_models,
+                siliconflow_summary_models=config.summary.siliconflow_models,
             )
-            for client in (tingwu, siliconflow, dashscope):
+            for client in (tingwu, siliconflow, summary_client):
                 if client is not None:
                     stack.enter_context(client)
             state_store = stack.enter_context(NotionEpisodeStateStore(notion))
@@ -174,7 +174,7 @@ def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
                 state_store,
                 tingwu=tingwu,
                 siliconflow=siliconflow,
-                dashscope=dashscope,
+                summary_client=summary_client,
                 summary_policy=_summary_policy(config),
                 summary_enabled=config.summary.enabled,
             )

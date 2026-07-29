@@ -17,8 +17,7 @@ Fork 本仓库，在 `Settings → Secrets and variables → Actions` 至少添�
 - `NOTION_TOKEN`
 - `NOTION_PAGE_ID`
 
-转写建议再添加 `TINGWU_COOKIE` 和 `SILICONFLOW_API_KEY`；没有听悟原生摘要时，
-还需要 `DASHSCOPE_API_KEY`。获取方法和必需性见
+转写和免费摘要建议再添加 `TINGWU_COOKIE` 和 `SILICONFLOW_API_KEY`。获取方法见
 [GitHub Actions 与 Secrets](docs/github-actions.md)。
 
 ### 2. 初始化并同步
@@ -42,7 +41,7 @@ Fork 本仓库，在 `Settings → Secrets and variables → Actions` 至少添�
 ## 项目状态
 
 v0.1.0 已实现自主 Notion 模板、元数据与统计同步、听悟 Cookie → SiliconFlow
-降级转写、千问摘要、脑图、迁移和可恢复的 GitHub Actions 编排。真实账户验收按
+降级转写、SiliconFlow 免费摘要、脑图、迁移和可恢复的 GitHub Actions 编排。真实账户验收按
 [实施 Checklist](outputs/Xyz2Notion项目实施Checklist.md)
 继续记录；缺少用户凭证的项目不会用 Mock 冒充真实通过。
 
@@ -60,8 +59,8 @@ uv run pytest
 
 ## 配置
 
-复制 `config.example.yaml` 为 `config.yaml`，其中只保存 ASR 顺序、预算开关和
-任务上限等可公开配置：
+复制 `config.example.yaml` 为 `config.yaml`，其中只保存免费模型顺序和
+任务上限等公开配置：
 
 ```bash
 cp config.example.yaml config.yaml
@@ -84,13 +83,13 @@ uv run xyz2notion xiaoyuzhou-check
 认证方式、Device ID 和只读接口说明见
 [`docs/xiaoyuzhou-auth.md`](docs/xiaoyuzhou-auth.md)。
 
-默认 ASR 顺序为通义听悟 Cookie → SiliconFlow，付费 DashScope 默认关闭且
-预算为 0。SiliconFlow 音频切片、免费模型降级和时间轴精度说明见
+默认 ASR 顺序为通义听悟 Cookie → SiliconFlow，不实现任何付费 Provider。
+SiliconFlow 音频切片、免费模型降级和时间轴精度说明见
 [`docs/siliconflow-asr.md`](docs/siliconflow-asr.md)。
 
 听悟 Cookie 的域名隔离、断点续查和降级规则见
-[`docs/tingwu-cookie.md`](docs/tingwu-cookie.md)。文字稿的千问结构化摘要、长文本
-分段、Token 与费用记录见
+[`docs/tingwu-cookie.md`](docs/tingwu-cookie.md)。文字稿的 SiliconFlow
+免费结构化摘要、长文本分段和 Token 记录见
 [`docs/ai-enrichment.md`](docs/ai-enrichment.md)。
 单集页面的托管区边界、播放器、原生脑图、SVG 脑图和用户笔记保护机制见
 [`docs/episode-page.md`](docs/episode-page.md)。

@@ -148,6 +148,8 @@ def test_client_and_chunk_limits_are_validated(tmp_path: Path) -> None:
         SiliconFlowClient("")
     with pytest.raises(ValueError, match="at least one"):
         SiliconFlowClient("key", models=())
+    with pytest.raises(ValueError, match="free allowlist"):
+        SiliconFlowClient("key", models=("paid-or-unknown/model",))
     with pytest.raises(ValueError, match="negative"):
         SiliconFlowClient("key", max_retries=-1)
     with pytest.raises(UnsafeCredentialDestinationError):

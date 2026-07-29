@@ -1,4 +1,4 @@
-"""Official DashScope OpenAI-compatible JSON summary client."""
+"""SiliconFlow free-model JSON summary client."""
 
 from __future__ import annotations
 
@@ -20,13 +20,18 @@ from xyz2notion.models import (
 )
 from xyz2notion.security import CredentialKind, validate_credential_destination
 
-DASHSCOPE_CHAT_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+SILICONFLOW_CHAT_URL = "https://api.siliconflow.cn/v1/chat/completions"
+DEFAULT_SUMMARY_MODELS = (
+    "Qwen/Qwen3-8B",
+    "Qwen/Qwen2.5-7B-Instruct",
+)
+FREE_SUMMARY_MODELS = frozenset(DEFAULT_SUMMARY_MODELS)
 StructuredModel = TypeVar("StructuredModel", bound=BaseModel)
 
 
 @dataclass(frozen=True)
 class CompletionUsage:
-    """Token accounting returned by the official compatible endpoint."""
+    """Token accounting returned by SiliconFlow."""
 
     input_tokens: int = 0
     output_tokens: int = 0
@@ -54,7 +59,7 @@ def _error(
 ) -> ProviderError:
     return ProviderError(
         ProviderFailure(
-            provider="dashscope",
+            provider="siliconflow_summary",
             category=category,
             message=message,
             code=code,
@@ -77,8 +82,8 @@ def _response_code(response: httpx.Response) -> str | None:
     return str(code) if code is not None else None
 
 
-class DashScopeSummaryClient:
-    """Low-level Qwen JSON client with bounded retries and one repair call."""
+class SiliconFlowSummaryClient:
+    """Free-model JSON client with fallback, bounded retries, and one repair."""
 
     _retryable_statuses = frozenset({429, 500, 502, 503, 504})
 
@@ -86,6 +91,7 @@ class DashScopeSummaryClient:
         self,
         api_key: str | SecretStr,
         *,
+        models: tuple[str, ...] = DEFAULT_SUMMARY_MODELS,
         client: httpx.Client | None = None,
         max_retries: int = 3,
         timeout_seconds: float = 180,
@@ -94,10 +100,20 @@ class DashScopeSummaryClient:
     ) -> None:
         secret = api_key.get_secret_value() if isinstance(api_key, SecretStr) else api_key
         if not secret.strip():
-            raise ValueError("DashScope API key cannot be empty")
+            raise ValueError("SiliconFlow API key cannot be empty")
+        normalized_models = tuple(model.strip() for model in models if model.strip())
+        if not normalized_models:
+            raise ValueError("at least one SiliconFlow summary model is required")
+        if unknown := set(normalized_models) - FREE_SUMMARY_MODELS:
+            raise ValueError(
+                f"SiliconFlow summary models outside the free allowlist are not allowed: "
+                f"{', '.join(sorted(unknown))}"
+            )
         if max_retries < 0:
             raise ValueError("max_retries cannot be negative")
-        validate_credential_destination(DASHSCOPE_CHAT_URL, CredentialKind.DASHSCOPE)
+        validate_credential_destination(SILICONFLOW_CHAT_URL, CredentialKind.SILICONFLOW)
+        self.models = normalized_models
+        self.active_model: str | None = None
         self.max_retries = max_retries
         self._sleep = sleep
         self._jitter = jitter
@@ -112,7 +128,7 @@ class DashScopeSummaryClient:
         if self._owns_client:
             self._client.close()
 
-    def __enter__(self) -> DashScopeSummaryClient:
+    def __enter__(self) -> SiliconFlowSummaryClient:
         return self
 
     def __exit__(self, *_args: object) -> None:
@@ -149,7 +165,7 @@ class DashScopeSummaryClient:
             response: httpx.Response | None = None
             try:
                 response = self._client.post(
-                    DASHSCOPE_CHAT_URL,
+                    SILICONFLOW_CHAT_URL,
                     headers=self._headers,
                     json=payload,
                 )
@@ -159,7 +175,7 @@ class DashScopeSummaryClient:
                     continue
                 raise _error(
                     ProviderErrorCategory.NETWORK,
-                    f"DashScope transport failed: {type(exc).__name__}",
+                    f"SiliconFlow summary transport failed: {type(exc).__name__}",
                 ) from exc
             code = _response_code(response)
             if response.status_code in self._retryable_statuses:
@@ -173,37 +189,40 @@ class DashScopeSummaryClient:
                 )
                 raise _error(
                     category,
-                    f"DashScope is temporarily unavailable (HTTP {response.status_code})",
+                    f"SiliconFlow summary is temporarily unavailable (HTTP {response.status_code})",
                     code=code or str(response.status_code),
                 )
             if response.status_code == 401:
                 raise _error(
                     ProviderErrorCategory.AUTHENTICATION,
-                    "DashScope API key is invalid",
+                    "SiliconFlow API key is invalid",
                     code=code or "401",
                 )
             if response.status_code == 403:
                 category = (
                     ProviderErrorCategory.QUOTA_EXHAUSTED
-                    if code == "AllocationQuota.FreeTierOnly"
+                    if code and "quota" in code.lower()
                     else ProviderErrorCategory.AUTHENTICATION
                 )
-                message = (
-                    "DashScope free quota is exhausted and Free Quota Only stopped the call"
-                    if category is ProviderErrorCategory.QUOTA_EXHAUSTED
-                    else "DashScope denied access"
+                raise _error(
+                    category,
+                    (
+                        "SiliconFlow free-model quota is unavailable"
+                        if category is ProviderErrorCategory.QUOTA_EXHAUSTED
+                        else "SiliconFlow denied access"
+                    ),
+                    code=code or "403",
                 )
-                raise _error(category, message, code=code or "403")
             if response.status_code == 404:
                 raise _error(
                     ProviderErrorCategory.UNSUPPORTED,
-                    "Configured DashScope model or endpoint is unavailable",
+                    "Configured SiliconFlow summary model is unavailable",
                     code=code or "404",
                 )
             if response.is_error:
                 raise _error(
                     ProviderErrorCategory.INVALID_INPUT,
-                    f"DashScope rejected the summary request (HTTP {response.status_code})",
+                    f"SiliconFlow rejected the summary request (HTTP {response.status_code})",
                     code=code or str(response.status_code),
                 )
             try:
@@ -220,9 +239,55 @@ class DashScopeSummaryClient:
             except (KeyError, IndexError, TypeError, ValueError) as exc:
                 raise _error(
                     ProviderErrorCategory.SCHEMA_CHANGED,
-                    "DashScope returned an unexpected completion schema",
+                    "SiliconFlow returned an unexpected completion schema",
                 ) from exc
         raise AssertionError("unreachable retry loop")
+
+    def _model_candidates(self) -> tuple[str, ...]:
+        if self.active_model is None:
+            return self.models
+        return (
+            self.active_model,
+            *(model for model in self.models if model != self.active_model),
+        )
+
+    def _complete_with_fallback(
+        self,
+        *,
+        system: str,
+        user: str,
+        max_output_tokens: int,
+    ) -> tuple[str, CompletionUsage]:
+        last_error: ProviderError | None = None
+        for model in self._model_candidates():
+            try:
+                result = self._complete(
+                    model=model,
+                    system=system,
+                    user=user,
+                    max_output_tokens=max_output_tokens,
+                )
+            except ProviderError as exc:
+                if exc.failure.category not in {
+                    ProviderErrorCategory.RATE_LIMITED,
+                    ProviderErrorCategory.UNAVAILABLE,
+                    ProviderErrorCategory.UNSUPPORTED,
+                }:
+                    raise
+                last_error = exc
+                continue
+            self.active_model = model
+            return result
+        if last_error is not None:
+            raise _error(
+                ProviderErrorCategory.UNAVAILABLE,
+                "All configured SiliconFlow free summary models are unavailable",
+                code=last_error.failure.code,
+            ) from last_error
+        raise _error(
+            ProviderErrorCategory.UNAVAILABLE,
+            "No SiliconFlow free summary model is available",
+        )
 
     @staticmethod
     def _decode(content: str, model_type: type[StructuredModel]) -> StructuredModel:
@@ -237,15 +302,13 @@ class DashScopeSummaryClient:
         self,
         model_type: type[StructuredModel],
         *,
-        model: str,
         system: str,
         user: str,
         max_output_tokens: int,
         validator: Callable[[StructuredModel], bool] | None = None,
     ) -> tuple[StructuredModel, CompletionUsage]:
         """Generate one object and repair only its JSON when validation fails."""
-        content, usage = self._complete(
-            model=model,
+        content, usage = self._complete_with_fallback(
             system=system,
             user=user,
             max_output_tokens=max_output_tokens,
@@ -261,8 +324,7 @@ class DashScopeSummaryClient:
                 ensure_ascii=False,
                 separators=(",", ":"),
             )
-            repaired, repair_usage = self._complete(
-                model=model,
+            repaired, repair_usage = self._complete_with_fallback(
                 system=system,
                 user=REPAIR_PROMPT.format(schema=schema, invalid=content),
                 max_output_tokens=max_output_tokens,
@@ -273,11 +335,11 @@ class DashScopeSummaryClient:
             except (json.JSONDecodeError, ValidationError) as exc:
                 raise _error(
                     ProviderErrorCategory.SCHEMA_CHANGED,
-                    "DashScope JSON repair did not satisfy the summary schema",
+                    "SiliconFlow JSON repair did not satisfy the summary schema",
                 ) from exc
             if validator is not None and not validator(value):
                 raise _error(
                     ProviderErrorCategory.SCHEMA_CHANGED,
-                    "DashScope JSON repair did not satisfy timeline constraints",
+                    "SiliconFlow JSON repair did not satisfy timeline constraints",
                 ) from None
             return value, total_usage

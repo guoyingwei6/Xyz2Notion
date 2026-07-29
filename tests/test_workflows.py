@@ -56,7 +56,6 @@ def test_ai_workflows_receive_only_expected_provider_secrets() -> None:
             "NOTION_PAGE_ID",
             "TINGWU_COOKIE",
             "SILICONFLOW_API_KEY",
-            "DASHSCOPE_API_KEY",
         ):
             assert f"secrets.{secret}" in text
         assert "XIAOYUZHOU_REFRESH_TOKEN" not in text

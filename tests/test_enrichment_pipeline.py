@@ -2,13 +2,13 @@ from dataclasses import replace
 
 import pytest
 
-from xyz2notion.enrichment.dashscope import CompletionUsage
 from xyz2notion.enrichment.pipeline import (
     SummaryPolicy,
     TranscriptEnricher,
     validate_payload,
 )
 from xyz2notion.enrichment.schema import EnrichmentPayload
+from xyz2notion.enrichment.siliconflow import CompletionUsage
 from xyz2notion.models import (
     Chapter,
     MindmapNode,
@@ -32,6 +32,9 @@ def enrichment_payload(summary: str = "摘要") -> EnrichmentPayload:
 
 
 class FakeClient:
+    models = ("Qwen/Qwen3-8B",)
+    active_model = "Qwen/Qwen3-8B"
+
     def __init__(self) -> None:
         self.calls: list[str] = []
 
@@ -39,13 +42,11 @@ class FakeClient:
         self,
         _model_type: object,
         *,
-        model: str,
         system: str,
         user: str,
         max_output_tokens: int,
         validator: object,
     ) -> tuple[EnrichmentPayload, CompletionUsage]:
-        assert model == "qwen-flash"
         assert system
         assert max_output_tokens == 8192
         self.calls.append(user)
@@ -75,7 +76,8 @@ def test_single_chunk_generates_complete_result_and_cost() -> None:
     assert result.people == ("人物",)
     assert result.input_tokens == 100
     assert result.output_tokens == 20
-    assert result.estimated_cost_cny == 0.000045
+    assert result.estimated_cost_cny == 0
+    assert result.model == "Qwen/Qwen3-8B"
     assert result.prompt_version == "summary-v1"
 
 

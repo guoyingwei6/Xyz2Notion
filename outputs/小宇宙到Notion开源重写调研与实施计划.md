@@ -13,11 +13,11 @@ updated: 2026-07-29
 
 - 运行环境仅使用用户自己的 GitHub Actions。
 - 数据保存在用户自己的 Notion。
-- 语音识别优先使用用户自己的通义听悟网页额度，失败后使用用户自己的 SiliconFlow API Key；千问总结和可选付费保险使用用户自己的 DashScope API Key。
+- 语音识别优先使用用户自己的通义听悟网页额度，失败后使用用户自己的 SiliconFlow API Key；缺少听悟原生摘要时仍使用同一个 Key 调用 SiliconFlow 免费文本模型。
 - 不部署 VPS。
 - 不依赖 NotionHub 插件、作者 OAuth、作者激活服务或作者的播放器、脑图、热力图服务器。
 - 项目代码以 MIT 或 Apache-2.0 许可证完整开源。
-- 代码本身免费；默认 ASR 路线当前可做到零调用费用，用户主动启用正式付费 API 时由使用者承担费用。
+- 代码本身免费；项目只配置当前标为免费的 SiliconFlow 模型，不实现付费 Provider。
 
 核心功能均可实现：
 
@@ -125,15 +125,15 @@ flowchart LR
     B --> C["元数据与收听状态标准化"]
     C --> D["Notion 数据库"]
     C --> E["AI 任务状态机"]
-    E --> F["DashScope 录音文件识别"]
+    E --> F["听悟 / SiliconFlow 免费语音识别"]
     F --> E
-    E --> G["Qwen 结构化总结"]
+    E --> G["SiliconFlow 免费结构化总结"]
     G --> H["Notion 内容渲染器"]
     H --> D
     I["本地热力图/脑图渲染"] --> H
 ```
 
-GitHub Actions 只负责调度和短暂计算；Notion 同时承担内容库和任务状态存储，不需要额外数据库。听悟网页和正式 DashScope 路线直接提交公网音频 URL；SiliconFlow 路线则在 Runner 临时下载、转码和切片。任何路线都不把音频保存为 Actions Artifact，任务结束后随临时 Runner 销毁。
+GitHub Actions 只负责调度和短暂计算；Notion 同时承担内容库和任务状态存储，不需要额外数据库。听悟网页直接提交公网音频 URL；SiliconFlow 路线在 Runner 临时下载、转码和切片。任何路线都不把音频保存为 Actions Artifact，任务结束后随临时 Runner 销毁。
 
 ## 五、Notion 数据模型
 
@@ -214,25 +214,18 @@ GitHub Actions 只负责调度和短暂计算；Notion 同时承担内容库和�
 - 每次最多新提交 2–3 个任务。
 - 支持 `finished_only`、`played_only`、`manual` 三种模式。
 - 支持单集级“跳过”和“强制重做”。
-- 提交前按音频时长估算费用，并受单次最大预算和每日最大预算限制。
+- 免费 Provider 不设置金额预算；只通过单次单集数和分钟数限制运行规模。
 
 ### 2. 多 Provider 语音识别
 
-本节原先采用“正式 DashScope ASR 优先”。经进一步核查通义听悟网页额度和 SiliconFlow 免费 ASR 后，调整为：
+经核查通义听悟网页额度和 SiliconFlow 免费模型后，最终调整为：
 
 1. 通义听悟网页 Cookie：优先消耗用户已有的网页转写时长，并取得说话人、时间戳、摘要和脑图。
 2. SiliconFlow 官方免费 API：Cookie 失效、风控或内部接口改变时自动降级，默认使用 `FunAudioLLM/SenseVoiceSmall`，方言内容可改用 `TeleAI/TeleSpeechASR`。
-3. 正式 DashScope API：默认关闭，仅作为用户主动启用且受预算上限约束的最终保险。
+3. SiliconFlow 免费文本模型：听悟缺少原生摘要时生成摘要、章节和思维导图；免费模型不可用时等待重试，不切换付费模型。
 
 完整调查、限制和错误降级规则见《语音识别方案全面调查与 Fallback 设计》。
 
-### 3. 可选的正式录音文件识别 API
-
-首选 `fun-asr`：
-
-- 支持最长 12 小时、2 GB 文件。
-- 支持主流播客音频格式。
-- 支持句子和词语时间戳。
 - 支持说话人分离。
 - 中文、方言和复杂音频的识别能力更强。
 
@@ -302,7 +295,7 @@ Notion API 当前平均限制为每个连接每秒 3 个请求，单个 rich tex
 - 查询 Notion 中的待提交和运行中任务。
 - 提交有限数量的新 ASR 任务。
 - 查询已提交任务并获取结果。
-- 调用千问生成结构化内容。
+- 调用 SiliconFlow 免费文本模型生成结构化内容。
 - 写入 Notion。
 
 GitHub 官方说明公共仓库的标准 Runner 免费，但定时任务可能延迟或在整点高峰被丢弃；公共仓库连续 60 天无活动时，定时 workflow 也可能被自动禁用。README 和运行摘要必须明确提醒。
@@ -314,10 +307,7 @@ GitHub 官方说明公共仓库的标准 Runner 免费，但定时任务可能�
 - `NOTION_ROOT_PAGE_ID`
 - `SILICONFLOW_API_KEY`
 
-按所启用的 Provider 选填：
-
 - `TINGWU_COOKIE`：使用通义听悟网页余额时填写。
-- `DASHSCOPE_API_KEY`：启用正式付费 ASR 或千问总结时填写。
 
 明确不需要：
 
@@ -363,7 +353,7 @@ src/cosmos2notion/
     notion.py
     tingwu_web.py
     siliconflow.py
-    dashscope.py
+    siliconflow_summary.py
   services/
     metadata_sync.py
     transcription.py
@@ -421,7 +411,7 @@ tests/
 - 先接入 SiliconFlow 免费 ASR，实现下载、规范化、切片、合并和粗粒度时间轴。
 - 再接入通义听悟 Cookie Provider，解析时间戳、说话人、文字稿、摘要和脑图。
 - 实现 Cookie 健康检查、熔断、Provider 自动降级、任务状态、重试和失败分类。
-- 最后增加默认关闭、受预算约束的正式 DashScope ASR。
+- 使用同一个 SiliconFlow Key 接入免费结构化摘要，只接受已核对的免费模型白名单。
 
 验收：选择一集短节目和一集超过一小时的节目；Cookie 失效时能自动降级；任务中断后可续跑且不重复提交。
 
@@ -459,10 +449,10 @@ tests/
 | Refresh Token 属于账号凭证 | 泄露可访问私人数据 | 只放 GitHub Secret、日志脱敏、绝不发给第三方 |
 | 音频 URL 失效或拒绝抓取 | ASR 无法下载 | 重新获取单集信息；必要时由 GitHub Runner 临时下载、转码后上传 |
 | 听悟 Cookie 过期或网页接口改变 | 首选 Provider 不可用 | 健康检查、熔断并自动降级到 SiliconFlow |
-| SiliconFlow 免费模型下线或限流 | 免费降级链路不可用 | 模型 ID 可配置、两个免费模型互备、保留可选付费保险 |
+| SiliconFlow 免费模型下线或限流 | 免费降级链路不可用 | 模型 ID 可配置、两个免费模型互备，全部失败时保留状态等待重试 |
 | 定时 Action 延迟或停用 | 同步不准时 | 非整点调度、手动入口、状态机续跑、运行摘要 |
 | Notion API 限流和长文字稿 | 写入慢或失败 | 分块、批量、退避、可恢复根块 |
-| 正式 ASR 和 LLM 产生费用 | 大量历史节目可能超预算 | 付费 ASR 默认关闭；设置单集、每日和每月预算阈值 |
+| 免费政策未来发生变化 | 原免费模型可能不再符合项目原则 | 固定免费模型白名单，并在升级前人工核对服务商价格页 |
 | 超长节目说话人分离不稳定 | 角色标签错误 | 两小时以上关闭分离或后续分段 |
 | 页面公开发布 | 可能暴露私人收听记录 | GitHub Pages 默认关闭，Notion 页面默认私有 |
 

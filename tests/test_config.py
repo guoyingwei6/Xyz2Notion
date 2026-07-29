@@ -28,9 +28,10 @@ def test_example_config_is_valid_and_secret_free() -> None:
         AsrProvider.TINGWU_COOKIE,
         AsrProvider.SILICONFLOW,
     )
-    assert config.asr.paid_enabled is False
-    assert config.asr.paid_budget_cny == 0
-    assert config.summary.model == "qwen-flash"
+    assert config.summary.siliconflow_models == (
+        "Qwen/Qwen3-8B",
+        "Qwen/Qwen2.5-7B-Instruct",
+    )
     assert config.summary.prompt_version == "summary-v1"
     assert config.limits.episodes_per_run == 3
     raw = Path("config.example.yaml").read_text(encoding="utf-8")
@@ -71,23 +72,12 @@ def test_missing_config_has_clear_error(tmp_path: Path) -> None:
         {"provider_order": ["siliconflow", "siliconflow"]},
         {"siliconflow_models": []},
         {"siliconflow_models": ["model", "model"]},
-        {"paid_enabled": True, "paid_budget_cny": 0},
-        {"paid_enabled": False, "paid_budget_cny": 1},
-        {"provider_order": ["dashscope_paid"]},
+        {"siliconflow_models": ["paid-or-unknown/model"]},
     ],
 )
 def test_asr_policy_rejects_unsafe_configuration(values: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         AsrConfig.model_validate(values)
-
-
-def test_paid_provider_requires_explicit_budget() -> None:
-    config = AsrConfig(
-        provider_order=(AsrProvider.DASHSCOPE_PAID,),
-        paid_enabled=True,
-        paid_budget_cny=5,
-    )
-    assert config.paid_budget_cny == 5
 
 
 def test_empty_provider_order_intentionally_pauses_asr() -> None:
@@ -99,12 +89,19 @@ def test_daily_limit_cannot_exceed_monthly_limit() -> None:
         LimitConfig(asr_minutes_per_day=31, asr_minutes_per_month=30)
 
 
-def test_summary_limits_and_prices_are_validated() -> None:
-    assert SummaryConfig().input_cny_per_million_tokens == 0.15
+def test_summary_limits_and_free_models_are_validated() -> None:
     with pytest.raises(ValidationError):
         SummaryConfig(chunk_tokens=999)
     with pytest.raises(ValidationError):
-        SummaryConfig(output_cny_per_million_tokens=-1)
+        SummaryConfig(siliconflow_models=())
+    with pytest.raises(ValidationError):
+        SummaryConfig(siliconflow_models=("same", "same"))
+    for non_free_model in (
+        "Pro/Qwen/Qwen2.5-7B-Instruct",
+        "Qwen/Qwen2.5-14B-Instruct",
+    ):
+        with pytest.raises(ValidationError):
+            SummaryConfig(siliconflow_models=(non_free_model,))
 
 
 def test_derived_device_id_is_stable_and_valid() -> None:
@@ -181,7 +178,6 @@ def test_secret_values_are_not_serialized_or_represented() -> None:
             "NOTION_PAGE_ID": "page-example",
             "TINGWU_COOKIE": "cookie-example",
             "SILICONFLOW_API_KEY": "silicon-example",
-            "DASHSCOPE_API_KEY": "dashscope-example",
         },
         fallback_identity="test",
     )
@@ -191,7 +187,6 @@ def test_secret_values_are_not_serialized_or_represented() -> None:
         "notion-example",
         "cookie-example",
         "silicon-example",
-        "dashscope-example",
     ):
         assert secret not in rendered
     credentials.require("notion_token", "xiaoyuzhou_refresh_token")
