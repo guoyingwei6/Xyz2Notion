@@ -50,8 +50,17 @@ def _nested_id(item: Mapping[str, Any], entity: str, key: str) -> str:
     return str(value).strip() if value is not None else ""
 
 
-def collect_metadata(api: XiaoyuzhouMetadataAPI) -> MetadataSnapshot:
-    """Collect subscriptions, listened podcasts, all episodes, history, and progress."""
+def collect_metadata(
+    api: XiaoyuzhouMetadataAPI,
+    *,
+    include_catalog: bool = False,
+) -> MetadataSnapshot:
+    """Collect podcast metadata and listened episodes.
+
+    Full podcast catalogs are optional because fetching every historical episode
+    from every subscribed show can expand a modest account into tens of
+    thousands of Notion rows.
+    """
     subscriptions = api.subscriptions()
     mileage = api.mileage()
     history = api.play_history()
@@ -61,16 +70,18 @@ def collect_metadata(api: XiaoyuzhouMetadataAPI) -> MetadataSnapshot:
     history_pids = {pid for item in history if (pid := _nested_id(item, "episode", "pid"))}
     recovered_podcasts = [api.podcast(pid) for pid in sorted(history_pids - known_pids)]
     subscriptions = [*subscriptions, *recovered_podcasts]
-    pids = tuple(
-        dict.fromkeys(
-            pid
-            for item in (*subscriptions, *mileage, *history)
-            if (pid := _nested_id(item, "podcast", "pid"))
-            or (pid := _nested_id(item, "episode", "pid"))
+    catalog_episodes: list[JsonObject] = []
+    if include_catalog:
+        pids = tuple(
+            dict.fromkeys(
+                pid
+                for item in (*subscriptions, *mileage, *history)
+                if (pid := _nested_id(item, "podcast", "pid"))
+                or (pid := _nested_id(item, "episode", "pid"))
+            )
         )
-    )
-    episodes = [episode for pid in pids for episode in api.episodes(pid)]
-    combined_episodes = [*episodes, *history]
+        catalog_episodes = [episode for pid in pids for episode in api.episodes(pid)]
+    combined_episodes = [*catalog_episodes, *history]
     eids = tuple(
         dict.fromkeys(
             eid for item in combined_episodes if (eid := _nested_id(item, "episode", "eid"))

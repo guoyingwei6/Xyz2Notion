@@ -87,9 +87,22 @@ class FakeXiaoyuzhou:
         return {"playedSeconds": year + month, "playedDays": month}
 
 
-def test_collect_metadata_covers_subscriptions_mileage_history_and_all_episodes() -> None:
+def test_collect_metadata_defaults_to_listened_history_only() -> None:
     fake = FakeXiaoyuzhou()
     snapshot = collect_metadata(fake)
+    assert fake.requested_pids == []
+    assert fake.progress_eids == ("history-episode",)
+    assert {podcast.pid for podcast in snapshot.podcasts} == {
+        "subscribed-podcast",
+        "listened-podcast",
+        "history-podcast",
+    }
+    assert {episode.eid for episode in snapshot.episodes} == {"history-episode"}
+
+
+def test_collect_metadata_can_include_all_catalog_episodes() -> None:
+    fake = FakeXiaoyuzhou()
+    snapshot = collect_metadata(fake, include_catalog=True)
     assert set(fake.requested_pids) == {
         "subscribed-podcast",
         "listened-podcast",

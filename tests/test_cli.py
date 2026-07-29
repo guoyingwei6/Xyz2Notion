@@ -175,7 +175,7 @@ def test_sync_metadata_success_reports_only_counts(
     monkeypatch.setattr(  # type: ignore[attr-defined]
         cli_module,
         "collect_metadata",
-        lambda _api: "fixture-snapshot",
+        lambda _api, **_kwargs: "fixture-snapshot",
     )
     monkeypatch.setattr(  # type: ignore[attr-defined]
         cli_module,
