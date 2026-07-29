@@ -128,10 +128,12 @@ class NotionCoverLocalizer:
         api: CoverRepairAPI,
         data_source_ids: Sequence[str],
         *,
+        sort_property: str | None = None,
         http_client: httpx.Client | None = None,
     ) -> None:
         self.api = api
         self.data_source_ids = tuple(data_source_ids)
+        self.sort_property = sort_property
         self._owns_http = http_client is None
         self._http = http_client or httpx.Client(timeout=30)
 
@@ -151,9 +153,17 @@ class NotionCoverLocalizer:
         repaired = skipped = failed = 0
         candidates: list[tuple[str, str]] = []
         for data_source_id in self.data_source_ids:
+            payload: JsonObject = {"page_size": 100}
+            if self.sort_property:
+                payload["sorts"] = [
+                    {
+                        "property": self.sort_property,
+                        "direction": "descending",
+                    }
+                ]
             pages = self.api.query_data_source_page(
                 data_source_id,
-                {"page_size": 100},
+                payload,
             )
             for page in pages:
                 page_id = page.get("id")

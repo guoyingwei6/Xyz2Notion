@@ -350,10 +350,8 @@ def _run_cover_repair(args: argparse.Namespace) -> int:
             initialization = NotionInitializer(notion, page_id).initialize()
             with NotionCoverLocalizer(
                 notion,
-                (
-                    initialization.resources["podcast"].data_source_id,
-                    initialization.resources["episode"].data_source_id,
-                ),
+                (initialization.resources["podcast"].data_source_id,),
+                sort_property="Total Listening Seconds",
             ) as localizer:
                 report = localizer.repair(limit=args.limit)
     except (ConfigurationError, MissingCredentialError) as exc:

@@ -1118,8 +1118,15 @@ def test_notion_cover_repair_runs_without_xiaoyuzhou_credentials(
             )
 
     class FakeLocalizer:
-        def __init__(self, _api: object, sources: object) -> None:
-            assert sources == ("podcasts", "episodes")
+        def __init__(
+            self,
+            _api: object,
+            sources: object,
+            *,
+            sort_property: str,
+        ) -> None:
+            assert sources == ("podcasts",)
+            assert sort_property == "Total Listening Seconds"
 
         def __enter__(self) -> "FakeLocalizer":
             return self

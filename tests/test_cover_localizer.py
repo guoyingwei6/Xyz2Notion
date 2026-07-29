@@ -13,12 +13,14 @@ class FakeCoverAPI:
         self.pages = pages
         self.uploads: list[tuple[str, str, bytes]] = []
         self.updates: list[tuple[str, dict[str, Any]]] = []
+        self.query_payloads: list[Mapping[str, Any] | None] = []
 
     def query_data_source_page(
         self,
         _data_source_id: str,
         _payload: Mapping[str, Any] | None = None,
     ) -> list[JsonObject]:
+        self.query_payloads.append(_payload)
         return self.pages
 
     def upload_file(self, filename: str, content_type: str, content: bytes) -> str:
@@ -57,11 +59,27 @@ def test_cover_localizer_uploads_and_repoints_cover_icon_and_property() -> None:
     )
     with (
         httpx.Client(transport=transport) as http,
-        NotionCoverLocalizer(api, ("podcasts",), http_client=http) as localizer,
+        NotionCoverLocalizer(
+            api,
+            ("podcasts",),
+            sort_property="Total Listening Seconds",
+            http_client=http,
+        ) as localizer,
     ):
         report = localizer.repair(limit=1)
     assert report.repaired == 1
     assert report.failed == 0
+    assert api.query_payloads == [
+        {
+            "page_size": 100,
+            "sorts": [
+                {
+                    "property": "Total Listening Seconds",
+                    "direction": "descending",
+                }
+            ],
+        }
+    ]
     assert api.uploads[0][1:] == ("image/jpeg", b"jpeg")
     payload = api.updates[0][1]
     assert payload["icon"]["type"] == "file_upload"
