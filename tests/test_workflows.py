@@ -31,6 +31,7 @@ def test_runtime_workflows_use_concurrency_and_private_safe_summaries() -> None:
         "sync-metadata.yml",
         "process-ai.yml",
         "retry-failed.yml",
+        "maintenance.yml",
     ):
         text, workflow = _workflow(name)
         assert workflow["concurrency"]["cancel-in-progress"] is False  # type: ignore[index]
@@ -59,3 +60,31 @@ def test_ai_workflows_receive_only_expected_provider_secrets() -> None:
         ):
             assert f"secrets.{secret}" in text
         assert "XIAOYUZHOU_REFRESH_TOKEN" not in text
+
+
+def test_maintenance_workflow_has_safe_dispatch_guards() -> None:
+    text, workflow = _workflow("maintenance.yml")
+    assert workflow["permissions"] == {"contents": "read"}
+    for operation in (
+        "migrate-dry-run",
+        "migrate",
+        "redo-episode",
+        "rebuild-statistics",
+        "rebuild-heatmap",
+    ):
+        assert operation in text
+    assert "confirm_changes" in text
+    assert 'CONFIRM_CHANGES" != "true' in text
+    assert "NOTION_MIGRATION_PAGE_ID" in text
+
+
+def test_all_notion_writers_share_one_concurrency_group() -> None:
+    for name in (
+        "init-notion.yml",
+        "sync-metadata.yml",
+        "process-ai.yml",
+        "retry-failed.yml",
+        "maintenance.yml",
+    ):
+        text, _workflow_data = _workflow(name)
+        assert "group: xyz2notion-runtime" in text

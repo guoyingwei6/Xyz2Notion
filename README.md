@@ -94,7 +94,7 @@ uv run xyz2notion xiaoyuzhou-check
 [`docs/ai-enrichment.md`](docs/ai-enrichment.md)。
 单集页面的托管区边界、播放器、原生脑图、SVG 脑图和用户笔记保护机制见
 [`docs/episode-page.md`](docs/episode-page.md)。
-GitHub Secrets、四个运行工作流、调度时间和手动重试方法见
+GitHub Secrets、五个运行工作流、调度时间和手动维护方法见
 [`docs/github-actions.md`](docs/github-actions.md)。
 旧 Podcast2Notion 模板的原地迁移、dry-run、单集重做和统计重建见
 [`docs/migration.md`](docs/migration.md)。

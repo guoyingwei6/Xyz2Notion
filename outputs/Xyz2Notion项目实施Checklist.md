@@ -521,6 +521,7 @@ P9 当前状态：程序托管根块、先建后换、用户块保护、播放�
 - [x] `sync-metadata.yml`：同步小宇宙元数据和统计。
 - [x] `process-ai.yml`：推进 ASR、总结和发布状态机。
 - [x] `retry-failed.yml` 或手动重试入口。
+- [x] `maintenance.yml`：GitHub-only 迁移、单集重做和统计重建入口。
 - [x] 调度避开整点高峰。
 - [x] 配置 concurrency 防止重复运行。
 - [x] 设置合理的 job timeout。
@@ -532,6 +533,7 @@ P9 当前状态：程序托管根块、先建后换、用户块保护、播放�
 - [x] `XIAOYUZHOU_DEVICE_ID` 可选 Variable。
 - [x] `NOTION_TOKEN`。
 - [x] `NOTION_PAGE_ID`。
+- [x] `NOTION_MIGRATION_PAGE_ID` 可选旧模板副本。
 - [x] `TINGWU_COOKIE` 可选。
 - [x] `SILICONFLOW_API_KEY`。
 - [x] `DASHSCOPE_API_KEY` 条件必需。
@@ -543,9 +545,9 @@ P9 当前状态：程序托管根块、先建后换、用户块保护、播放�
 - [x] 模拟工作流中断后下一次能从 Notion 检查点继续。
 - [x] 自动化检查确认未配置 Artifact，仓库不提交私人状态、音频或完整文字稿。
 
-P10 当前状态：四个只读权限运行工作流、错峰调度、互斥并发、超时、聚合摘要、
-Notion 私有检查点和只重试可恢复失败的入口已完成；223 个测试通过，覆盖率
-91.02%。真实手动/定时运行等待用户在 Fork 中配置 Secrets。
+P10 当前状态：五个只读权限运行工作流、错峰调度、所有 Notion 写入全局互斥、
+超时、聚合摘要、Notion 私有检查点和安全维护入口已完成。真实手动/定时运行等待
+用户在 Fork 中配置 Secrets。
 
 ---
 
@@ -563,6 +565,7 @@ Notion 私有检查点和只重试可恢复失败的入口已完成；223 个测
 - [x] 支持单集重做。
 - [x] 支持统计重建。
 - [x] 支持当前年度热力图重建。
+- [x] 迁移、单集重做、统计和热力图重建均可仅通过 GitHub Actions 运行。
 - [x] 支持 Cookie Provider 单独禁用。
 - [x] 支持所有 ASR Provider 暂停而继续同步元数据。
 

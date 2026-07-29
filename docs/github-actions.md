@@ -15,6 +15,7 @@ Xyz2Notion 的定时任务只运行在用户自己 Fork 的 GitHub 仓库中。�
 | `XIAOYUZHOU_REFRESH_TOKEN` | 是 | 小宇宙换取短期 Access Token |
 | `NOTION_TOKEN` | 是 | 用户自己的 Notion Integration Token |
 | `NOTION_PAGE_ID` | 是 | 已授权给 Integration 的空白根页面 ID |
+| `NOTION_MIGRATION_PAGE_ID` | 否 | 旧模板副本页面；仅维护工作流迁移操作使用 |
 | `TINGWU_COOKIE` | 否 | 优先使用用户已有的听悟网页额度 |
 | `SILICONFLOW_API_KEY` | 建议 | 听悟 Cookie 终态失效后的免费 ASR 降级 |
 | `DASHSCOPE_API_KEY` | 条件必需 | 没有听悟原生摘要时调用千问生成摘要 |
@@ -61,9 +62,10 @@ ASR 模型。`DASHSCOPE_API_KEY` 来自用户自己的阿里云百炼账户，�
 | `Sync Podcast Metadata` | 每天 00:17 UTC、手动 | 同步订阅、进度、统计和热力图 |
 | `Process Episode AI` | 每 6 小时的第 43 分、手动 | 推进 ASR、摘要和发布状态机 |
 | `Retry Failed Episode AI` | 手动 | 只恢复 `FAILED_RETRYABLE` 单集 |
+| `Xyz2Notion Maintenance` | 手动 | 迁移、单集重做、统计或热力图重建 |
 
-定时任务刻意避开整点。元数据工作流和 AI 工作流各自使用 concurrency；同一类任务
-不会并发修改 Notion。AI 与重试工作流共用同一个 concurrency group。
+定时任务刻意避开整点。所有会写入 Notion 的工作流共用
+`xyz2notion-runtime` concurrency group，避免迁移、初始化、元数据和 AI 同时改页。
 
 首次使用顺序：
 
@@ -74,6 +76,19 @@ ASR 模型。`DASHSCOPE_API_KEY` 来自用户自己的阿里云百炼账户，�
 
 如果 Fork 中存在公开的 `config.yaml`，AI 工作流使用它；否则使用
 `config.example.yaml`。配置文件只能包含模型顺序、额度上限等非秘密设置。
+
+## 维护工作流
+
+`Xyz2Notion Maintenance` 提供五种手动操作：
+
+- `migrate-dry-run`：只读检查旧模板，默认选项；
+- `migrate`：应用原地迁移，必须同时勾选 `confirm_changes`；
+- `redo-episode`：必须在 `episode_eid` 填写精确 EID；
+- `rebuild-statistics`：重算全部统计；
+- `rebuild-heatmap`：重建当前年度热力图。
+
+如果设置 `NOTION_MIGRATION_PAGE_ID`，两个迁移操作使用该旧模板副本；其他操作始终
+使用主 `NOTION_PAGE_ID`。工作流不会把页面 ID、EID 或迁移键写入运行摘要。
 
 ## 中断与重试
 

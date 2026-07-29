@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: xyz2notion-init
+  group: xyz2notion-runtime
   cancel-in-progress: false
 
 jobs:

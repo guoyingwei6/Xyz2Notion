@@ -1,0 +1,102 @@
+name: Xyz2Notion Maintenance
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Safe maintenance operation
+        required: true
+        default: migrate-dry-run
+        type: choice
+        options:
+          - migrate-dry-run
+          - migrate
+          - redo-episode
+          - rebuild-statistics
+          - rebuild-heatmap
+      episode_eid:
+        description: Required only for redo-episode
+        required: false
+        type: string
+      confirm_changes:
+        description: Required for the write-enabled migrate operation
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xyz2notion-runtime
+  cancel-in-progress: false
+
+jobs:
+  maintain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Install locked application
+        run: |
+          python -m pip install uv==0.9.28
+          uv sync --locked
+
+      - name: Run selected maintenance operation
+        env:
+          OPERATION: ${{ inputs.operation }}
+          EPISODE_EID: ${{ inputs.episode_eid }}
+          CONFIRM_CHANGES: ${{ inputs.confirm_changes }}
+          XIAOYUZHOU_REFRESH_TOKEN: ${{ secrets.XIAOYUZHOU_REFRESH_TOKEN }}
+          XIAOYUZHOU_DEVICE_ID: ${{ vars.XIAOYUZHOU_DEVICE_ID }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
+          NOTION_MIGRATION_PAGE_ID: ${{ secrets.NOTION_MIGRATION_PAGE_ID }}
+        run: |
+          set -euo pipefail
+          page_args=()
+          if [[ "$OPERATION" == migrate* && -n "$NOTION_MIGRATION_PAGE_ID" ]]; then
+            page_args=(--page-id "$NOTION_MIGRATION_PAGE_ID")
+          fi
+          case "$OPERATION" in
+            migrate-dry-run)
+              result="$(uv run xyz2notion migrate --dry-run "${page_args[@]}")"
+              ;;
+            migrate)
+              if [[ "$CONFIRM_CHANGES" != "true" ]]; then
+                printf 'Set confirm_changes=true to apply migration changes.\n' >&2
+                exit 2
+              fi
+              result="$(uv run xyz2notion migrate "${page_args[@]}")"
+              ;;
+            redo-episode)
+              if [[ -z "$EPISODE_EID" ]]; then
+                printf 'episode_eid is required for redo-episode.\n' >&2
+                exit 2
+              fi
+              result="$(uv run xyz2notion redo-episode --eid "$EPISODE_EID")"
+              ;;
+            rebuild-statistics)
+              result="$(uv run xyz2notion rebuild-statistics)"
+              ;;
+            rebuild-heatmap)
+              result="$(uv run xyz2notion rebuild-heatmap)"
+              ;;
+            *)
+              printf 'Unsupported maintenance operation.\n' >&2
+              exit 2
+              ;;
+          esac
+          printf '%s\n' "$result"
+          {
+            printf '## Xyz2Notion maintenance\n\n'
+            printf 'Operation: `%s`\n\n' "$OPERATION"
+            printf '```text\n%s\n```\n' "$result"
+          } >> "$GITHUB_STEP_SUMMARY"

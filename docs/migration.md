@@ -24,6 +24,10 @@ uv run xyz2notion migrate --dry-run
 uv run xyz2notion migrate
 ```
 
+也可以完全不在本地接触 Token：把旧模板副本 ID 保存为 GitHub Secret
+`NOTION_MIGRATION_PAGE_ID`，运行 `Xyz2Notion Maintenance`，先选择
+`migrate-dry-run`，确认聚合结果后再选择 `migrate` 并勾选 `confirm_changes`。
+
 ## 自动识别和映射
 
 迁移器识别旧数据库名：
@@ -66,6 +70,9 @@ uv run xyz2notion migrate
 ```bash
 uv run xyz2notion redo-episode --eid <EID>
 ```
+
+GitHub-only 用法是在 `Xyz2Notion Maintenance` 选择 `redo-episode` 并填写
+`episode_eid`。
 
 该命令只清空 Xyz2Notion 管理的 AI 状态属性，不删除当前页面内容。下一次
 `process-ai` 会重新生成，并在成功后原子替换 Xyz2Notion 托管区。
