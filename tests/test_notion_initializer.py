@@ -238,6 +238,12 @@ def test_statistics_charts_are_compact_primary_views() -> None:
     assert all(spec.position == "start" for spec in chart_specs)
     assert chart_specs[0].chart_type == "number"
     assert all(spec.chart_type in {"column", "line"} for spec in chart_specs[1:])
+    assert [spec.chart_group_by for spec in chart_specs[1:]] == [
+        "year",
+        "month",
+        "week",
+        "day",
+    ]
     assert all(
         spec.filter
         == {
@@ -523,9 +529,17 @@ def test_chart_configuration_uses_dates_hours_and_compact_presentation() -> None
     assert configuration == {
         "type": "chart",
         "chart_type": "line",
-        "x_axis_property_id": "start",
-        "y_axis_property_id": "hours",
-        "sort": "x_ascending",
+        "x_axis": {
+            "type": "date",
+            "property_id": "start",
+            "group_by": "month",
+            "sort": {"type": "ascending"},
+            "start_day_of_week": 1,
+        },
+        "y_axis": {
+            "aggregator": "sum",
+            "property_id": "hours",
+        },
         "color_theme": "teal",
         "height": "small",
         "legend_position": "off",

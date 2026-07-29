@@ -35,6 +35,7 @@ class ViewSpec:
     chart_x_property: str | None = None
     chart_y_property: str | None = None
     chart_value_property: str | None = None
+    chart_group_by: Literal["day", "week", "month", "year"] | None = None
     position: Literal["start", "end"] = "end"
 
 
@@ -338,6 +339,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         chart_type="column",
         chart_x_property="Start Date",
         chart_y_property="Listening Hours",
+        chart_group_by="year",
         position="start",
     ),
     ViewSpec(
@@ -368,6 +370,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         chart_type="line",
         chart_x_property="Start Date",
         chart_y_property="Listening Hours",
+        chart_group_by="month",
         position="start",
     ),
     ViewSpec(
@@ -398,6 +401,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         chart_type="line",
         chart_x_property="Start Date",
         chart_y_property="Listening Hours",
+        chart_group_by="week",
         position="start",
     ),
     ViewSpec(
@@ -428,6 +432,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         chart_type="line",
         chart_x_property="Start Date",
         chart_y_property="Listening Hours",
+        chart_group_by="day",
         position="start",
     ),
     ViewSpec(
@@ -600,13 +605,22 @@ def view_configuration(spec: ViewSpec, property_ids: dict[str, str]) -> JsonObje
             or spec.chart_x_property not in property_ids
             or spec.chart_y_property is None
             or spec.chart_y_property not in property_ids
+            or spec.chart_group_by is None
         ):
             raise ValueError(f"Chart view {spec.name!r} has incomplete axes")
         configuration.update(
             {
-                "x_axis_property_id": property_ids[spec.chart_x_property],
-                "y_axis_property_id": property_ids[spec.chart_y_property],
-                "sort": "x_ascending",
+                "x_axis": {
+                    "type": "date",
+                    "property_id": property_ids[spec.chart_x_property],
+                    "group_by": spec.chart_group_by,
+                    "sort": {"type": "ascending"},
+                    "start_day_of_week": 1,
+                },
+                "y_axis": {
+                    "aggregator": "sum",
+                    "property_id": property_ids[spec.chart_y_property],
+                },
                 "axis_labels": "both",
                 "grid_lines": "horizontal",
             }
