@@ -282,7 +282,7 @@ def relational_properties(resources: dict[str, NotionResource]) -> dict[str, Jso
         result[key] = {
             "Episodes": relation_property(episode),
             "Listening Seconds": rollup_property("Episodes", "Played Seconds", "sum"),
-            "Episode Count": rollup_property("Episodes", "Name", "count_all"),
+            "Episode Count": rollup_property("Episodes", "Name", "count"),
             "Listening Hours": formula_property(
                 'round(prop("Exact Listening Seconds") / 3600 * 10) / 10'
             ),

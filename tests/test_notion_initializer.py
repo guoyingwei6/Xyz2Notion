@@ -220,6 +220,7 @@ def test_initializer_creates_complete_clean_room_template() -> None:
 
     year_properties = fake.data_sources[result.resources["year"].data_source_id]["properties"]
     assert year_properties["Listening Seconds"]["rollup"]["function"] == "sum"
+    assert year_properties["Episode Count"]["rollup"]["function"] == "count"
     assert year_properties["Listening Hours"]["formula"]["expression"]
 
     liked_view = next(view for view in fake.views.values() if view["name"] == "Episode · 喜欢")
