@@ -237,18 +237,35 @@ class NotionClient:
                 current_body["start_cursor"] = str(cursor)
 
     def search_databases(self, title: str) -> list[JsonObject]:
-        """Search database containers by title."""
-        return list(
-            self.paginate(
-                "POST",
-                "/search",
-                json_body={
-                    "query": title,
-                    "filter": {"property": "object", "value": "database"},
-                    "page_size": 100,
-                },
-            )
-        )
+        """Search data sources by title and return their database containers.
+
+        Notion API 2026-03-11 no longer accepts ``database`` as a search object.
+        The initializer still needs database containers, so resolve each matching
+        data source through its parent database and de-duplicate the result.
+        """
+        databases: list[JsonObject] = []
+        seen_database_ids: set[str] = set()
+        for data_source in self.paginate(
+            "POST",
+            "/search",
+            json_body={
+                "query": title,
+                "filter": {"property": "object", "value": "data_source"},
+                "page_size": 100,
+            },
+        ):
+            parent = data_source.get("parent")
+            if not isinstance(parent, dict):
+                continue
+            database_id = parent.get("database_id")
+            if not database_id:
+                continue
+            database_id = str(database_id)
+            if database_id in seen_database_ids:
+                continue
+            seen_database_ids.add(database_id)
+            databases.append(self.retrieve_database(database_id))
+        return databases
 
     def retrieve_page(self, page_id: str) -> JsonObject:
         return self.request("GET", f"/pages/{page_id}")

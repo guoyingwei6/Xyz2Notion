@@ -60,6 +60,48 @@ def test_create_data_source_page_uses_2026_parent_contract() -> None:
     assert created["id"] == "row-1"
 
 
+def test_search_databases_resolves_data_source_parents() -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/v1/search":
+            payload = request.read().decode()
+            assert request.method == "POST"
+            assert '"value":"data_source"' in payload
+            assert '"value":"database"' not in payload
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "object": "data_source",
+                            "id": "ds-1",
+                            "parent": {"type": "database_id", "database_id": "db-1"},
+                        },
+                        {
+                            "object": "data_source",
+                            "id": "ds-2",
+                            "parent": {"type": "database_id", "database_id": "db-1"},
+                        },
+                        {"object": "data_source", "id": "orphan"},
+                    ],
+                    "has_more": False,
+                    "next_cursor": None,
+                },
+            )
+        assert request.method == "GET"
+        assert request.url.path == "/v1/databases/db-1"
+        return httpx.Response(
+            200,
+            json={"object": "database", "id": "db-1", "data_sources": [{"id": "ds-1"}]},
+        )
+
+    client = client_for(httpx.MockTransport(handle))
+    assert [database["id"] for database in client.search_databases("播客")] == ["db-1"]
+    assert [request.url.path for request in requests] == ["/v1/search", "/v1/databases/db-1"]
+
+
 def test_direct_file_upload_creates_sends_and_returns_id() -> None:
     requests: list[httpx.Request] = []
 
