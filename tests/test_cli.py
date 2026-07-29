@@ -335,6 +335,243 @@ def test_audit_dashboard_reports_notion_error(
     assert "Notion error" in capsys.readouterr().err  # type: ignore[attr-defined]
 
 
+def _layout_bundle(prefix: str, *, complete: bool = True) -> list[dict[str, object]]:
+    types = ["heading_1", "callout", "column_list", "divider", "callout"]
+    if complete:
+        types.append("paragraph")
+    return [
+        {"id": f"{prefix}-{index}", "type": block_type} for index, block_type in enumerate(types)
+    ]
+
+
+def test_cleanup_dashboard_layout_refuses_wrong_confirmation_before_api_access(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        cli_module,
+        "NotionClient",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("API accessed")),
+    )
+    assert (
+        main(
+            [
+                "cleanup-dashboard-layout",
+                "--confirm",
+                "wrong",
+                "--expected-bundles",
+                "5",
+                "--expected-total",
+                "49",
+            ]
+        )
+        == 7
+    )
+    assert "cleanup refused" in capsys.readouterr().err.lower()  # type: ignore[attr-defined]
+
+
+def test_cleanup_dashboard_layout_reports_missing_token(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.delenv("NOTION_TOKEN", raising=False)  # type: ignore[attr-defined]
+    assert (
+        main(
+            [
+                "cleanup-dashboard-layout",
+                "--page-id",
+                "fixture-page",
+                "--confirm",
+                "ARCHIVE_5_BUNDLES_30_LAYOUT_BLOCKS",
+                "--expected-bundles",
+                "5",
+                "--expected-total",
+                "49",
+            ]
+        )
+        == 2
+    )
+    assert "Configuration error" in capsys.readouterr().err  # type: ignore[attr-defined]
+
+
+def test_cleanup_dashboard_layout_reports_notion_error(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
+
+    class FailingNotion(FakeContextClient):
+        def list_block_children(self, _block_id: str) -> list[object]:
+            raise cli_module.NotionAPIError("private upstream response")
+
+    monkeypatch.setattr(cli_module, "NotionClient", FailingNotion)  # type: ignore[attr-defined]
+    assert (
+        main(
+            [
+                "cleanup-dashboard-layout",
+                "--page-id",
+                "fixture-page",
+                "--confirm",
+                "ARCHIVE_5_BUNDLES_30_LAYOUT_BLOCKS",
+                "--expected-bundles",
+                "5",
+                "--expected-total",
+                "49",
+            ]
+        )
+        == 4
+    )
+    assert "Notion error" in capsys.readouterr().err  # type: ignore[attr-defined]
+
+
+def test_cleanup_dashboard_layout_refuses_preflight_mismatch_without_archiving(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+
+    class FakeNotion(FakeContextClient):
+        deleted: ClassVar[list[str]] = []
+
+        def list_block_children(self, block_id: str) -> list[object]:
+            assert block_id == "fixture-page"
+            return [{"id": "user-note", "type": "paragraph"}]
+
+        def delete_block(self, block_id: str) -> dict[str, bool]:
+            self.deleted.append(block_id)
+            return {"archived": True}
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
+    assert (
+        main(
+            [
+                "cleanup-dashboard-layout",
+                "--confirm",
+                "ARCHIVE_5_BUNDLES_30_LAYOUT_BLOCKS",
+                "--expected-bundles",
+                "5",
+                "--expected-total",
+                "49",
+            ]
+        )
+        == 7
+    )
+    assert FakeNotion.deleted == []
+    assert "actual_total=1" in capsys.readouterr().err  # type: ignore[attr-defined]
+
+
+def test_cleanup_dashboard_layout_refuses_incomplete_selected_ids(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+    duplicates = [block for bundle in range(5) for block in _layout_bundle(f"duplicate-{bundle}")]
+    duplicates[0]["id"] = None
+    original = [
+        *duplicates,
+        *_layout_bundle("preserved", complete=False),
+        *[{"id": f"database-{index}", "type": "child_database"} for index in range(8)],
+        {"id": "data-page", "type": "child_page"},
+        {"id": "heatmap", "type": "image"},
+        {"id": "user-note", "type": "paragraph"},
+        {"id": "user-heading", "type": "heading_2"},
+        {"id": "user-callout", "type": "callout"},
+        {"id": "user-divider", "type": "divider"},
+    ]
+
+    class FakeNotion(FakeContextClient):
+        def list_block_children(self, _block_id: str) -> list[object]:
+            return original
+
+        def delete_block(self, _block_id: str) -> dict[str, bool]:
+            raise AssertionError("cleanup must not archive invalid selections")
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
+    assert (
+        main(
+            [
+                "cleanup-dashboard-layout",
+                "--confirm",
+                "ARCHIVE_5_BUNDLES_30_LAYOUT_BLOCKS",
+                "--expected-bundles",
+                "5",
+                "--expected-total",
+                "49",
+            ]
+        )
+        == 7
+    )
+    assert "incomplete or duplicated" in capsys.readouterr().err  # type: ignore[attr-defined]
+
+
+def test_cleanup_dashboard_layout_archives_only_five_exact_duplicate_bundles(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+    duplicate_blocks = [
+        block for bundle in range(5) for block in _layout_bundle(f"duplicate-{bundle}")
+    ]
+    preserved_layout = _layout_bundle("preserved", complete=False)
+    preserved_databases = [
+        {"id": f"database-{index}", "type": "child_database"} for index in range(8)
+    ]
+    preserved_other = [
+        {"id": "data-page", "type": "child_page"},
+        {"id": "heatmap", "type": "image"},
+        {"id": "user-note", "type": "paragraph"},
+        {"id": "user-heading", "type": "heading_2"},
+        {"id": "user-callout", "type": "callout"},
+        {"id": "user-divider", "type": "divider"},
+    ]
+    original = [
+        *duplicate_blocks,
+        *preserved_layout,
+        *preserved_databases,
+        *preserved_other,
+    ]
+    assert len(original) == 49
+
+    class FakeNotion(FakeContextClient):
+        deleted: ClassVar[list[str]] = []
+
+        def list_block_children(self, block_id: str) -> list[object]:
+            assert block_id == "fixture-page"
+            return [block for block in original if block["id"] not in self.deleted]
+
+        def delete_block(self, block_id: str) -> dict[str, bool]:
+            self.deleted.append(block_id)
+            return {"archived": True}
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
+    assert (
+        main(
+            [
+                "cleanup-dashboard-layout",
+                "--confirm",
+                "ARCHIVE_5_BUNDLES_30_LAYOUT_BLOCKS",
+                "--expected-bundles",
+                "5",
+                "--expected-total",
+                "49",
+            ]
+        )
+        == 0
+    )
+    assert FakeNotion.deleted == [str(block["id"]) for block in duplicate_blocks]
+    assert not set(FakeNotion.deleted) & {
+        str(block["id"]) for block in [*preserved_layout, *preserved_databases, *preserved_other]
+    }
+    output = capsys.readouterr().out  # type: ignore[attr-defined]
+    assert "bundles archived=5" in output
+    assert "blocks archived=30" in output
+    assert "remaining total=19" in output
+    assert "duplicate-" not in output
+
+
 def test_rebuild_dashboard_refuses_wrong_confirmation_before_api_access(
     capsys: object,
     monkeypatch: object,

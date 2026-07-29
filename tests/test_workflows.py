@@ -48,16 +48,24 @@ def test_init_workflow_requires_exact_dashboard_rebuild_confirmation() -> None:
     assert inputs["operation"]["options"] == [  # type: ignore[index]
         "initialize",
         "audit-dashboard",
+        "cleanup-dashboard-layout",
         "rebuild-dashboard",
     ]
     assert inputs["confirmation"]["required"] is False  # type: ignore[index]
     assert inputs["expected_count"]["required"] is False  # type: ignore[index]
+    assert inputs["expected_total"]["required"] is False  # type: ignore[index]
     assert "default" not in inputs["confirmation"]  # type: ignore[operator]
     assert "default" not in inputs["expected_count"]  # type: ignore[operator]
+    assert "default" not in inputs["expected_total"]  # type: ignore[operator]
     assert 'OPERATION" == "initialize"' in text
     assert "uv run xyz2notion notion-init" in text
     assert 'OPERATION" == "audit-dashboard"' in text
     assert "uv run xyz2notion audit-dashboard" in text
+    assert 'OPERATION" == "cleanup-dashboard-layout"' in text
+    assert "ARCHIVE_${EXPECTED_COUNT}_BUNDLES_${expected_blocks}_LAYOUT_BLOCKS" in text
+    assert "uv run xyz2notion cleanup-dashboard-layout" in text
+    assert '--expected-bundles "$EXPECTED_COUNT"' in text
+    assert '--expected-total "$EXPECTED_TOTAL"' in text
     assert 'OPERATION" == "rebuild-dashboard"' in text
     assert 'EXPECTED_COUNT" =~ ^[1-9][0-9]*$' in text
     assert 'CONFIRMATION" != "ARCHIVE_${EXPECTED_COUNT}_LINKED_DATABASE_BLOCKS"' in text

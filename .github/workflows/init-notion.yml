@@ -11,13 +11,18 @@ on:
         options:
           - initialize
           - audit-dashboard
+          - cleanup-dashboard-layout
           - rebuild-dashboard
       confirmation:
-        description: "For rebuild: ARCHIVE_<count>_LINKED_DATABASE_BLOCKS"
+        description: "Exact confirmation required for destructive operations"
         required: false
         type: string
       expected_count:
-        description: "For rebuild: exact positive root linked database block count"
+        description: "Exact positive linked block or duplicate bundle count"
+        required: false
+        type: string
+      expected_total:
+        description: "For layout cleanup: exact root block count before cleanup"
         required: false
         type: string
 
@@ -53,12 +58,29 @@ jobs:
           OPERATION: ${{ inputs.operation }}
           CONFIRMATION: ${{ inputs.confirmation }}
           EXPECTED_COUNT: ${{ inputs.expected_count }}
+          EXPECTED_TOTAL: ${{ inputs.expected_total }}
         run: |
           set -euo pipefail
           if [[ "$OPERATION" == "initialize" ]]; then
             result="$(uv run xyz2notion notion-init)"
           elif [[ "$OPERATION" == "audit-dashboard" ]]; then
             result="$(uv run xyz2notion audit-dashboard)"
+          elif [[ "$OPERATION" == "cleanup-dashboard-layout" ]]; then
+            if [[ ! "$EXPECTED_COUNT" =~ ^[1-9][0-9]*$ ]] || \
+               [[ ! "$EXPECTED_TOTAL" =~ ^[1-9][0-9]*$ ]]; then
+              printf 'Dashboard layout cleanup refused: expected counts must be positive\n' >&2
+              exit 2
+            fi
+            expected_blocks="$((EXPECTED_COUNT * 6))"
+            expected_confirmation="ARCHIVE_${EXPECTED_COUNT}_BUNDLES_${expected_blocks}_LAYOUT_BLOCKS"
+            if [[ "$CONFIRMATION" != "$expected_confirmation" ]]; then
+              printf 'Dashboard layout cleanup refused: confirmation did not match counts\n' >&2
+              exit 2
+            fi
+            result="$(uv run xyz2notion cleanup-dashboard-layout \
+              --confirm "$CONFIRMATION" \
+              --expected-bundles "$EXPECTED_COUNT" \
+              --expected-total "$EXPECTED_TOTAL")"
           elif [[ "$OPERATION" == "rebuild-dashboard" ]]; then
             if [[ ! "$EXPECTED_COUNT" =~ ^[1-9][0-9]*$ ]]; then
               printf 'Dashboard rebuild refused: expected_count must be positive\n' >&2

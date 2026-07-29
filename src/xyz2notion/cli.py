@@ -70,6 +70,31 @@ def build_parser() -> argparse.ArgumentParser:
         "--page-id",
         help="target root page ID; defaults to NOTION_PAGE_ID",
     )
+    cleanup_dashboard = subparsers.add_parser(
+        "cleanup-dashboard-layout",
+        help="archive an exact set of duplicate managed dashboard layout bundles",
+    )
+    cleanup_dashboard.add_argument(
+        "--page-id",
+        help="target root page ID; defaults to NOTION_PAGE_ID",
+    )
+    cleanup_dashboard.add_argument(
+        "--confirm",
+        required=True,
+        help="required destructive-operation confirmation",
+    )
+    cleanup_dashboard.add_argument(
+        "--expected-bundles",
+        required=True,
+        type=int,
+        help="exact expected duplicate six-block layout bundle count",
+    )
+    cleanup_dashboard.add_argument(
+        "--expected-total",
+        required=True,
+        type=int,
+        help="exact expected root block count before cleanup",
+    )
     rebuild_dashboard = subparsers.add_parser(
         "rebuild-dashboard",
         help="archive an exact set of root linked database blocks and rebuild views",
@@ -391,6 +416,26 @@ def _is_dashboard_marker(block: Mapping[str, object]) -> bool:
     return False
 
 
+_MANAGED_LAYOUT_BUNDLE_SHAPE = (
+    "heading_1",
+    "callout",
+    "column_list",
+    "divider",
+    "callout",
+    "paragraph",
+)
+
+
+def _layout_bundle_ranges(blocks: Sequence[Mapping[str, object]]) -> list[range]:
+    block_types = [str(block.get("type", "")) for block in blocks]
+    width = len(_MANAGED_LAYOUT_BUNDLE_SHAPE)
+    return [
+        range(index, index + width)
+        for index in range(len(block_types) - width + 1)
+        if tuple(block_types[index : index + width]) == _MANAGED_LAYOUT_BUNDLE_SHAPE
+    ]
+
+
 def _run_audit_dashboard(args: argparse.Namespace) -> int:
     try:
         credentials = load_runtime_credentials()
@@ -420,11 +465,7 @@ def _run_audit_dashboard(args: argparse.Namespace) -> int:
         and tuple(block_types[index - len(managed_prefix) : index]) == managed_prefix
         for index in marker_indexes
     )
-    managed_bundle_shape = (*managed_prefix, "paragraph")
-    layout_bundle_shape_candidates = sum(
-        tuple(block_types[index : index + len(managed_bundle_shape)]) == managed_bundle_shape
-        for index in range(len(block_types) - len(managed_bundle_shape) + 1)
-    )
+    layout_bundle_shape_candidates = len(_layout_bundle_ranges(blocks))
     child_database = block_types.count("child_database")
     column_list = block_types.count("column_list")
     marker_count = len(marker_indexes)
@@ -436,6 +477,114 @@ def _run_audit_dashboard(args: argparse.Namespace) -> int:
         f"managed_bundle_candidates={managed_bundle_candidates}, "
         f"layout_bundle_shape_candidates={layout_bundle_shape_candidates}, "
         f"other_blocks={other_blocks})"
+    )
+    return 0
+
+
+def _run_cleanup_dashboard_layout(args: argparse.Namespace) -> int:
+    expected_blocks = args.expected_bundles * len(_MANAGED_LAYOUT_BUNDLE_SHAPE)
+    expected_confirmation = (
+        f"ARCHIVE_{args.expected_bundles}_BUNDLES_{expected_blocks}_LAYOUT_BLOCKS"
+    )
+    if (
+        args.expected_bundles <= 0
+        or args.expected_total <= 0
+        or args.confirm != expected_confirmation
+    ):
+        print(
+            "Dashboard layout cleanup refused: confirmation or expected counts did not match",
+            file=sys.stderr,
+        )
+        return 7
+
+    try:
+        credentials = load_runtime_credentials()
+        credentials.require("notion_token")
+        page_id = args.page_id or credentials.notion_page_id
+        if not page_id:
+            raise MissingCredentialError(
+                "Missing target page: set NOTION_PAGE_ID or pass --page-id"
+            )
+        if credentials.notion_token is None:
+            raise AssertionError("credential requirement did not narrow notion_token")
+
+        with NotionClient(credentials.notion_token) as notion:
+            blocks = notion.list_block_children(page_id)
+            ranges = _layout_bundle_ranges(blocks)
+            child_database_count = sum(block.get("type") == "child_database" for block in blocks)
+            column_list_count = sum(block.get("type") == "column_list" for block in blocks)
+            if (
+                len(blocks) != args.expected_total
+                or len(ranges) != args.expected_bundles
+                or child_database_count != 8
+                or column_list_count != args.expected_bundles + 1
+            ):
+                print(
+                    "Dashboard layout cleanup refused: root layout preflight "
+                    "did not match "
+                    f"(expected_total={args.expected_total}, actual_total={len(blocks)}, "
+                    f"expected_bundles={args.expected_bundles}, "
+                    f"actual_bundles={len(ranges)}, "
+                    f"child_database={child_database_count}, "
+                    f"column_list={column_list_count})",
+                    file=sys.stderr,
+                )
+                return 7
+
+            selected = [blocks[index] for bundle_range in ranges for index in bundle_range]
+            block_ids = [block.get("id") for block in selected]
+            if (
+                len(block_ids) != expected_blocks
+                or len(set(block_ids)) != expected_blocks
+                or not all(isinstance(block_id, str) and block_id for block_id in block_ids)
+            ):
+                print(
+                    "Dashboard layout cleanup refused: selected layout block IDs "
+                    "were incomplete or duplicated",
+                    file=sys.stderr,
+                )
+                return 7
+
+            for block_id in block_ids:
+                if not isinstance(block_id, str):
+                    raise AssertionError("preflight validation did not narrow block ID")
+                notion.delete_block(block_id)
+
+            remaining = notion.list_block_children(page_id)
+            remaining_child_databases = sum(
+                block.get("type") == "child_database" for block in remaining
+            )
+            remaining_columns = sum(block.get("type") == "column_list" for block in remaining)
+            remaining_candidates = len(_layout_bundle_ranges(remaining))
+            expected_remaining = args.expected_total - expected_blocks
+            if (
+                len(remaining) != expected_remaining
+                or remaining_child_databases != 8
+                or remaining_columns != 1
+                or remaining_candidates != 0
+            ):
+                print(
+                    "Dashboard layout cleanup incomplete after archive "
+                    f"(remaining_total={len(remaining)}, "
+                    f"child_database={remaining_child_databases}, "
+                    f"column_list={remaining_columns}, "
+                    f"duplicate_bundles={remaining_candidates})",
+                    file=sys.stderr,
+                )
+                return 7
+    except (ConfigurationError, MissingCredentialError) as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    except NotionAPIError as exc:
+        print(f"Notion error: {exc}", file=sys.stderr)
+        return 4
+
+    print(
+        "Dashboard layout cleanup OK "
+        f"(bundles archived={args.expected_bundles}, "
+        f"blocks archived={expected_blocks}, "
+        f"remaining total={expected_remaining}, "
+        "child_database=8, column_list=1)"
     )
     return 0
 
@@ -566,6 +715,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "audit-dashboard":
         return _run_audit_dashboard(args)
+    if args.command == "cleanup-dashboard-layout":
+        return _run_cleanup_dashboard_layout(args)
     if args.command == "rebuild-dashboard":
         return _run_rebuild_dashboard(args)
     if args.command == "xiaoyuzhou-check":
