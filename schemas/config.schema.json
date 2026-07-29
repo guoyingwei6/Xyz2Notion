@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/guoyingwei6/Xyz2Notion/blob/main/schemas/config.schema.json",
+  "title": "Xyz2Notion configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version"],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "asr": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider_order": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["tingwu_cookie", "siliconflow", "dashscope_paid"]
+          },
+          "default": ["tingwu_cookie", "siliconflow"]
+        },
+        "paid_enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "paid_budget_cny": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0
+        },
+        "siliconflow_models": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "episodes_per_run": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3
+        },
+        "asr_minutes_per_day": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 240
+        },
+        "asr_minutes_per_month": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3000
+        },
+        "provider_poll_attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 60
+        }
+      }
+    },
+    "state_file": {
+      "type": "string",
+      "minLength": 1,
+      "default": ".xyz2notion/state.json"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+schema_version: 1
+
+asr:
+  provider_order:
+    - tingwu_cookie
+    - siliconflow
+  paid_enabled: false
+  paid_budget_cny: 0
+  siliconflow_models:
+    - FunAudioLLM/SenseVoiceSmall
+    - TeleAI/TeleSpeechASR
+
+limits:
+  episodes_per_run: 3
+  asr_minutes_per_day: 240
+  asr_minutes_per_month: 3000
+  provider_poll_attempts: 60
+
+state_file: .xyz2notion/state.json

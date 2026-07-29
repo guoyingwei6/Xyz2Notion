@@ -26,6 +26,32 @@ uv run mypy src
 uv run pytest
 ```
 
+## 配置
+
+复制 `config.example.yaml` 为 `config.yaml`，其中只保存 ASR 顺序、预算开关和
+任务上限等可公开配置：
+
+```bash
+cp config.example.yaml config.yaml
+uv run xyz2notion config-check --config config.yaml
+```
+
+凭证只通过 GitHub Actions Secrets 或环境变量提供。兼容旧变量
+`REFRESH_TOKEN`，但推荐迁移为 `XIAOYUZHOU_REFRESH_TOKEN`。
+
+`XIAOYUZHOU_DEVICE_ID` 可以不填。省略时会根据
+`XYZ2NOTION_INSTALLATION_ID`、`GITHUB_REPOSITORY` 或 Notion 页面 ID
+稳定派生 UUID；显式填写则始终使用用户提供的设备 ID。
+
+默认 ASR 顺序为通义听悟 Cookie → SiliconFlow，付费 DashScope 默认关闭且
+预算为 0。
+
+## 可恢复运行
+
+每个单集使用独立状态机记录发现、ASR 提交、转写、AI 增强和发布阶段。
+状态以原子 JSON 文件保存；GitHub Actions 中断后会从最后状态继续，而不是
+重新执行已经完成的步骤。
+
 ## 安全原则
 
 - 凭证只能发送到对应服务的精确域名。

@@ -79,43 +79,46 @@ P0 当前状态：已完成。公开仓库、质量检查、类型检查、19 �
 
 ### 配置
 
-- [ ] 定义 `config.yaml` Schema。
-- [ ] 定义环境变量加载和校验。
-- [ ] 支持旧 Secret `REFRESH_TOKEN` 迁移到 `XIAOYUZHOU_REFRESH_TOKEN`。
-- [ ] 支持可选 `XIAOYUZHOU_DEVICE_ID`。
-- [ ] 未填写 Device ID 时生成稳定 UUID。
-- [ ] 支持 ASR Provider 顺序配置。
-- [ ] 付费 ASR 默认关闭且预算为 0。
-- [ ] 配置单次、每日、每月任务上限。
+- [x] 定义 `config.yaml` Schema 和 `config.example.yaml`。
+- [x] 定义环境变量加载和校验，凭证使用 `SecretStr`。
+- [x] 支持旧 Secret `REFRESH_TOKEN` 迁移到 `XIAOYUZHOU_REFRESH_TOKEN`。
+- [x] 支持可选 `XIAOYUZHOU_DEVICE_ID`。
+- [x] 未填写 Device ID 时根据安装身份生成稳定 UUID。
+- [x] 支持 ASR Provider 顺序配置，默认听悟 Cookie → SiliconFlow。
+- [x] 付费 ASR 默认关闭且预算为 0，未显式预算时拒绝启用。
+- [x] 配置单次 Episode 数、每日/月度 ASR 分钟数和轮询次数上限。
 
 ### 领域模型
 
-- [ ] 定义 Podcast 模型。
-- [ ] 定义 Episode 模型。
-- [ ] 定义 Author 模型。
-- [ ] 定义 ListeningPeriod 模型。
-- [ ] 定义 TranscriptResult 统一模型。
-- [ ] 定义 SummaryResult 和 MindmapNode。
-- [ ] 定义 Provider 错误类别。
-- [ ] 定义幂等键：PID、EID、ASR Provider Task ID。
+- [x] 定义 Podcast 模型。
+- [x] 定义 Episode 模型。
+- [x] 定义 Author 模型。
+- [x] 定义 ListeningPeriod 模型。
+- [x] 定义 TranscriptResult 和 TranscriptSegment 统一模型。
+- [x] 定义 SummaryResult、Chapter 和递归 MindmapNode。
+- [x] 定义 Provider 错误类别、可重试判断和安全异常。
+- [x] 定义幂等键：PID、EID、ASR Provider Task ID。
 
 ### 状态机
 
-- [ ] 实现 `DISCOVERED`。
-- [ ] 实现 `ASR_SUBMITTED`。
-- [ ] 实现 `ASR_RUNNING`。
-- [ ] 实现 `TRANSCRIBED`。
-- [ ] 实现 `ENRICHED`。
-- [ ] 实现 `PUBLISHED`。
-- [ ] 实现 `FAILED_RETRYABLE`。
-- [ ] 实现 `FAILED_FINAL`。
-- [ ] 对非法状态跳转增加测试。
+- [x] 实现 `DISCOVERED`。
+- [x] 实现 `ASR_SUBMITTED`。
+- [x] 实现 `ASR_RUNNING`。
+- [x] 实现 `TRANSCRIBED`。
+- [x] 实现 `ENRICHED`。
+- [x] 实现 `PUBLISHED`。
+- [x] 实现 `FAILED_RETRYABLE`，保存精确恢复状态。
+- [x] 实现 `FAILED_FINAL`。
+- [x] 对非法状态跳转、错误类别和失败状态一致性增加测试。
 
 ### P1 验收
 
-- [ ] 配置缺失时给出明确错误。
-- [ ] 所有模型可以 JSON 序列化和反序列化。
-- [ ] 状态机中断后可以从保存状态继续。
+- [x] 配置缺失或非法时给出明确错误。
+- [x] 所有模型可以 JSON 序列化和反序列化。
+- [x] 状态机使用原子 JSON 存储，中断后可以从保存状态继续。
+
+P1 当前状态：本地质量检查、类型检查和 77 个测试通过，覆盖率 98.23%；
+等待 GitHub CI 阶段验收。
 
 ---
 

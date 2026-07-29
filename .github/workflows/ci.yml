@@ -43,6 +43,11 @@ jobs:
       - name: Test
         run: uv run pytest --cov --cov-report=term-missing
 
+      - name: CLI smoke test
+        run: |
+          uv run xyz2notion doctor
+          uv run xyz2notion config-check --config config.example.yaml
+
   secret-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 10
