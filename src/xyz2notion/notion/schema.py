@@ -270,12 +270,17 @@ def relational_properties(resources: dict[str, NotionResource]) -> dict[str, Jso
                 'round(prop("Played Seconds") / prop("Duration Seconds") * 100), 0)'
             ),
             "Progress Ring": formula_property(
-                'lets(p, if(prop("Duration Seconds") > 0, '
-                'max(0, min(100, round(prop("Played Seconds") / '
-                'prop("Duration Seconds") * 100))), 0), '
-                'substring("●●●●●●●●●●", 0, floor(p / 10)) + '
-                'substring("○○○○○○○○○○", 0, 10 - floor(p / 10)) + '
-                '" " + format(p) + "%")'
+                'ifs(prop("Progress Percent") >= 100, "●●●●●●●●●●", '
+                'prop("Progress Percent") >= 90, "●●●●●●●●●○", '
+                'prop("Progress Percent") >= 80, "●●●●●●●●○○", '
+                'prop("Progress Percent") >= 70, "●●●●●●●○○○", '
+                'prop("Progress Percent") >= 60, "●●●●●●○○○○", '
+                'prop("Progress Percent") >= 50, "●●●●●○○○○○", '
+                'prop("Progress Percent") >= 40, "●●●●○○○○○○", '
+                'prop("Progress Percent") >= 30, "●●●○○○○○○○", '
+                'prop("Progress Percent") >= 20, "●●○○○○○○○○", '
+                'prop("Progress Percent") >= 10, "●○○○○○○○○○", '
+                '"○○○○○○○○○○") + " " + format(prop("Progress Percent")) + "%"'
             ),
         },
         "mindmap": {
