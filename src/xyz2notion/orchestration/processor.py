@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import SecretStr
 
+from xyz2notion.asr.local_whisper import LocalWhisperClient
 from xyz2notion.asr.pipeline import transcribe_siliconflow_episode
 from xyz2notion.asr.router import tingwu_fallback_allowed
 from xyz2notion.asr.siliconflow import SiliconFlowClient
@@ -145,6 +146,7 @@ class EpisodeAIProcessor:
         *,
         tingwu: TingwuClient | None = None,
         siliconflow: SiliconFlowClient | None = None,
+        local_whisper: LocalWhisperClient | None = None,
         summary_client: SiliconFlowSummaryClient | None = None,
         summary_policy: SummaryPolicy | None = None,
         summary_enabled: bool = True,
@@ -154,6 +156,7 @@ class EpisodeAIProcessor:
         self.state_store = state_store
         self.tingwu = tingwu
         self.siliconflow = siliconflow
+        self.local_whisper = local_whisper
         self.summary_client = summary_client
         self.summary_policy = summary_policy or SummaryPolicy()
         self.summary_enabled = summary_enabled
@@ -169,6 +172,14 @@ class EpisodeAIProcessor:
                 "No usable ASR provider is configured",
             )
         return transcribe_siliconflow_episode(candidate.audio_url, self.siliconflow)
+
+    def _local_whisper(self, candidate: EpisodeCandidate) -> TranscriptResult:
+        if self.local_whisper is None:
+            raise _failure(
+                ProviderErrorCategory.UNSUPPORTED,
+                "No usable local ASR provider is configured",
+            )
+        return transcribe_siliconflow_episode(candidate.audio_url, self.local_whisper)
 
     def _tingwu_task(
         self,
@@ -211,7 +222,9 @@ class EpisodeAIProcessor:
             try:
                 task = self._tingwu_task(candidate, state)
             except ProviderError as exc:
-                if self.siliconflow is None or not tingwu_fallback_allowed(exc):
+                if (
+                    self.siliconflow is None and self.local_whisper is None
+                ) or not tingwu_fallback_allowed(exc):
                     raise
             else:
                 checkpoint = state.model_copy(
@@ -254,13 +267,21 @@ class EpisodeAIProcessor:
                     )
                 # A terminal Tingwu record may safely switch to SiliconFlow.
 
-        transcript = self._siliconflow(candidate)
+        if self.siliconflow is not None:
+            try:
+                transcript = self._siliconflow(candidate)
+            except ProviderError:
+                if self.local_whisper is None:
+                    raise
+                transcript = self._local_whisper(candidate)
+        else:
+            transcript = self._local_whisper(candidate)
         record = state.record.transition(PipelineState.TRANSCRIBED)
         return (
             state.model_copy(
                 update={
                     "record": record,
-                    "provider": "siliconflow",
+                    "provider": transcript.provider,
                     "provider_task_id": transcript.provider_task_id,
                     "transcript": transcript,
                     "summary": None,
@@ -318,7 +339,7 @@ class EpisodeAIProcessor:
                 PipelineState.ASR_SUBMITTED,
                 PipelineState.ASR_RUNNING,
             }:
-                if self.tingwu is None and self.siliconflow is None:
+                if self.tingwu is None and self.siliconflow is None and self.local_whisper is None:
                     return ProcessingOutcome(
                         candidate.eid,
                         "paused",
@@ -389,13 +410,20 @@ def build_provider_clients(
     siliconflow_summary_api_key: SecretStr | None,
     siliconflow_asr_models: tuple[str, ...],
     siliconflow_summary_models: tuple[str, ...],
-) -> tuple[TingwuClient | None, SiliconFlowClient | None, SiliconFlowSummaryClient | None]:
+    local_whisper_model: str | None = None,
+) -> tuple[
+    TingwuClient | None,
+    SiliconFlowClient | None,
+    LocalWhisperClient | None,
+    SiliconFlowSummaryClient | None,
+]:
     """Construct only explicitly configured user-owned providers."""
     return (
         TingwuClient(tingwu_cookie) if tingwu_cookie is not None else None,
         SiliconFlowClient(siliconflow_asr_api_key, models=siliconflow_asr_models)
         if siliconflow_asr_api_key is not None
         else None,
+        LocalWhisperClient(local_whisper_model) if local_whisper_model is not None else None,
         SiliconFlowSummaryClient(
             siliconflow_summary_api_key,
             models=siliconflow_summary_models,

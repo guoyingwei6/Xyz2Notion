@@ -128,6 +128,16 @@ class SiliconProcessor(EpisodeAIProcessor):
         return transcript()
 
 
+class LocalFallbackProcessor(SiliconProcessor):
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.local_calls = 0
+
+    def _local_whisper(self, _candidate: EpisodeCandidate) -> TranscriptResult:
+        self.local_calls += 1
+        return transcript("local_whisper")
+
+
 class FakeTingwu:
     def __init__(self, task: TingwuTask, *, fail_auth: bool = False) -> None:
         self.task = task
@@ -248,6 +258,37 @@ def test_no_asr_provider_pauses_without_persisting_failure() -> None:
     assert outcome.action == "paused"
     assert outcome.state is PipelineState.DISCOVERED
     assert store.saved == []
+
+
+def test_siliconflow_failure_falls_back_to_local_whisper() -> None:
+    store = FakeStateStore()
+    processor = LocalFallbackProcessor(
+        FakeNotion(),
+        store,
+        siliconflow=object(),
+        local_whisper=object(),  # type: ignore[arg-type]
+        summary_client=FakeSummaryClient(),
+        failures=1,
+    )
+    outcome = processor.process(CANDIDATE, {})
+    assert outcome.state is PipelineState.PUBLISHED
+    assert processor.asr_calls == 1
+    assert processor.local_calls == 1
+    assert store.state.provider == "local_whisper"
+
+
+def test_local_whisper_can_run_without_remote_asr_provider() -> None:
+    store = FakeStateStore()
+    processor = LocalFallbackProcessor(
+        FakeNotion(),
+        store,
+        local_whisper=object(),  # type: ignore[arg-type]
+        summary_client=FakeSummaryClient(),
+    )
+    outcome = processor.process(CANDIDATE, {})
+    assert outcome.state is PipelineState.PUBLISHED
+    assert processor.asr_calls == 0
+    assert processor.local_calls == 1
 
 
 def test_disabled_summary_pauses_after_transcription_without_repeating_asr() -> None:

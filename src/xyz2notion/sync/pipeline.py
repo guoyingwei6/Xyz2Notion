@@ -63,9 +63,7 @@ def collect_metadata(
     history = api.play_history()
     playlist_eids = api.playlist_eids()
     favorites = api.favorites()
-    history_eids = {
-        eid for item in history if (eid := _nested_id(item, "episode", "eid"))
-    }
+    history_eids = {eid for item in history if (eid := _nested_id(item, "episode", "eid"))}
     favorite_eids = {
         eid
         for item in favorites

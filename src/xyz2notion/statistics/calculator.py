@@ -179,9 +179,7 @@ def calculate_statistics(
             source=source,
         )
 
-    played_pids = {
-        episode.pid for episode in snapshot.episodes if episode.played_seconds > 0
-    }
+    played_pids = {episode.pid for episode in snapshot.episodes if episode.played_seconds > 0}
     listened_podcasts = tuple(
         podcast
         for podcast in snapshot.podcasts

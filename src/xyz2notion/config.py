@@ -28,6 +28,7 @@ class AsrProvider(StrEnum):
 
     TINGWU_COOKIE = "tingwu_cookie"
     SILICONFLOW = "siliconflow"
+    LOCAL_WHISPER = "local_whisper"
 
 
 FREE_SILICONFLOW_ASR_MODELS = frozenset(
@@ -56,11 +57,13 @@ class AsrConfig(StrictConfigModel):
     provider_order: tuple[AsrProvider, ...] = (
         AsrProvider.TINGWU_COOKIE,
         AsrProvider.SILICONFLOW,
+        AsrProvider.LOCAL_WHISPER,
     )
     siliconflow_models: tuple[str, ...] = (
         "FunAudioLLM/SenseVoiceSmall",
         "TeleAI/TeleSpeechASR",
     )
+    local_whisper_model: Literal["tiny", "base", "small"] = "small"
 
     @model_validator(mode="after")
     def validate_provider_policy(self) -> Self:
@@ -83,7 +86,7 @@ class AsrConfig(StrictConfigModel):
 class LimitConfig(StrictConfigModel):
     """Per-run and time-window safety limits."""
 
-    episodes_per_run: int = Field(default=3, ge=1)
+    episodes_per_run: int = Field(default=2, ge=1)
     asr_minutes_per_day: int = Field(default=240, ge=1)
     asr_minutes_per_month: int = Field(default=3000, ge=1)
     provider_poll_attempts: int = Field(default=60, ge=1)

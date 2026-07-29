@@ -202,6 +202,14 @@ def _paragraph(text: str) -> JsonObject:
     }
 
 
+def _divider() -> JsonObject:
+    return {
+        "object": "block",
+        "type": "divider",
+        "divider": {},
+    }
+
+
 def _callout(text: str, emoji: str) -> JsonObject:
     return {
         "object": "block",
@@ -213,10 +221,17 @@ def _callout(text: str, emoji: str) -> JsonObject:
     }
 
 
+def _menu() -> JsonObject:
+    return {
+        "object": "block",
+        "type": "table_of_contents",
+        "table_of_contents": {"color": "gray"},
+    }
+
+
 def home_blocks() -> list[JsonObject]:
     """Return the Notion-native dashboard introduction matching the public demo."""
     return [
-        _paragraph(HOME_MARKER),
         _heading(1, "播客"),
         _callout(
             "这里只记录真正播放过的节目; 浏览但没有产生播放进度的单集不会参与统计。",
@@ -234,9 +249,16 @@ def home_blocks() -> list[JsonObject]:
                             "width_ratio": 0.3,
                             "children": [
                                 _heading(2, "菜单"),
-                                _paragraph(
-                                    "总收听时长\n收听时长排行\nAuthor\nPodcast\nEpisode\n思维导图"
+                                _menu(),
+                                _divider(),
+                                _heading(2, "总收听时长"),
+                                _callout(
+                                    "全部 · 年 · 月 · 周 · 日\n"
+                                    "统计只计算实际播放时长大于 0 的节目。",
+                                    "🎧",
                                 ),
+                                _heading(2, "收听时长排行"),
+                                _paragraph("按真实播放时长从高到低展示 Podcast。"),
                             ],
                         },
                     },
@@ -247,17 +269,29 @@ def home_blocks() -> list[JsonObject]:
                             "width_ratio": 0.7,
                             "children": [
                                 _heading(2, "播客记录"),
-                                _paragraph("年度收听热力图由每日同步工作流自动更新。"),
+                                _callout(
+                                    "年度收听热力图由每日同步工作流自动更新; "
+                                    "未播放的单集不会点亮记录。",
+                                    "📅",
+                                ),
+                                _heading(2, "Podcast"),
+                                _paragraph("封面画廊 · 仅展示实际收听过的播客"),
+                                _heading(2, "Episode"),
+                                _paragraph("全部 · 在听 · 听过 · 喜欢 · 待听 · 收藏"),
+                                _heading(2, "思维导图"),
+                                _paragraph("每期节目生成的可视化脑图与原生大纲"),
                             ],
                         },
                     },
                 ]
             },
         },
-        _heading(2, "总收听时长"),
-        _callout("年、月、周、日统计均只计算实际播放秒数大于 0 的节目。", "🎧"),
-        _heading(2, "Podcast · Episode · 思维导图"),
-        _paragraph("下方数据库视图由 Xyz2Notion 更新, 你自己的笔记和字段会被保留。"),
+        _divider(),
+        _callout(
+            "下方数据库视图由 Xyz2Notion 更新; 你自己的笔记、字段、封面和图标会被保留。",
+            "🪐",
+        ),
+        _paragraph(HOME_MARKER),
     ]
 
 
@@ -307,12 +341,7 @@ class NotionInitializer:
     def _ensure_page_branding(self) -> None:
         page = self.api.retrieve_page(self.root_page_id)
         updates: JsonObject = {}
-        icon = page.get("icon")
-        if not icon or (
-            isinstance(icon, dict)
-            and icon.get("type") == "emoji"
-            and icon.get("emoji") == "🎧"
-        ):
+        if not page.get("icon"):
             updates["icon"] = {"type": "emoji", "emoji": "🪐"}
         cover = page.get("cover")
         external = cover.get("external") if isinstance(cover, dict) else None
@@ -454,10 +483,7 @@ class NotionInitializer:
         if any(HOME_MARKER in _block_text(block) for block in blocks):
             replacements = {
                 "Xyz2Notion · 播客仪表盘": ("heading_1", "播客"),
-                (
-                    "自主可控: 小宇宙、转写、总结和统计仅在你的 GitHub Actions 与 "
-                    "Notion 中流转。"
-                ): (
+                ("自主可控: 小宇宙、转写、总结和统计仅在你的 GitHub Actions 与 Notion 中流转。"): (
                     "callout",
                     "这里只记录真正播放过的节目; 浏览但没有产生播放进度的单集不会参与统计。",
                 ),
@@ -467,9 +493,7 @@ class NotionInitializer:
                     "年度收听热力图由每日同步工作流自动更新。",
                 ),
                 "收听统计": ("heading_2", "总收听时长"),
-                (
-                    "以下视图由 Xyz2Notion 管理; 你添加的其他块、视图和笔记不会被删除。"
-                ): (
+                ("以下视图由 Xyz2Notion 管理; 你添加的其他块、视图和笔记不会被删除。"): (
                     "paragraph",
                     "年、月、周、日统计只计算实际播放秒数大于 0 的节目。",
                 ),

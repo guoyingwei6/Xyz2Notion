@@ -42,7 +42,8 @@ Fork 本仓库，在 `Settings → Secrets and variables → Actions` 至少添�
 
 手动运行 `Process Episode AI`。元数据每天自动同步；AI 工作流在初期验收阶段仅
 手动运行，避免未经确认连续处理大量节目。听悟 Cookie 明确失效时自动降级到
-SiliconFlow；工作流中断后从用户自己 Notion 里的私有检查点继续。
+SiliconFlow；如果两条远程通道都不可用，最后才在 GitHub Actions CPU 上运行
+本地 `faster-whisper small`。工作流中断后从用户自己 Notion 里的私有检查点继续。
 
 只有满足以下条件的单集才会进入 AI 队列：
 
@@ -58,8 +59,8 @@ SiliconFlow；工作流中断后从用户自己 Notion 里的私有检查点继�
 
 ## 项目状态
 
-v0.1.0 已实现自主 Notion 模板、元数据与统计同步、听悟 Cookie → SiliconFlow
-降级转写、SiliconFlow 免费摘要、脑图、迁移和可恢复的 GitHub Actions 编排。真实账户验收按
+v0.1.0 已实现自主 Notion 模板、元数据与统计同步、听悟 Cookie → SiliconFlow →
+本地 Whisper 三级降级转写、SiliconFlow 免费摘要、脑图、迁移和可恢复的 GitHub Actions 编排。真实账户验收按
 [实施 Checklist](outputs/Xyz2Notion项目实施Checklist.md)
 继续记录；缺少用户凭证的项目不会用 Mock 冒充真实通过。
 
@@ -101,9 +102,12 @@ uv run xyz2notion xiaoyuzhou-check
 认证方式、Device ID 和只读接口说明见
 [`docs/xiaoyuzhou-auth.md`](docs/xiaoyuzhou-auth.md)。
 
-默认 ASR 顺序为通义听悟 Cookie → SiliconFlow，不实现任何付费 Provider。
+默认 ASR 顺序为通义听悟 Cookie → SiliconFlow → GitHub Actions 本地 Whisper，
+不实现任何付费 Provider。本地模型无需额外 Secret，只在前两条通道失败后加载。
 SiliconFlow 音频切片、免费模型降级和时间轴精度说明见
 [`docs/siliconflow-asr.md`](docs/siliconflow-asr.md)。
+本地最终兜底的资源、隐私和运行限制见
+[`docs/local-whisper.md`](docs/local-whisper.md)。
 
 听悟 Cookie 的域名隔离、断点续查和降级规则见
 [`docs/tingwu-cookie.md`](docs/tingwu-cookie.md)。文字稿的 SiliconFlow

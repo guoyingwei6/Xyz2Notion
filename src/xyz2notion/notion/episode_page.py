@@ -160,6 +160,12 @@ def _summary_blocks(summary: SummaryResult) -> list[JsonObject]:
             blocks.append(_heading(3, f"{_time(chapter.start_ms)} {chapter.title}"))
             if chapter.summary:
                 blocks.append(_callout(chapter.summary))
+    return blocks
+
+
+def _insight_blocks(summary: SummaryResult) -> list[JsonObject]:
+    """Render useful secondary analysis after the screenshot-critical main flow."""
+    blocks: list[JsonObject] = []
     if summary.highlights:
         blocks.append(_heading(2, "关键观点"))
         blocks.extend(_list_block(value) for value in summary.highlights)
@@ -236,6 +242,25 @@ class EpisodePageRenderer:
             for grandchild in child.children:
                 self._append_mindmap(str(child_id), grandchild)
 
+    def _append_native_mindmap(self, parent_id: str, node: MindmapNode) -> None:
+        """Keep the accessible outline available without duplicating the SVG in full."""
+        created = self.api.append_block_children(
+            parent_id,
+            [
+                {
+                    "object": "block",
+                    "type": "toggle",
+                    "toggle": {
+                        "rich_text": rich_text("展开文字版思维导图"),
+                        "color": "gray_background",
+                    },
+                }
+            ],
+        )
+        if not created or not created[0].get("id"):
+            raise RuntimeError("Notion did not return the native mind-map toggle ID")
+        self._append_mindmap(str(created[0]["id"]), node)
+
     def publish(self, data: EpisodePageInput) -> EpisodePagePublishResult:
         content_hash = _content_hash(data)
         ready_marker = _marker("READY", content_hash)
@@ -296,17 +321,20 @@ class EpisodePageRenderer:
         if prefix:
             self.api.append_block_children(managed_id, prefix)
         if data.summary is not None:
-            self._append_mindmap(managed_id, data.summary.mindmap)
+            self._append_native_mindmap(managed_id, data.summary.mindmap)
             self.api.append_block_children(managed_id, _summary_blocks(data.summary))
         self.api.append_block_children(managed_id, _transcript_blocks(data.transcript))
+        if data.summary is not None:
+            insights = _insight_blocks(data.summary)
+            if insights:
+                self.api.append_block_children(managed_id, [_divider(), *insights])
         quality = data.transcript.timing_quality.value
         self.api.append_block_children(
             managed_id,
             [
                 _divider(),
                 _callout(
-                    f"转写信息 · {data.transcript.provider} · "
-                    f"{data.transcript.model} · {quality}",
+                    f"转写信息 · {data.transcript.provider} · {data.transcript.model} · {quality}",
                     "🎙️",
                 ),
             ],

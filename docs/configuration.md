@@ -12,8 +12,9 @@ uv run xyz2notion config-check --config config.yaml
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `provider_order` | `tingwu_cookie`, `siliconflow` | ASR 优先级；空数组表示暂停新 ASR |
+| `provider_order` | `tingwu_cookie`, `siliconflow`, `local_whisper` | ASR 优先级；空数组表示暂停新 ASR |
 | `siliconflow_models` | SenseVoiceSmall、TeleSpeechASR | 免费白名单模型 404 时依次尝试 |
+| `local_whisper_model` | `small` | 最终本地兜底；仅允许 `tiny`、`base`、`small` |
 
 只禁用 Cookie：
 
@@ -21,6 +22,7 @@ uv run xyz2notion config-check --config config.yaml
 asr:
   provider_order:
     - siliconflow
+    - local_whisper
 ```
 
 暂停所有新 ASR：
@@ -51,7 +53,7 @@ asr:
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `episodes_per_run` | `3` | 每次 AI 工作流最多推进的单集数 |
+| `episodes_per_run` | `2` | 每次 AI 工作流最多推进的单集数 |
 | `asr_minutes_per_day` | `240` | 每日计划处理分钟上限 |
 | `asr_minutes_per_month` | `3000` | 每月计划处理分钟上限 |
 | `provider_poll_attempts` | `60` | 异步任务轮询上限 |

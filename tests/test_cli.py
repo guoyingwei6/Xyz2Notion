@@ -132,6 +132,12 @@ def test_sync_metadata_success_reports_only_counts(
     monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
     monkeypatch.setattr(cli_module, "XiaoyuzhouClient", FakeContextClient)  # type: ignore[attr-defined]
     monkeypatch.setattr(cli_module, "NotionClient", FakeContextClient)  # type: ignore[attr-defined]
+    fixture_snapshot = SimpleNamespace(
+        episodes=(
+            SimpleNamespace(played_seconds=120, in_playlist=True, favorited=False),
+            SimpleNamespace(played_seconds=0, in_playlist=True, favorited=True),
+        )
+    )
 
     class FakeInitializer:
         def __init__(self, _api: object, page_id: str) -> None:
@@ -145,7 +151,7 @@ def test_sync_metadata_success_reports_only_counts(
             assert resources == {}
 
         def sync(self, snapshot: object) -> object:
-            assert snapshot == "fixture-snapshot"
+            assert snapshot is fixture_snapshot
             return SimpleNamespace(created=2, updated=1, unchanged=3)
 
     class FakeStatisticsSynchronizer:
@@ -175,7 +181,7 @@ def test_sync_metadata_success_reports_only_counts(
     monkeypatch.setattr(  # type: ignore[attr-defined]
         cli_module,
         "collect_metadata",
-        lambda _api, **_kwargs: "fixture-snapshot",
+        lambda _api, **_kwargs: fixture_snapshot,
     )
     monkeypatch.setattr(  # type: ignore[attr-defined]
         cli_module,
@@ -194,6 +200,7 @@ def test_sync_metadata_success_reports_only_counts(
     output = capsys.readouterr().out  # type: ignore[attr-defined]
     assert "created: 2, updated: 1, unchanged: 3" in output
     assert "statistics created: 4, statistics updated: 5" in output
+    assert "episodes played: 1, playlist: 2, favorites: 1" in output
     assert "heatmap: updated" in output
 
 
@@ -298,7 +305,7 @@ def test_process_ai_reports_only_aggregate_counts(
     monkeypatch.setattr(  # type: ignore[attr-defined]
         cli_module,
         "build_provider_clients",
-        lambda **_kwargs: (None, None, None),
+        lambda **_kwargs: (None, None, None, None),
     )
 
     assert main(["process-ai", "--config", "config.example.yaml"]) == 0

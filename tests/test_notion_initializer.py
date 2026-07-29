@@ -323,10 +323,7 @@ def test_home_layout_has_columns_and_heatmap_placeholder() -> None:
     blocks = home_blocks()
     column_list = next(block for block in blocks if block["type"] == "column_list")
     assert len(column_list["column_list"]["children"]) == 2
-    ratios = [
-        column["column"]["width_ratio"]
-        for column in column_list["column_list"]["children"]
-    ]
+    ratios = [column["column"]["width_ratio"] for column in column_list["column_list"]["children"]]
     assert ratios == [
         0.3,
         0.7,
@@ -334,6 +331,23 @@ def test_home_layout_has_columns_and_heatmap_placeholder() -> None:
     rendered = str(blocks)
     assert "播客记录" in rendered
     assert "只记录真正播放过的节目" in rendered
+    assert "'type': 'table_of_contents'" in rendered
+    assert "全部 · 在听 · 听过 · 喜欢 · 待听 · 收藏" in rendered
+    assert rendered.index("Podcast") < rendered.index("Episode") < rendered.index("思维导图")
+
+
+def test_initializer_preserves_existing_custom_icon_and_cover() -> None:
+    fake = FakeNotion()
+    fake.pages["root"]["icon"] = {"type": "emoji", "emoji": "🎧"}
+    fake.pages["root"]["cover"] = {
+        "type": "external",
+        "external": {"url": "https://images.example/my-cover.jpg"},
+    }
+
+    NotionInitializer(fake, "root").initialize()
+
+    assert fake.pages["root"]["icon"] == {"type": "emoji", "emoji": "🎧"}
+    assert fake.pages["root"]["cover"]["external"]["url"] == ("https://images.example/my-cover.jpg")
 
 
 def test_view_configuration_resolves_property_ids() -> None:

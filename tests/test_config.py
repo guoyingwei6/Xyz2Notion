@@ -27,13 +27,14 @@ def test_example_config_is_valid_and_secret_free() -> None:
     assert config.asr.provider_order == (
         AsrProvider.TINGWU_COOKIE,
         AsrProvider.SILICONFLOW,
+        AsrProvider.LOCAL_WHISPER,
     )
     assert config.summary.siliconflow_models == (
         "Qwen/Qwen3-8B",
         "Qwen/Qwen2.5-7B-Instruct",
     )
     assert config.summary.prompt_version == "summary-v1"
-    assert config.limits.episodes_per_run == 3
+    assert config.limits.episodes_per_run == 2
     raw = Path("config.example.yaml").read_text(encoding="utf-8")
     assert "TOKEN" not in raw
     assert "COOKIE" not in raw

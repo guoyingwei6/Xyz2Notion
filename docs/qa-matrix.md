@@ -26,6 +26,8 @@ ASR 准确率。真实效果必须用用户自己的音频和 Provider 凭证验
 | 听悟字段改变 | `test_tingwu.py` | `schema_changed`，不解析错误数据 |
 | SiliconFlow 429 | `test_siliconflow.py` | 按 Retry-After 有限重试 |
 | SiliconFlow 模型 404 | `test_siliconflow.py` | 尝试下一个免费模型 |
+| SiliconFlow 最终失败 | `test_ai_processor.py` | 降级到 GitHub Actions 本地 Whisper |
+| 本地 Whisper 契约 | `test_local_whisper.py` | 输出带时间戳的文字稿并安全处理空结果 |
 | 音频 URL 失效/私网 | `test_audio_processing.py` | 下载前拒绝或安全失败 |
 | Action 中途取消 | `test_state.py`, `test_ai_processor.py` | 从精确阶段恢复，不重复 ASR |
 | Notion 429/529 | `test_notion_client.py` | 限速或过载退避重试 |

@@ -146,6 +146,9 @@ def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
         siliconflow_asr_api_key = (
             credentials.siliconflow_api_key if AsrProvider.SILICONFLOW in selected else None
         )
+        local_whisper_model = (
+            config.asr.local_whisper_model if AsrProvider.LOCAL_WHISPER in selected else None
+        )
         siliconflow_summary_api_key = (
             credentials.siliconflow_api_key if config.summary.enabled else None
         )
@@ -158,14 +161,15 @@ def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
                 {"page_size": 100},
             )
             candidates = episode_candidates(pages)[: config.limits.episodes_per_run]
-            tingwu, siliconflow, summary_client = build_provider_clients(
+            tingwu, siliconflow, local_whisper, summary_client = build_provider_clients(
                 tingwu_cookie=tingwu_cookie,
                 siliconflow_asr_api_key=siliconflow_asr_api_key,
                 siliconflow_summary_api_key=siliconflow_summary_api_key,
                 siliconflow_asr_models=config.asr.siliconflow_models,
                 siliconflow_summary_models=config.summary.siliconflow_models,
+                local_whisper_model=local_whisper_model,
             )
-            for client in (tingwu, siliconflow, summary_client):
+            for client in (tingwu, siliconflow, local_whisper, summary_client):
                 if client is not None:
                     stack.enter_context(client)
             state_store = stack.enter_context(NotionEpisodeStateStore(notion))
@@ -174,6 +178,7 @@ def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
                 state_store,
                 tingwu=tingwu,
                 siliconflow=siliconflow,
+                local_whisper=local_whisper,
                 summary_client=summary_client,
                 summary_policy=_summary_policy(config),
                 summary_enabled=config.summary.enabled,
@@ -432,6 +437,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             ):
                 initialization = NotionInitializer(notion, page_id).initialize()
                 snapshot = collect_metadata(xiaoyuzhou)
+                played_count = sum(episode.played_seconds > 0 for episode in snapshot.episodes)
+                playlist_count = sum(episode.in_playlist for episode in snapshot.episodes)
+                favorite_count = sum(episode.favorited for episode in snapshot.episodes)
                 wrapped = collect_monthly_wrapped(xiaoyuzhou, snapshot)
                 report = MetadataSynchronizer(
                     notion,
@@ -461,6 +469,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"unchanged: {report.unchanged}; "
             f"statistics created: {statistics_report.created}, "
             f"statistics updated: {statistics_report.updated}; "
+            f"episodes played: {played_count}, "
+            f"playlist: {playlist_count}, favorites: {favorite_count}; "
             f"heatmap: {heatmap.action})"
         )
         return 0

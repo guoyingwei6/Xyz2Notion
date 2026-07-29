@@ -202,9 +202,7 @@ def build_metadata_snapshot(
 
     listened_pids = {episode.pid for episode in episodes_by_eid.values()}
     podcasts = [podcast for podcast in podcasts if podcast.pid in listened_pids]
-    listened_author_ids = {
-        author_id for podcast in podcasts for author_id in podcast.author_ids
-    }
+    listened_author_ids = {author_id for podcast in podcasts for author_id in podcast.author_ids}
     authors_by_id = {
         author_id: author
         for author_id, author in authors_by_id.items()

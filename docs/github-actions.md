@@ -100,7 +100,8 @@ Actions 被取消或超时后，下次运行继续查询或发布，不重复提
 临时网络、限流或服务不可用会进入 `FAILED_RETRYABLE`。修复凭证或等待服务恢复后，
 手动运行 `Retry Failed Episode AI`。认证失效、风控或听悟网页 Schema 变化属于
 明确终态时，若配置了 SiliconFlow，则自动降级；正在排队或处理中的听悟任务不会
-提前双跑。
+提前双跑。SiliconFlow ASR 仍失败时，最后才在 Runner CPU 上运行本地 Whisper；
+本地通道不需要新增 Secret。
 
 ## 轮换
 
