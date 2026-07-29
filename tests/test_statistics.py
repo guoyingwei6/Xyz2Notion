@@ -164,11 +164,17 @@ def test_heatmap_svg_and_png_cover_every_date_without_external_assets() -> None:
     assert 'data-date="2026-01-02"' in svg
     assert 'data-seconds="900"' in svg
     assert 'data-level="3"' in svg
+    assert ">Jan</text>" in svg
+    assert ">Dec</text>" in svg
+    assert ">Mon</text>" in svg
+    assert ">Wed</text>" in svg
+    assert ">Fri</text>" in svg
 
     png = render_heatmap_png(2026, daily)
     assert png.startswith(b"\x89PNG\r\n\x1a\n")
     width, height = struct.unpack(">II", png[16:24])
-    assert width > height > 0
+    assert width > 530
+    assert height > 75
     assert png.endswith(b"IEND\xaeB`\x82")
 
 
