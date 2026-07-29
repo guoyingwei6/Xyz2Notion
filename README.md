@@ -53,7 +53,8 @@ uv run xyz2notion xiaoyuzhou-check
 [`docs/xiaoyuzhou-auth.md`](docs/xiaoyuzhou-auth.md)。
 
 默认 ASR 顺序为通义听悟 Cookie → SiliconFlow，付费 DashScope 默认关闭且
-预算为 0。
+预算为 0。SiliconFlow 音频切片、免费模型降级和时间轴精度说明见
+[`docs/siliconflow-asr.md`](docs/siliconflow-asr.md)。
 
 ## 可恢复运行
 

@@ -55,6 +55,14 @@ class ProviderErrorCategory(StrEnum):
     UNKNOWN = "unknown"
 
 
+class TranscriptTimingQuality(StrEnum):
+    """Precision of transcript timestamps supplied by a provider."""
+
+    UNKNOWN = "unknown"
+    COARSE = "coarse_timestamps"
+    EXACT = "exact_timestamps"
+
+
 _RETRYABLE_CATEGORIES = frozenset(
     {
         ProviderErrorCategory.RATE_LIMITED,
@@ -185,6 +193,7 @@ class TranscriptResult(ContractModel):
     duration_ms: NonNegativeInt
     text: NonEmptyStr
     segments: tuple[TranscriptSegment, ...] = ()
+    timing_quality: TranscriptTimingQuality = TranscriptTimingQuality.UNKNOWN
     accuracy_hint: float | None = Field(default=None, ge=0, le=1)
     created_at: AwareDatetime = Field(default_factory=utc_now)
 
