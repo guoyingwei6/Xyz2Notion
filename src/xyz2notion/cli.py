@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
 from datetime import date
 
@@ -26,7 +26,7 @@ from xyz2notion.migration.schema import (
     migration_plan,
 )
 from xyz2notion.notion.client import NotionAPIError, NotionClient
-from xyz2notion.notion.initializer import NotionInitializer
+from xyz2notion.notion.initializer import HOME_MARKER_URL, NotionInitializer
 from xyz2notion.orchestration.processor import (
     EpisodeAIProcessor,
     build_provider_clients,
@@ -59,6 +59,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="create or reconcile the Xyz2Notion workspace",
     )
     notion_init.add_argument(
+        "--page-id",
+        help="target root page ID; defaults to NOTION_PAGE_ID",
+    )
+    audit_dashboard = subparsers.add_parser(
+        "audit-dashboard",
+        help="report aggregate root dashboard block counts without changing Notion",
+    )
+    audit_dashboard.add_argument(
         "--page-id",
         help="target root page ID; defaults to NOTION_PAGE_ID",
     )
@@ -365,6 +373,67 @@ def _run_rebuild(args: argparse.Namespace, *, heatmap_only: bool) -> int:
     return 0
 
 
+def _is_dashboard_marker(block: Mapping[str, object]) -> bool:
+    block_type = block.get("type")
+    body = block.get(block_type) if isinstance(block_type, str) else None
+    if not isinstance(body, Mapping):
+        return False
+    items = body.get("rich_text")
+    if not isinstance(items, Sequence):
+        return False
+    for item in items:
+        if not isinstance(item, Mapping):
+            continue
+        text = item.get("text")
+        link = text.get("link") if isinstance(text, Mapping) else None
+        if isinstance(link, Mapping) and link.get("url") == HOME_MARKER_URL:
+            return True
+    return False
+
+
+def _run_audit_dashboard(args: argparse.Namespace) -> int:
+    try:
+        credentials = load_runtime_credentials()
+        credentials.require("notion_token")
+        page_id = args.page_id or credentials.notion_page_id
+        if not page_id:
+            raise MissingCredentialError(
+                "Missing target page: set NOTION_PAGE_ID or pass --page-id"
+            )
+        if credentials.notion_token is None:
+            raise AssertionError("credential requirement did not narrow notion_token")
+
+        with NotionClient(credentials.notion_token) as notion:
+            blocks = notion.list_block_children(page_id)
+    except (ConfigurationError, MissingCredentialError) as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    except NotionAPIError as exc:
+        print(f"Notion error: {exc}", file=sys.stderr)
+        return 4
+
+    block_types = [str(block.get("type", "")) for block in blocks]
+    marker_indexes = [index for index, block in enumerate(blocks) if _is_dashboard_marker(block)]
+    managed_prefix = ("heading_1", "callout", "column_list", "divider", "callout")
+    managed_bundle_candidates = sum(
+        index >= len(managed_prefix)
+        and tuple(block_types[index - len(managed_prefix) : index]) == managed_prefix
+        for index in marker_indexes
+    )
+    child_database = block_types.count("child_database")
+    column_list = block_types.count("column_list")
+    marker_count = len(marker_indexes)
+    other_blocks = len(blocks) - child_database - column_list - marker_count
+    print(
+        "Dashboard audit OK "
+        f"(total={len(blocks)}, child_database={child_database}, "
+        f"column_list={column_list}, marker_count={marker_count}, "
+        f"managed_bundle_candidates={managed_bundle_candidates}, "
+        f"other_blocks={other_blocks})"
+    )
+    return 0
+
+
 def _run_rebuild_dashboard(args: argparse.Namespace) -> int:
     expected_confirmation = f"ARCHIVE_{args.expected_count}_LINKED_DATABASE_BLOCKS"
     if args.expected_count <= 0 or args.confirm != expected_confirmation:
@@ -489,6 +558,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"views created: {result.created_views}, views updated: {result.updated_views})"
         )
         return 0
+    if args.command == "audit-dashboard":
+        return _run_audit_dashboard(args)
     if args.command == "rebuild-dashboard":
         return _run_rebuild_dashboard(args)
     if args.command == "xiaoyuzhou-check":

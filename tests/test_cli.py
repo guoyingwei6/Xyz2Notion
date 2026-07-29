@@ -234,6 +234,106 @@ def test_notion_init_success_reports_counts(
     assert "views created: 12" in output
 
 
+def test_audit_dashboard_reports_only_aggregate_counts_without_writes(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+
+    marker = {
+        "id": "private-marker-id",
+        "type": "paragraph",
+        "paragraph": {
+            "rich_text": [
+                {
+                    "type": "text",
+                    "text": {
+                        "content": "private marker text",
+                        "link": {"url": cli_module.HOME_MARKER_URL},
+                    },
+                }
+            ]
+        },
+    }
+
+    class FakeNotion(FakeContextClient):
+        def list_block_children(self, block_id: str) -> list[object]:
+            assert block_id == "fixture-page"
+            return [
+                {"id": "private-heading", "type": "heading_1"},
+                {"id": "private-callout-1", "type": "callout"},
+                {"id": "private-columns", "type": "column_list"},
+                {"id": "private-divider", "type": "divider"},
+                {"id": "private-callout-2", "type": "callout"},
+                marker,
+                {"id": "private-database", "type": "child_database"},
+                {
+                    "id": "private-plain-url",
+                    "type": "paragraph",
+                    "paragraph": {
+                        "rich_text": [
+                            {
+                                "type": "text",
+                                "text": {
+                                    "content": cli_module.HOME_MARKER_URL,
+                                    "link": None,
+                                },
+                            }
+                        ]
+                    },
+                },
+                marker,
+            ]
+
+        def delete_block(self, _block_id: str) -> dict[str, bool]:
+            raise AssertionError("audit must not delete blocks")
+
+    class ForbiddenInitializer:
+        def __init__(self, _api: object, _page_id: str) -> None:
+            raise AssertionError("audit must not initialize Notion")
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        cli_module,
+        "NotionInitializer",
+        ForbiddenInitializer,
+    )
+    assert main(["audit-dashboard"]) == 0
+    output = capsys.readouterr().out  # type: ignore[attr-defined]
+    assert output.strip() == (
+        "Dashboard audit OK (total=9, child_database=1, column_list=1, "
+        "marker_count=2, managed_bundle_candidates=1, other_blocks=5)"
+    )
+    assert "private-" not in output
+    assert cli_module.HOME_MARKER_URL not in output
+
+
+def test_audit_dashboard_reports_missing_token(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.delenv("NOTION_TOKEN", raising=False)  # type: ignore[attr-defined]
+    assert main(["audit-dashboard", "--page-id", "fixture-page"]) == 2
+    assert "Configuration error" in capsys.readouterr().err  # type: ignore[attr-defined]
+
+
+def test_audit_dashboard_reports_notion_error(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
+
+    class FailingNotion(FakeContextClient):
+        def list_block_children(self, block_id: str) -> list[object]:
+            assert block_id == "explicit-page"
+            raise cli_module.NotionAPIError("private upstream response")
+
+    monkeypatch.setattr(cli_module, "NotionClient", FailingNotion)  # type: ignore[attr-defined]
+    assert main(["audit-dashboard", "--page-id", "explicit-page"]) == 4
+    assert "Notion error" in capsys.readouterr().err  # type: ignore[attr-defined]
+
+
 def test_rebuild_dashboard_refuses_wrong_confirmation_before_api_access(
     capsys: object,
     monkeypatch: object,

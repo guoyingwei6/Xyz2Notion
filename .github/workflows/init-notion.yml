@@ -10,6 +10,7 @@ on:
         type: choice
         options:
           - initialize
+          - audit-dashboard
           - rebuild-dashboard
       confirmation:
         description: "For rebuild: ARCHIVE_<count>_LINKED_DATABASE_BLOCKS"
@@ -56,6 +57,8 @@ jobs:
           set -euo pipefail
           if [[ "$OPERATION" == "initialize" ]]; then
             result="$(uv run xyz2notion notion-init)"
+          elif [[ "$OPERATION" == "audit-dashboard" ]]; then
+            result="$(uv run xyz2notion audit-dashboard)"
           elif [[ "$OPERATION" == "rebuild-dashboard" ]]; then
             if [[ ! "$EXPECTED_COUNT" =~ ^[1-9][0-9]*$ ]]; then
               printf 'Dashboard rebuild refused: expected_count must be positive\n' >&2
