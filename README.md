@@ -60,6 +60,8 @@ uv run xyz2notion xiaoyuzhou-check
 [`docs/tingwu-cookie.md`](docs/tingwu-cookie.md)。文字稿的千问结构化摘要、长文本
 分段、Token 与费用记录见
 [`docs/ai-enrichment.md`](docs/ai-enrichment.md)。
+单集页面的托管区边界、播放器、原生脑图、SVG 脑图和用户笔记保护机制见
+[`docs/episode-page.md`](docs/episode-page.md)。
 
 ## 可恢复运行
 

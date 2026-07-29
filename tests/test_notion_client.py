@@ -151,6 +151,17 @@ def test_server_errors_use_exponential_backoff() -> None:
     assert sleeps == [1.0, 2.0]
 
 
+def test_notion_529_is_retryable() -> None:
+    responses = iter(
+        (
+            httpx.Response(529, json={"code": "overloaded", "message": "try later"}),
+            httpx.Response(200, json={"ok": True}),
+        )
+    )
+    client = client_for(httpx.MockTransport(lambda _request: next(responses)))
+    assert client.request("GET", "/users/me") == {"ok": True}
+
+
 def test_transport_error_retries_then_returns() -> None:
     attempts = 0
 
@@ -318,8 +329,10 @@ def test_resource_helpers_use_2026_endpoints() -> None:
     client.create_view({"database_id": "db", "data_source_id": "ds", "name": "All"})
     client.update_view("view", {"name": "Updated"})
     client.list_block_children("root")
+    client.delete_block("managed")
     assert ("POST", "/v1/pages") in calls
     assert ("POST", "/v1/databases") in calls
     assert ("POST", "/v1/data_sources/ds/query") in calls
+    assert ("DELETE", "/v1/blocks/managed") in calls
     with pytest.raises(ValueError, match="required"):
         client.list_views()

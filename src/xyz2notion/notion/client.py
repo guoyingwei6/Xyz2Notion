@@ -71,7 +71,7 @@ def paragraph_blocks(text: str) -> list[JsonObject]:
 class NotionClient:
     """Synchronous Notion client with retries, pagination, and safety checks."""
 
-    _retryable_statuses = frozenset({429, 500, 502, 503, 504})
+    _retryable_statuses = frozenset({429, 500, 502, 503, 504, 529})
 
     def __init__(
         self,
@@ -405,6 +405,10 @@ class NotionClient:
             f"/blocks/{block_id}",
             json_body=payload,
         )
+
+    def delete_block(self, block_id: str) -> JsonObject:
+        """Archive one precisely identified block and its managed subtree."""
+        return self.request("DELETE", f"/blocks/{block_id}")
 
     def upload_file(
         self,
