@@ -769,7 +769,7 @@ def _run_rebuild_dashboard_layout(args: argparse.Namespace) -> int:
             if (
                 len(blocks) != args.expected_total
                 or args.expected_total != len(_LEGACY_DASHBOARD_LAYOUT_TYPES)
-                or block_types != _LEGACY_DASHBOARD_LAYOUT_TYPES
+                or Counter(block_types) != Counter(_LEGACY_DASHBOARD_LAYOUT_TYPES)
                 or len(data_pages) != 1
             ):
                 print(
