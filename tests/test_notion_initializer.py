@@ -5,6 +5,7 @@ from xyz2notion.notion.client import JsonObject, rich_text
 from xyz2notion.notion.initializer import (
     DATA_PAGE_TITLE,
     HOME_MARKER,
+    HOME_MARKER_URL,
     NotionInitializer,
     home_blocks,
 )
@@ -279,15 +280,63 @@ def test_initializer_is_idempotent_and_preserves_user_content() -> None:
     assert fake.created_views == len(VIEW_SPECS)
     assert fake.data_sources[podcast_ds]["properties"]["My Notes"]["id"] == "custom"
     assert user_block in fake.blocks["root"]
-    marker_count = sum(
-        HOME_MARKER
-        in "".join(
-            item["text"]["content"]
-            for item in block.get(block.get("type"), {}).get("rich_text", [])
-        )
-        for block in fake.blocks["root"]
-    )
+    marker_count = sum(HOME_MARKER_URL in str(block) for block in fake.blocks["root"])
     assert marker_count == 1
+
+
+def test_initializer_migrates_legacy_home_columns_and_hides_marker() -> None:
+    fake = FakeNotion()
+    fake.blocks["root"].extend(
+        [
+            {
+                "id": "legacy-marker",
+                "type": "paragraph",
+                "paragraph": {"rich_text": rich_text(HOME_MARKER)},
+            },
+            {
+                "id": "columns",
+                "type": "column_list",
+                "has_children": True,
+                "column_list": {},
+            },
+        ]
+    )
+    fake.blocks["columns"] = [
+        {"id": "left", "type": "column", "has_children": True, "column": {}},
+        {"id": "right", "type": "column", "has_children": True, "column": {}},
+    ]
+    fake.blocks["left"] = [
+        {
+            "id": "quick",
+            "type": "heading_2",
+            "heading_2": {"rich_text": rich_text("快速入口")},
+        },
+        {
+            "id": "quick-copy",
+            "type": "paragraph",
+            "paragraph": {"rich_text": rich_text("Podcast · Episode · 思维导图")},
+        },
+    ]
+    fake.blocks["right"] = [
+        {
+            "id": "status",
+            "type": "heading_2",
+            "heading_2": {"rich_text": rich_text("同步状态")},
+        },
+        {
+            "id": "status-copy",
+            "type": "paragraph",
+            "paragraph": {"rich_text": rich_text("统计与内容由 Xyz2Notion 工作流幂等更新。")},
+        },
+    ]
+
+    NotionInitializer(fake, "root").initialize()
+
+    assert "菜单" in str(fake.blocks["left"])
+    assert "待听" in str(fake.blocks["left"])
+    assert "播客记录" in str(fake.blocks["right"])
+    assert HOME_MARKER not in str(fake.blocks["root"])
+    assert HOME_MARKER_URL in str(fake.blocks["root"])
 
 
 def test_initializer_adopts_matching_legacy_database_without_copying_rows() -> None:

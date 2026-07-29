@@ -19,6 +19,7 @@ from xyz2notion.notion.schema import (
 
 DATA_PAGE_TITLE = "Xyz2Notion 数据层"
 HOME_MARKER = "XYZ2NOTION_MANAGED_HOME_V1"
+HOME_MARKER_URL = "https://xyz2notion.local/managed-home-v2"
 DEFAULT_COVER_URL = "https://raw.githubusercontent.com/guoyingwei6/Xyz2Notion/main/assets/cover.svg"
 MANAGED_COVER_PATH = "guoyingwei6/Xyz2Notion/main/assets/cover.svg"
 LEGACY_DATABASE_TITLES: dict[str, tuple[str, ...]] = {
@@ -202,6 +203,44 @@ def _paragraph(text: str) -> JsonObject:
     }
 
 
+def _home_marker() -> JsonObject:
+    """Return an invisible linked marker that does not clutter the dashboard."""
+    return {
+        "object": "block",
+        "type": "paragraph",
+        "paragraph": {
+            "rich_text": [
+                {
+                    "type": "text",
+                    "text": {
+                        "content": "\u200b",
+                        "link": {"url": HOME_MARKER_URL},
+                    },
+                }
+            ]
+        },
+    }
+
+
+def _is_home_marker(block: Mapping[str, Any]) -> bool:
+    if HOME_MARKER in _block_text(block):
+        return True
+    body = block.get(str(block.get("type")))
+    if not isinstance(body, Mapping):
+        return False
+    items = body.get("rich_text")
+    if not isinstance(items, Sequence):
+        return False
+    for item in items:
+        if not isinstance(item, Mapping):
+            continue
+        text = item.get("text")
+        link = text.get("link") if isinstance(text, Mapping) else None
+        if isinstance(link, Mapping) and link.get("url") == HOME_MARKER_URL:
+            return True
+    return False
+
+
 def _divider() -> JsonObject:
     return {
         "object": "block",
@@ -291,7 +330,7 @@ def home_blocks() -> list[JsonObject]:
             "下方数据库视图由 Xyz2Notion 更新; 你自己的笔记、字段、封面和图标会被保留。",
             "🪐",
         ),
-        _paragraph(HOME_MARKER),
+        _home_marker(),
     ]
 
 
@@ -480,7 +519,8 @@ class NotionInitializer:
 
     def _ensure_home_blocks(self) -> bool:
         blocks = self.api.list_block_children(self.root_page_id)
-        if any(HOME_MARKER in _block_text(block) for block in blocks):
+        marker = next((block for block in blocks if _is_home_marker(block)), None)
+        if marker is not None:
             replacements = {
                 "Xyz2Notion · 播客仪表盘": ("heading_1", "播客"),
                 ("自主可控: 小宇宙、转写、总结和统计仅在你的 GitHub Actions 与 Notion 中流转。"): (
@@ -497,8 +537,31 @@ class NotionInitializer:
                     "paragraph",
                     "年、月、周、日统计只计算实际播放秒数大于 0 的节目。",
                 ),
+                "快速入口": ("heading_2", "菜单"),
+                "Podcast · Episode · 思维导图": (
+                    "paragraph",
+                    "总收听时长\n收听时长排行\nAuthor\nPodcast\nEpisode\n待听\n收藏\n思维导图",
+                ),
+                "同步状态": ("heading_2", "播客记录"),
+                "统计与内容由 Xyz2Notion 工作流幂等更新。": (
+                    "paragraph",
+                    "年度收听热力图由每日同步工作流自动更新; 未播放的单集不会点亮记录。",
+                ),
             }
+            layout_blocks = list(blocks)
             for block in blocks:
+                if (
+                    block.get("type") != "column_list"
+                    or not block.get("has_children")
+                    or not block.get("id")
+                ):
+                    continue
+                columns = self.api.list_block_children(str(block["id"]))
+                layout_blocks.extend(columns)
+                for column in columns:
+                    if column.get("type") == "column" and column.get("id"):
+                        layout_blocks.extend(self.api.list_block_children(str(column["id"])))
+            for block in layout_blocks:
                 block_id = block.get("id")
                 replacement = replacements.get(_block_text(block))
                 if not block_id or replacement is None:
@@ -508,6 +571,10 @@ class NotionInitializer:
                 if block_type == "callout":
                     body["icon"] = {"type": "emoji", "emoji": "🎧"}
                 self.api.update_block(str(block_id), {block_type: body})
+            marker_id = marker.get("id")
+            if marker_id and HOME_MARKER in _block_text(marker):
+                marker_body = _home_marker()["paragraph"]
+                self.api.update_block(str(marker_id), {"paragraph": marker_body})
             return False
         self.api.append_block_children(self.root_page_id, home_blocks())
         return True
