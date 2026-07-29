@@ -341,9 +341,32 @@ class XiaoyuzhouClient:
             raise ValueError("pid cannot be empty")
         return list(self._paginate("/v1/episode/list", {"limit": limit, "pid": pid}))
 
+    def episode(self, eid: str) -> JsonObject:
+        """Return one episode by EID."""
+        if not eid:
+            raise ValueError("eid cannot be empty")
+        payload = self.request("GET", "/v1/episode/get", params={"eid": eid})
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            raise XiaoyuzhouAPIError("Xiaoyuzhou episode response has invalid data")
+        return data
+
     def play_history(self, *, limit: int = 25) -> list[JsonObject]:
         """Return played-history wrapper objects in API order."""
         return list(self._paginate("/v1/episode-played/list-history", {"limit": limit}))
+
+    def playlist_eids(self) -> list[str]:
+        """Return the authenticated user's ordered listen-later playlist."""
+        payload = self.request("POST", "/v1/playlist/pull", json_body={})
+        data = payload.get("data")
+        items = data.get("list") if isinstance(data, dict) else None
+        if not isinstance(items, list) or any(not isinstance(item, str) for item in items):
+            raise XiaoyuzhouAPIError("Xiaoyuzhou playlist response has invalid data")
+        return list(dict.fromkeys(item for item in items if item))
+
+    def favorites(self) -> list[JsonObject]:
+        """Return all episode bookmarks from the authenticated user's collection."""
+        return list(self._paginate("/v1/favorite/list", {}))
 
     def playback_progress(
         self,

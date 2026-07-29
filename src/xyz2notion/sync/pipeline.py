@@ -21,9 +21,13 @@ class XiaoyuzhouMetadataAPI(Protocol):
 
     def podcast(self, pid: str) -> JsonObject: ...
 
-    def episodes(self, pid: str, *, limit: int = 25) -> list[JsonObject]: ...
-
     def play_history(self, *, limit: int = 25) -> list[JsonObject]: ...
+
+    def playlist_eids(self) -> list[str]: ...
+
+    def favorites(self) -> list[JsonObject]: ...
+
+    def episode(self, eid: str) -> JsonObject: ...
 
     def playback_progress(
         self,
@@ -52,36 +56,49 @@ def _nested_id(item: Mapping[str, Any], entity: str, key: str) -> str:
 
 def collect_metadata(
     api: XiaoyuzhouMetadataAPI,
-    *,
-    include_catalog: bool = False,
 ) -> MetadataSnapshot:
-    """Collect podcast metadata and listened episodes.
-
-    Full podcast catalogs are optional because fetching every historical episode
-    from every subscribed show can expand a modest account into tens of
-    thousands of Notion rows.
-    """
+    """Collect only playback-history episodes with positive listening progress."""
     subscriptions = api.subscriptions()
     mileage = api.mileage()
     history = api.play_history()
+    playlist_eids = api.playlist_eids()
+    favorites = api.favorites()
+    history_eids = {
+        eid for item in history if (eid := _nested_id(item, "episode", "eid"))
+    }
+    favorite_eids = {
+        eid
+        for item in favorites
+        if (eid := _nested_id(item, "episode", "eid"))
+        or (eid := str(item.get("eid") or "").strip())
+    }
+    playlist_only = [
+        api.episode(eid)
+        for eid in playlist_eids
+        if eid not in history_eids and eid not in favorite_eids
+    ]
+    playlist_set = set(playlist_eids)
+    favorite_set = set(favorite_eids)
+
+    combined_episodes: list[JsonObject] = []
+    for item in [*history, *playlist_only, *favorites]:
+        wrapper = dict(item)
+        raw = wrapper.get("episode")
+        episode = dict(raw) if isinstance(raw, Mapping) else dict(wrapper)
+        eid = str(episode.get("eid") or "").strip()
+        if not eid:
+            continue
+        episode["_xyz_in_playlist"] = eid in playlist_set
+        episode["_xyz_favorited"] = eid in favorite_set or bool(episode.get("isFavorited"))
+        combined_episodes.append({"episode": episode})
     known_pids = {
         pid for item in (*subscriptions, *mileage) if (pid := _nested_id(item, "podcast", "pid"))
     }
-    history_pids = {pid for item in history if (pid := _nested_id(item, "episode", "pid"))}
+    history_pids = {
+        pid for item in combined_episodes if (pid := _nested_id(item, "episode", "pid"))
+    }
     recovered_podcasts = [api.podcast(pid) for pid in sorted(history_pids - known_pids)]
     subscriptions = [*subscriptions, *recovered_podcasts]
-    catalog_episodes: list[JsonObject] = []
-    if include_catalog:
-        pids = tuple(
-            dict.fromkeys(
-                pid
-                for item in (*subscriptions, *mileage, *history)
-                if (pid := _nested_id(item, "podcast", "pid"))
-                or (pid := _nested_id(item, "episode", "pid"))
-            )
-        )
-        catalog_episodes = [episode for pid in pids for episode in api.episodes(pid)]
-    combined_episodes = [*catalog_episodes, *history]
     eids = tuple(
         dict.fromkeys(
             eid for item in combined_episodes if (eid := _nested_id(item, "episode", "eid"))

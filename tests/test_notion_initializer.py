@@ -164,6 +164,18 @@ class FakeNotion:
         self.blocks[block_id].extend(created)
         return created
 
+    def update_block(
+        self,
+        block_id: str,
+        payload: Mapping[str, Any],
+    ) -> JsonObject:
+        for blocks in self.blocks.values():
+            for block in blocks:
+                if block.get("id") == block_id:
+                    block.update(payload)
+                    return block
+        raise KeyError(block_id)
+
 
 def test_schema_has_exactly_nine_databases_and_expected_views() -> None:
     assert [spec.title for spec in DATABASE_SPECS] == [
@@ -177,13 +189,15 @@ def test_schema_has_exactly_nine_databases_and_expected_views() -> None:
         "日",
         "思维导图",
     ]
-    assert len(VIEW_SPECS) == 12
+    assert len(VIEW_SPECS) == 14
     assert {
         "Podcast",
         "Episode · 全部",
         "Episode · 在听",
         "Episode · 听过",
         "Episode · 喜欢",
+        "Episode · 待听",
+        "Episode · 收藏",
         "思维导图",
     }.issubset({spec.name for spec in VIEW_SPECS})
 
@@ -197,8 +211,8 @@ def test_initializer_creates_complete_clean_room_template() -> None:
     assert result.created_home is True
     assert fake.created_pages == 1
     assert fake.blocks["root"][1]["child_page"]["title"] == DATA_PAGE_TITLE
-    assert fake.pages["root"]["icon"]["emoji"] == "🎧"
-    assert fake.pages["root"]["cover"]["external"]["url"].endswith("assets/cover.svg")
+    assert fake.pages["root"]["icon"]["emoji"] == "🪐"
+    assert fake.pages["root"]["cover"]["external"]["url"].endswith("assets/cover.svg?v=2")
     assert set(result.resources) == {spec.key for spec in DATABASE_SPECS}
 
     episode_properties = fake.data_sources[result.resources["episode"].data_source_id]["properties"]
@@ -225,12 +239,18 @@ def test_initializer_creates_complete_clean_room_template() -> None:
 
     liked_view = next(view for view in fake.views.values() if view["name"] == "Episode · 喜欢")
     assert liked_view["filter"] == {
-        "property": "Liked",
-        "checkbox": {"equals": True},
+        "and": [
+            {"property": "Played Seconds", "number": {"greater_than": 0}},
+            {"property": "Liked", "checkbox": {"equals": True}},
+        ]
     }
     podcast_view = next(view for view in fake.views.values() if view["name"] == "Podcast")
     assert podcast_view["configuration"]["type"] == "gallery"
     assert podcast_view["configuration"]["cover"]["type"] == "property"
+    assert podcast_view["filter"] == {
+        "property": "Total Listening Seconds",
+        "number": {"greater_than": 0},
+    }
 
 
 def test_initializer_is_idempotent_and_preserves_user_content() -> None:
@@ -303,9 +323,17 @@ def test_home_layout_has_columns_and_heatmap_placeholder() -> None:
     blocks = home_blocks()
     column_list = next(block for block in blocks if block["type"] == "column_list")
     assert len(column_list["column_list"]["children"]) == 2
+    ratios = [
+        column["column"]["width_ratio"]
+        for column in column_list["column_list"]["children"]
+    ]
+    assert ratios == [
+        0.3,
+        0.7,
+    ]
     rendered = str(blocks)
-    assert "年度收听热力图" in rendered
-    assert "P5" in rendered
+    assert "播客记录" in rendered
+    assert "只记录真正播放过的节目" in rendered
 
 
 def test_view_configuration_resolves_property_ids() -> None:
@@ -316,6 +344,8 @@ def test_view_configuration_resolves_property_ids() -> None:
             "Name": "title",
             "Listening Status": "status",
             "Progress Ring": "ring",
+            "Played Seconds": "played",
+            "Skip AI": "skip",
             "Published At": "published",
             "Cover": "cover",
         },
@@ -325,5 +355,10 @@ def test_view_configuration_resolves_property_ids() -> None:
         "title",
         "status",
         "ring",
+        "skip",
         "published",
+    }
+    assert spec.filter == {
+        "property": "Played Seconds",
+        "number": {"greater_than": 0},
     }

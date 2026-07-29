@@ -172,6 +172,10 @@ def build_metadata_snapshot(
         duration = _integer(raw.get("duration"))
         played = _integer(progress_raw.get("progress") or raw.get("progress"))
         played = min(played, duration) if duration else played
+        favorited = bool(raw.get("_xyz_favorited") or raw.get("isFavorited"))
+        in_playlist = bool(raw.get("_xyz_in_playlist"))
+        if played <= 0 and not favorited and not in_playlist:
+            continue
         published_at = _datetime(raw.get("pubDate"), fallback=current)
         played_at_value = progress_raw.get("playedAt") or raw.get("playedAt")
         last_played_at = (
@@ -191,8 +195,21 @@ def build_metadata_snapshot(
             played_seconds=played,
             listening_status=_normalize_status(played, duration),
             liked=bool(raw.get("isPicked")),
+            favorited=favorited,
+            in_playlist=in_playlist,
             last_played_at=last_played_at,
         )
+
+    listened_pids = {episode.pid for episode in episodes_by_eid.values()}
+    podcasts = [podcast for podcast in podcasts if podcast.pid in listened_pids]
+    listened_author_ids = {
+        author_id for podcast in podcasts for author_id in podcast.author_ids
+    }
+    authors_by_id = {
+        author_id: author
+        for author_id, author in authors_by_id.items()
+        if author_id in listened_author_ids
+    }
 
     return MetadataSnapshot(
         authors=tuple(sorted(authors_by_id.values(), key=lambda value: value.author_id)),

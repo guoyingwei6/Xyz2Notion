@@ -163,9 +163,10 @@ def test_complete_page_is_created_with_player_summary_mindmap_and_transcript() -
     rendered = str(api.appended)
     assert "'type': 'audio'" in rendered
     assert "全文摘要" in rendered
-    assert "原生嵌套脑图" in rendered
+    assert "思维导图" in rendered
     assert "粗粒度时间轴" in rendered
     assert "00:00:00 · 主播" in rendered
+    assert rendered.index("音频") < rendered.index("思维导图") < rendered.index("全文摘要")
     assert block_text(api.blocks["new-1"]).startswith(f"{MANAGED_PREFIX} · READY · ")
 
 

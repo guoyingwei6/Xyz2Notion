@@ -165,8 +165,15 @@ def test_normalizer_merges_metadata_without_mutating_source() -> None:
             }
         ],
         mileage=source,
-        history=[],
-        progress=[],
+        history=[
+            {
+                "eid": "episode-fixture-1",
+                "pid": "podcast-fixture-1",
+                "title": "Played episode",
+                "pubDate": "2026-07-03T00:00:00Z",
+            }
+        ],
+        progress=[{"eid": "episode-fixture-1", "progress": 1}],
         now=datetime(2026, 7, 3, tzinfo=UTC),
     )
     assert snapshot.podcasts[0].total_listening_seconds == 3600

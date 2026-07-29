@@ -20,6 +20,7 @@ from xyz2notion.notion.schema import (
 DATA_PAGE_TITLE = "Xyz2Notion 数据层"
 HOME_MARKER = "XYZ2NOTION_MANAGED_HOME_V1"
 DEFAULT_COVER_URL = "https://raw.githubusercontent.com/guoyingwei6/Xyz2Notion/main/assets/cover.svg"
+MANAGED_COVER_PATH = "guoyingwei6/Xyz2Notion/main/assets/cover.svg"
 LEGACY_DATABASE_TITLES: dict[str, tuple[str, ...]] = {
     "author": ("Author", "作者"),
     "podcast": ("Podcast",),
@@ -107,6 +108,12 @@ class NotionInitializerAPI(Protocol):
         block_id: str,
         children: Sequence[Mapping[str, Any]],
     ) -> list[JsonObject]: ...
+
+    def update_block(
+        self,
+        block_id: str,
+        payload: Mapping[str, Any],
+    ) -> JsonObject: ...
 
 
 @dataclass(frozen=True)
@@ -207,13 +214,13 @@ def _callout(text: str, emoji: str) -> JsonObject:
 
 
 def home_blocks() -> list[JsonObject]:
-    """Return original dashboard blocks; user blocks are never removed."""
+    """Return the Notion-native dashboard introduction matching the public demo."""
     return [
         _paragraph(HOME_MARKER),
-        _heading(1, "Xyz2Notion · 播客仪表盘"),
+        _heading(1, "播客"),
         _callout(
-            "自主可控: 小宇宙、转写、总结和统计仅在你的 GitHub Actions 与 Notion 中流转。",
-            "🔒",
+            "这里只记录真正播放过的节目; 浏览但没有产生播放进度的单集不会参与统计。",
+            "🎧",
         ),
         {
             "object": "block",
@@ -224,10 +231,12 @@ def home_blocks() -> list[JsonObject]:
                         "object": "block",
                         "type": "column",
                         "column": {
-                            "width_ratio": 0.5,
+                            "width_ratio": 0.3,
                             "children": [
-                                _heading(2, "快速入口"),
-                                _paragraph("Podcast · Episode · 思维导图"),
+                                _heading(2, "菜单"),
+                                _paragraph(
+                                    "总收听时长\n收听时长排行\nAuthor\nPodcast\nEpisode\n思维导图"
+                                ),
                             ],
                         },
                     },
@@ -235,20 +244,20 @@ def home_blocks() -> list[JsonObject]:
                         "object": "block",
                         "type": "column",
                         "column": {
-                            "width_ratio": 0.5,
+                            "width_ratio": 0.7,
                             "children": [
-                                _heading(2, "同步状态"),
-                                _paragraph("统计与内容由 Xyz2Notion 工作流幂等更新。"),
+                                _heading(2, "播客记录"),
+                                _paragraph("年度收听热力图由每日同步工作流自动更新。"),
                             ],
                         },
                     },
                 ]
             },
         },
-        _heading(2, "年度收听热力图"),
-        _callout("热力图将在 P5 统计同步后自动更新。", "🔥"),
-        _heading(2, "收听统计"),
-        _paragraph("以下视图由 Xyz2Notion 管理; 你添加的其他块、视图和笔记不会被删除。"),
+        _heading(2, "总收听时长"),
+        _callout("年、月、周、日统计均只计算实际播放秒数大于 0 的节目。", "🎧"),
+        _heading(2, "Podcast · Episode · 思维导图"),
+        _paragraph("下方数据库视图由 Xyz2Notion 更新, 你自己的笔记和字段会被保留。"),
     ]
 
 
@@ -298,12 +307,20 @@ class NotionInitializer:
     def _ensure_page_branding(self) -> None:
         page = self.api.retrieve_page(self.root_page_id)
         updates: JsonObject = {}
-        if not page.get("icon"):
-            updates["icon"] = {"type": "emoji", "emoji": "🎧"}
-        if not page.get("cover"):
+        icon = page.get("icon")
+        if not icon or (
+            isinstance(icon, dict)
+            and icon.get("type") == "emoji"
+            and icon.get("emoji") == "🎧"
+        ):
+            updates["icon"] = {"type": "emoji", "emoji": "🪐"}
+        cover = page.get("cover")
+        external = cover.get("external") if isinstance(cover, dict) else None
+        cover_url = external.get("url") if isinstance(external, dict) else None
+        if not cover or (isinstance(cover_url, str) and MANAGED_COVER_PATH in cover_url):
             updates["cover"] = {
                 "type": "external",
-                "external": {"url": DEFAULT_COVER_URL},
+                "external": {"url": f"{DEFAULT_COVER_URL}?v=2"},
             }
         if updates:
             self.api.update_page(self.root_page_id, updates)
@@ -435,6 +452,38 @@ class NotionInitializer:
     def _ensure_home_blocks(self) -> bool:
         blocks = self.api.list_block_children(self.root_page_id)
         if any(HOME_MARKER in _block_text(block) for block in blocks):
+            replacements = {
+                "Xyz2Notion · 播客仪表盘": ("heading_1", "播客"),
+                (
+                    "自主可控: 小宇宙、转写、总结和统计仅在你的 GitHub Actions 与 "
+                    "Notion 中流转。"
+                ): (
+                    "callout",
+                    "这里只记录真正播放过的节目; 浏览但没有产生播放进度的单集不会参与统计。",
+                ),
+                "年度收听热力图": ("heading_2", "播客记录"),
+                "热力图将在 P5 统计同步后自动更新。": (
+                    "callout",
+                    "年度收听热力图由每日同步工作流自动更新。",
+                ),
+                "收听统计": ("heading_2", "总收听时长"),
+                (
+                    "以下视图由 Xyz2Notion 管理; 你添加的其他块、视图和笔记不会被删除。"
+                ): (
+                    "paragraph",
+                    "年、月、周、日统计只计算实际播放秒数大于 0 的节目。",
+                ),
+            }
+            for block in blocks:
+                block_id = block.get("id")
+                replacement = replacements.get(_block_text(block))
+                if not block_id or replacement is None:
+                    continue
+                block_type, text = replacement
+                body: JsonObject = {"rich_text": rich_text(text)}
+                if block_type == "callout":
+                    body["icon"] = {"type": "emoji", "emoji": "🎧"}
+                self.api.update_block(str(block_id), {block_type: body})
             return False
         self.api.append_block_children(self.root_page_id, home_blocks())
         return True

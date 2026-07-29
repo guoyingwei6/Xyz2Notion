@@ -74,11 +74,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--page-id",
         help="target root page ID; defaults to NOTION_PAGE_ID",
     )
-    sync_metadata.add_argument(
-        "--include-catalog",
-        action="store_true",
-        help="also sync every episode from every known podcast (can be very large)",
-    )
     for name, help_text in (
         ("process-ai", "advance ASR, summary, and Notion publishing"),
         ("retry-failed", "retry only resumable failed Episode AI jobs"),
@@ -436,10 +431,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 NotionClient(credentials.notion_token) as notion,
             ):
                 initialization = NotionInitializer(notion, page_id).initialize()
-                snapshot = collect_metadata(
-                    xiaoyuzhou,
-                    include_catalog=args.include_catalog,
-                )
+                snapshot = collect_metadata(xiaoyuzhou)
                 wrapped = collect_monthly_wrapped(xiaoyuzhou, snapshot)
                 report = MetadataSynchronizer(
                     notion,

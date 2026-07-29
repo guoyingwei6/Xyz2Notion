@@ -60,7 +60,7 @@ ASR 和免费文本模型。项目只接受代码已核对的免费模型白名�
 | 工作流 | 触发 | 作用 |
 | --- | --- | --- |
 | `Initialize Notion` | 手动 | 幂等创建或修复九个数据库和首页 |
-| `Sync Podcast Metadata` | 每天 00:17 UTC、手动 | 同步订阅、进度、统计和热力图 |
+| `Sync Podcast Metadata` | 每天 00:17 UTC、手动 | 同步播放历史、待听、收藏、统计和热力图 |
 | `Process Episode AI` | 手动 | 推进 ASR、摘要和发布状态机；初期验收完成后再恢复定时 |
 | `Retry Failed Episode AI` | 手动 | 只恢复 `FAILED_RETRYABLE` 单集 |
 | `Xyz2Notion Maintenance` | 手动 | 迁移、单集重做、统计或热力图重建 |

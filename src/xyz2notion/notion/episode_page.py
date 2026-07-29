@@ -113,6 +113,14 @@ def _quote(text: str) -> JsonObject:
     }
 
 
+def _divider() -> JsonObject:
+    return {
+        "object": "block",
+        "type": "divider",
+        "divider": {},
+    }
+
+
 def _time(milliseconds: int) -> str:
     seconds = max(0, milliseconds // 1000)
     hours, remainder = divmod(seconds, 3600)
@@ -253,26 +261,20 @@ class EpisodePageRenderer:
 
         prefix: list[JsonObject] = []
         if data.audio_url:
-            prefix.append(
-                {
-                    "object": "block",
-                    "type": "audio",
-                    "audio": {
-                        "type": "external",
-                        "external": {"url": data.audio_url},
+            prefix.extend(
+                [
+                    _heading(2, "音频"),
+                    {
+                        "object": "block",
+                        "type": "audio",
+                        "audio": {
+                            "type": "external",
+                            "external": {"url": data.audio_url},
+                        },
                     },
-                }
+                ]
             )
-        quality = data.transcript.timing_quality.value
-        prefix.append(
-            _callout(
-                f"ASR Provider: {data.transcript.provider} · "
-                f"Model: {data.transcript.model} · Quality: {quality}",
-                "🎙️",
-            )
-        )
         if data.summary is not None:
-            prefix.extend(_summary_blocks(data.summary))
             prefix.append(_heading(2, "思维导图"))
             svg = render_mindmap_svg(data.summary.mindmap)
             upload_id = self.api.upload_file(
@@ -291,11 +293,24 @@ class EpisodePageRenderer:
                     },
                 }
             )
-            prefix.append(_heading(3, "原生嵌套脑图"))
-        self.api.append_block_children(managed_id, prefix)
+        if prefix:
+            self.api.append_block_children(managed_id, prefix)
         if data.summary is not None:
             self._append_mindmap(managed_id, data.summary.mindmap)
+            self.api.append_block_children(managed_id, _summary_blocks(data.summary))
         self.api.append_block_children(managed_id, _transcript_blocks(data.transcript))
+        quality = data.transcript.timing_quality.value
+        self.api.append_block_children(
+            managed_id,
+            [
+                _divider(),
+                _callout(
+                    f"转写信息 · {data.transcript.provider} · "
+                    f"{data.transcript.model} · {quality}",
+                    "🎙️",
+                ),
+            ],
+        )
         self.api.update_block(
             managed_id,
             {"toggle": {"rich_text": rich_text(ready_marker), "color": "default"}},

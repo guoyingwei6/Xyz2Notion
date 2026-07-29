@@ -1,7 +1,7 @@
 # Xyz2Notion
 
-Xyz2Notion 是一个完全自托管的开源工具，用 GitHub Actions 将小宇宙订阅、
-收听记录、播放进度、文字稿、AI 总结和思维导图同步到用户自己的 Notion。
+Xyz2Notion 是一个完全自托管的开源工具，用 GitHub Actions 将小宇宙收听记录、
+待听播放列表、收藏、播放进度、文字稿、AI 总结和思维导图同步到用户自己的 Notion。
 
 项目不依赖作者服务器、NotionHub 插件或激活服务。用户自行提供小宇宙、
 Notion 和可选语音识别服务的凭证，所有任务运行在用户自己的 GitHub Actions
@@ -27,8 +27,16 @@ Fork 本仓库，在 `Settings → Secrets and variables → Actions` 至少添�
 1. `Initialize Notion`
 2. `Sync Podcast Metadata`
 
-它会在已授权的空白 Notion 页面中创建九个数据库、12 个视图、统计关系和首页，
-再同步订阅、历史、进度、排行和热力图。
+它会在已授权的空白 Notion 页面中创建九个数据库、14 个视图、统计关系和首页，
+再同步播放历史、待听列表、收藏、进度、排行和热力图。
+
+数据口径：
+
+- `Episode · 全部` 只显示播放秒数大于 0 的单集；
+- `Episode · 待听` 显示小宇宙播放列表，未播放时不参与统计；
+- `Episode · 收藏` 显示小宇宙收藏，未播放时不参与统计；
+- `Episode · 喜欢` 对应小宇宙 `isPicked`，与收藏是两个不同状态；
+- 时长、天数、期数、排行和热力图只统计播放秒数大于 0 的记录。
 
 ### 3. 生成文字稿与 AI 内容
 
@@ -36,9 +44,9 @@ Fork 本仓库，在 `Settings → Secrets and variables → Actions` 至少添�
 手动运行，避免未经确认连续处理大量节目。听悟 Cookie 明确失效时自动降级到
 SiliconFlow；工作流中断后从用户自己 Notion 里的私有检查点继续。
 
-只有同时满足以下条件的单集才会进入 AI 队列：
+只有满足以下条件的单集才会进入 AI 队列：
 
-- 已收听至少 120 秒；
+- 已收听至少 120 秒，或者已加入小宇宙收藏；
 - 存在可访问的音频链接；
 - 尚未发布文字稿，且不是“最终失败”；
 - Notion 中的 `Skip AI` 未勾选。

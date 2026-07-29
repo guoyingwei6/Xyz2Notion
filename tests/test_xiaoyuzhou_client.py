@@ -246,8 +246,27 @@ def test_all_read_endpoints_use_expected_contracts() -> None:
                 200,
                 json={"data": [{"eid": "episode-fixture-1"}], "loadMoreKey": None},
             )
+        if request.url.path == "/v1/episode/get":
+            assert dict(request.url.params) == {"eid": "episode-fixture-1"}
+            return httpx.Response(
+                200,
+                json={"data": {"eid": "episode-fixture-1", "title": "Episode"}},
+            )
         if request.url.path == "/v1/episode-played/list-history":
             return httpx.Response(200, json=fixture("history-page.json"))
+        if request.url.path == "/v1/playlist/pull":
+            return httpx.Response(
+                200,
+                json={"data": {"list": ["episode-fixture-1", "episode-fixture-1"]}},
+            )
+        if request.url.path == "/v1/favorite/list":
+            return httpx.Response(
+                200,
+                json={
+                    "data": [{"eid": "episode-fixture-1", "isFavorited": True}],
+                    "loadMoreKey": None,
+                },
+            )
         if request.url.path == "/v1/playback-progress/list":
             return httpx.Response(
                 200,
@@ -280,7 +299,10 @@ def test_all_read_endpoints_use_expected_contracts() -> None:
     assert client.mileage()[0]["playedSeconds"] == 3600
     assert client.podcast("podcast-fixture-1")["title"] == "Fixture Podcast"
     assert client.episodes("podcast-fixture-1")[0]["eid"] == "episode-fixture-1"
+    assert client.episode("episode-fixture-1")["title"] == "Episode"
     assert client.play_history()[0]["episode"]["eid"] == "episode-fixture-1"
+    assert client.playlist_eids() == ["episode-fixture-1"]
+    assert client.favorites()[0]["isFavorited"] is True
     assert len(client.playback_progress(["e1", "e1", "e2"], batch_size=1)) == 2
     assert client.profile()["uid"] == "user-fixture"
     assert client.monthly_wrapped(2026, 7)["playedSeconds"] == 7200
@@ -324,6 +346,8 @@ def test_validation_and_malformed_contracts() -> None:
         client.podcast("")
     with pytest.raises(ValueError, match="pid"):
         client.episodes("")
+    with pytest.raises(ValueError, match="eid"):
+        client.episode("")
     assert client.playback_progress([]) == []
     with pytest.raises(ValueError, match="batch_size"):
         client.playback_progress(["e1"], batch_size=0)

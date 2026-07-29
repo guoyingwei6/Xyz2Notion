@@ -179,12 +179,20 @@ def calculate_statistics(
             source=source,
         )
 
-    total_seconds = sum(podcast.total_listening_seconds for podcast in snapshot.podcasts)
+    played_pids = {
+        episode.pid for episode in snapshot.episodes if episode.played_seconds > 0
+    }
+    listened_podcasts = tuple(
+        podcast
+        for podcast in snapshot.podcasts
+        if podcast.pid in played_pids and podcast.total_listening_seconds > 0
+    )
+    total_seconds = sum(podcast.total_listening_seconds for podcast in listened_podcasts)
     played_days = len(day_stats)
     total = PeriodStatistics(
         kind=PeriodKind.ALL,
         key="all",
-        podcast_count=len(snapshot.podcasts),
+        podcast_count=len(played_pids),
         episode_count=len(
             {episode.eid for episode in snapshot.episodes if episode.played_seconds > 0}
         ),
@@ -193,7 +201,7 @@ def calculate_statistics(
         source="mileage",
     )
     ordered_podcasts = sorted(
-        snapshot.podcasts,
+        listened_podcasts,
         key=lambda podcast: (-podcast.total_listening_seconds, podcast.pid),
     )
     ranking = tuple(

@@ -121,6 +121,37 @@ def test_daily_levels_dates_and_iso_week_are_deterministic() -> None:
     assert {item.key for item in result.days} == {"2026-01-02", "2026-02-01"}
 
 
+def test_unplayed_playlist_and_favorite_do_not_affect_statistics() -> None:
+    snapshot = statistics_snapshot()
+    queued = Episode(
+        eid="queued",
+        pid="p3",
+        title="Queued",
+        published_at=datetime(2026, 2, 2, tzinfo=UTC),
+        played_seconds=0,
+        in_playlist=True,
+        favorited=True,
+    )
+    extra_podcast = Podcast(
+        pid="p3",
+        title="Queue only",
+        total_listening_seconds=0,
+        updated_at=datetime(2026, 2, 2, tzinfo=UTC),
+    )
+    result = calculate_statistics(
+        replace(
+            snapshot,
+            podcasts=(*snapshot.podcasts, extra_podcast),
+            episodes=(*snapshot.episodes, queued),
+        ),
+        today=date(2026, 2, 15),
+    )
+    assert result.total.episode_count == 3
+    assert result.total.podcast_count == 2
+    assert all(item.pid != "p3" for item in result.ranking)
+    assert all(item.episode_count <= 2 for item in result.daily)
+
+
 def test_heatmap_svg_and_png_cover_every_date_without_external_assets() -> None:
     daily = calculate_statistics(
         statistics_snapshot(),

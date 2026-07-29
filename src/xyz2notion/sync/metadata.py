@@ -284,6 +284,8 @@ class MetadataSynchronizer:
             ),
             "Listening Status": {"select": {"name": STATUS_NAMES[episode.listening_status]}},
             "Liked": {"checkbox": episode.liked},
+            "Favorited": {"checkbox": episode.favorited},
+            "In Playlist": {"checkbox": episode.in_playlist},
         }
         cover = _file(episode.image_url, "Episode cover")
         if cover:

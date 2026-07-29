@@ -199,10 +199,28 @@ def test_candidate_extraction_skips_incomplete_rows() -> None:
                 "Skip AI": {"checkbox": True},
             },
         },
+        {
+            "id": "favorited",
+            "properties": {
+                "EID": {"rich_text": [{"plain_text": "favorite"}]},
+                "Name": {"title": [{"plain_text": "收藏单集"}]},
+                "Audio URL": {"url": "https://cdn.example/favorite"},
+                "Played Seconds": {"number": 0},
+                "Favorited": {"checkbox": True},
+            },
+        },
         {"id": "skip", "properties": {}},
         {"properties": {}},
     ]
-    assert episode_candidates(pages) == (CANDIDATE,)
+    assert episode_candidates(pages) == (
+        CANDIDATE,
+        EpisodeCandidate(
+            "favorited",
+            "favorite",
+            "收藏单集",
+            "https://cdn.example/favorite",
+        ),
+    )
 
 
 def test_siliconflow_summary_and_publish_are_checkpointed() -> None:

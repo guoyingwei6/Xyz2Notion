@@ -38,6 +38,9 @@ class FakeXiaoyuzhou:
         assert pid == "history-podcast"
         return {"pid": pid, "title": "Recovered History Podcast"}
 
+    def episode(self, eid: str) -> JsonObject:
+        raise AssertionError(eid)
+
     def episodes(self, pid: str, *, limit: int = 25) -> list[JsonObject]:
         assert limit == 25
         self.requested_pids.append(pid)
@@ -62,6 +65,12 @@ class FakeXiaoyuzhou:
                 }
             }
         ]
+
+    def playlist_eids(self) -> list[str]:
+        return []
+
+    def favorites(self) -> list[JsonObject]:
+        return []
 
     def playback_progress(
         self,
@@ -92,34 +101,73 @@ def test_collect_metadata_defaults_to_listened_history_only() -> None:
     snapshot = collect_metadata(fake)
     assert fake.requested_pids == []
     assert fake.progress_eids == ("history-episode",)
-    assert {podcast.pid for podcast in snapshot.podcasts} == {
-        "subscribed-podcast",
-        "listened-podcast",
-        "history-podcast",
-    }
+    assert {podcast.pid for podcast in snapshot.podcasts} == {"history-podcast"}
     assert {episode.eid for episode in snapshot.episodes} == {"history-episode"}
 
 
-def test_collect_metadata_can_include_all_catalog_episodes() -> None:
+def test_collect_metadata_drops_history_rows_without_playback_progress() -> None:
     fake = FakeXiaoyuzhou()
-    snapshot = collect_metadata(fake, include_catalog=True)
-    assert set(fake.requested_pids) == {
-        "subscribed-podcast",
-        "listened-podcast",
-        "history-podcast",
-    }
-    assert set(fake.progress_eids) == {
-        "episode-subscribed-podcast",
-        "episode-listened-podcast",
-        "episode-history-podcast",
+    fake.playback_progress = lambda _eids, batch_size=100: []  # type: ignore[method-assign]
+    snapshot = collect_metadata(fake)
+    assert snapshot.episodes == ()
+    assert snapshot.podcasts == ()
+    assert snapshot.authors == ()
+
+
+def test_collect_metadata_keeps_playlist_and_favorites_as_non_statistical_rows() -> None:
+    class WithLibrary(FakeXiaoyuzhou):
+        def playlist_eids(self) -> list[str]:
+            return ["playlist-episode"]
+
+        def favorites(self) -> list[JsonObject]:
+            return [
+                {
+                    "eid": "favorite-episode",
+                    "pid": "favorite-podcast",
+                    "title": "Favorite",
+                    "pubDate": "2026-01-02T00:00:00Z",
+                    "isFavorited": True,
+                }
+            ]
+
+        def episode(self, eid: str) -> JsonObject:
+            assert eid == "playlist-episode"
+            return {
+                "eid": eid,
+                "pid": "playlist-podcast",
+                "title": "Listen later",
+                "pubDate": "2026-01-03T00:00:00Z",
+            }
+
+        def podcast(self, pid: str) -> JsonObject:
+            return {"pid": pid, "title": f"Podcast {pid}"}
+
+        def playback_progress(
+            self,
+            eids: Sequence[str],
+            *,
+            batch_size: int = 100,
+        ) -> list[JsonObject]:
+            assert batch_size == 100
+            return [
+                {
+                    "eid": eid,
+                    "progress": 1 if eid == "history-episode" else 0,
+                }
+                for eid in eids
+            ]
+
+    snapshot = collect_metadata(WithLibrary())
+    by_eid = {episode.eid: episode for episode in snapshot.episodes}
+    assert set(by_eid) == {
         "history-episode",
+        "playlist-episode",
+        "favorite-episode",
     }
-    assert {podcast.pid for podcast in snapshot.podcasts} == {
-        "subscribed-podcast",
-        "listened-podcast",
-        "history-podcast",
-    }
-    assert {episode.eid for episode in snapshot.episodes} == set(fake.progress_eids)
+    assert by_eid["playlist-episode"].in_playlist is True
+    assert by_eid["playlist-episode"].played_seconds == 0
+    assert by_eid["favorite-episode"].favorited is True
+    assert by_eid["favorite-episode"].played_seconds == 0
 
 
 def test_collect_monthly_wrapped_fetches_history_but_not_current_month() -> None:

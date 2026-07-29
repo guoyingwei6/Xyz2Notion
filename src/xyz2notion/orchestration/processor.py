@@ -111,12 +111,13 @@ def episode_candidates(pages: list[JsonObject]) -> tuple[EpisodeCandidate, ...]:
         audio_url = _property_url(properties, "Audio URL")
         asr_status = _property_selection(properties, "ASR Status")
         played_seconds = _property_number(properties, "Played Seconds")
+        favorited = _property_checkbox(properties, "Favorited")
         skip_ai = _property_checkbox(properties, "Skip AI")
         if (
             eid
             and title
             and audio_url
-            and played_seconds >= 120
+            and (played_seconds >= 120 or favorited)
             and not skip_ai
             and asr_status not in {"已发布", "最终失败"}
         ):

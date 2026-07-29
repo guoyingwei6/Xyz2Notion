@@ -140,6 +140,8 @@ class Episode(ContractModel):
     played_seconds: NonNegativeInt = 0
     listening_status: ListeningStatus = ListeningStatus.UNPLAYED
     liked: bool = False
+    favorited: bool = False
+    in_playlist: bool = False
     last_played_at: AwareDatetime | None = None
 
     @model_validator(mode="after")
