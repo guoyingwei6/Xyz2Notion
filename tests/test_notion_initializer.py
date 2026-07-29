@@ -209,7 +209,7 @@ def test_schema_has_exactly_nine_databases_and_expected_views() -> None:
         "日",
         "思维导图",
     ]
-    assert len(VIEW_SPECS) == 19
+    assert len(VIEW_SPECS) == 18
     assert {
         "收听总览",
         "年度趋势",
@@ -217,7 +217,6 @@ def test_schema_has_exactly_nine_databases_and_expected_views() -> None:
         "周趋势",
         "每日趋势",
         "Podcast",
-        "Episode · 收听记录",
         "Episode · 在听",
         "Episode · 听过",
         "Episode · 喜欢",
@@ -345,10 +344,10 @@ def test_initializer_creates_complete_clean_room_template() -> None:
         for view in fake.views.values()
         if view["data_source_id"] == result.resources["episode"].data_source_id
     ]
-    assert len(episode_views) == 6
+    assert len(episode_views) == 5
     assert len({view["parent"]["database_id"] for view in episode_views}) == 1
     assert sum("create_database" in view for view in episode_views) == 1
-    assert sum("database_id" in view for view in episode_views) == 5
+    assert sum("database_id" in view for view in episode_views) == 4
 
 
 def test_initializer_is_idempotent_and_preserves_user_content() -> None:
@@ -388,7 +387,7 @@ def test_initializer_rebuilds_missing_view_in_existing_linked_database() -> None
     first = initializer.initialize(create_home=True)
     episode_data_source_id = first.resources["episode"].data_source_id
     missing_id = next(
-        view_id for view_id, view in fake.views.items() if view["name"] == "Episode · 收听记录"
+        view_id for view_id, view in fake.views.items() if view["name"] == "Episode · 在听"
     )
     episode_database_id = str(fake.views[missing_id]["parent"]["database_id"])
     del fake.views[missing_id]
@@ -400,7 +399,7 @@ def test_initializer_rebuilds_missing_view_in_existing_linked_database() -> None
 
     assert rebuilt.created_views == 1
     assert rebuilt.updated_views == len(VIEW_SPECS) - 2
-    replacement = next(view for view in fake.views.values() if view["name"] == "Episode · 收听记录")
+    replacement = next(view for view in fake.views.values() if view["name"] == "Episode · 在听")
     assert replacement["data_source_id"] == episode_data_source_id
     assert replacement["parent"]["database_id"] == episode_database_id
     assert replacement["database_id"] == episode_database_id
@@ -564,7 +563,7 @@ def test_home_layout_has_columns_and_heatmap_placeholder() -> None:
     assert "播客记录" in rendered
     assert "年度热力图每日更新" in rendered
     assert "'type': 'table_of_contents'" in rendered
-    assert "收听记录 · 在听 · 听过 · 喜欢 · 待听 · 收藏" in rendered
+    assert "待听 · 在听 · 听过 · 喜欢 · 收藏" in rendered
     assert rendered.index("Podcast") < rendered.index("Episode") < rendered.index("思维导图")
     assert HOME_SUMMARY_MARKER_URL in rendered
     assert "总收听时长" not in rendered
@@ -586,14 +585,13 @@ def test_initializer_preserves_existing_custom_icon_and_cover() -> None:
 
 
 def test_view_configuration_resolves_property_ids() -> None:
-    spec = next(spec for spec in VIEW_SPECS if spec.key == "episodes_all")
+    spec = next(spec for spec in VIEW_SPECS if spec.key == "episodes_playlist")
     configuration = view_configuration(
         spec,
         {
             "Name": "title",
             "Listening Status": "status",
             "Progress Ring": "ring",
-            "Played Seconds": "played",
             "Published At": "published",
             "Cover": "cover",
         },
@@ -605,10 +603,7 @@ def test_view_configuration_resolves_property_ids() -> None:
         "ring",
         "published",
     }
-    assert spec.filter == {
-        "property": "Played Seconds",
-        "number": {"greater_than": 0},
-    }
+    assert spec.filter == {"property": "In Playlist", "checkbox": {"equals": True}}
 
 
 def test_chart_configuration_uses_dates_hours_and_compact_presentation() -> None:
@@ -667,9 +662,16 @@ def test_chart_configuration_rejects_incomplete_chart_specs() -> None:
 
 
 def test_episode_views_have_user_facing_cards_and_expected_filters() -> None:
-    episode_specs = {spec.key: spec for spec in VIEW_SPECS if spec.source == "episode"}
+    ordered_episode_specs = [spec for spec in VIEW_SPECS if spec.source == "episode"]
+    assert [spec.name for spec in ordered_episode_specs] == [
+        "Episode · 待听",
+        "Episode · 在听",
+        "Episode · 听过",
+        "Episode · 喜欢",
+        "Episode · 收藏",
+    ]
+    episode_specs = {spec.key: spec for spec in ordered_episode_specs}
     assert set(episode_specs) == {
-        "episodes_all",
         "episodes_listening",
         "episodes_played",
         "episodes_liked",

@@ -382,7 +382,7 @@ def home_blocks() -> list[JsonObject]:
         _heading(2, "Podcast"),
         _paragraph("收听排行与播客封面"),
         _heading(2, "Episode"),
-        _paragraph("收听记录 · 在听 · 听过 · 喜欢 · 待听 · 收藏"),
+        _paragraph("待听 · 在听 · 听过 · 喜欢 · 收藏"),
         _heading(2, "思维导图"),
         _paragraph("每期节目的可视化脑图与原生大纲"),
         _home_marker(),

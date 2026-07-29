@@ -32,7 +32,7 @@ Fork 本仓库，在 `Settings → Secrets and variables → Actions` 至少添�
 
 数据口径：
 
-- `Episode · 收听记录` 只显示播放秒数大于 0 的单集；
+- `Episode · 在听` 与 `Episode · 听过` 覆盖实际播放过的单集；
 - `Episode · 待听` 按小宇宙播放列表顺序显示，未播放时不参与统计；
 - `Episode · 收藏` 显示小宇宙收藏，未播放时不参与统计；
 - `Episode · 喜欢` 对应小宇宙 `isPicked`，与收藏是两个不同状态；

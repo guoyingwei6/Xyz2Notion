@@ -477,18 +477,16 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         cover_property="Cover",
     ),
     ViewSpec(
-        key="episodes_all",
+        key="episodes_playlist",
         source="episode",
-        name="Episode · 收听记录",
+        name="Episode · 待听",
         view_type="gallery",
-        visible_properties=(
-            "Name",
-            "Listening Status",
-            "Progress Ring",
-            "Published At",
+        visible_properties=("Name", "Listening Status", "Progress Ring", "Published At"),
+        filter={"property": "In Playlist", "checkbox": {"equals": True}},
+        sorts=(
+            {"property": "Playlist Position", "direction": "ascending"},
+            {"property": "Published At", "direction": "descending"},
         ),
-        filter={"property": "Played Seconds", "number": {"greater_than": 0}},
-        sorts=({"property": "Published At", "direction": "descending"},),
         cover_property="Cover",
     ),
     ViewSpec(
@@ -524,19 +522,6 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
             ]
         },
         sorts=({"property": "Published At", "direction": "descending"},),
-        cover_property="Cover",
-    ),
-    ViewSpec(
-        key="episodes_playlist",
-        source="episode",
-        name="Episode · 待听",
-        view_type="gallery",
-        visible_properties=("Name", "Listening Status", "Progress Ring", "Published At"),
-        filter={"property": "In Playlist", "checkbox": {"equals": True}},
-        sorts=(
-            {"property": "Playlist Position", "direction": "ascending"},
-            {"property": "Published At", "direction": "descending"},
-        ),
         cover_property="Cover",
     ),
     ViewSpec(
