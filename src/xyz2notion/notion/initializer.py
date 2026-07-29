@@ -629,6 +629,7 @@ class NotionInitializer:
                 }
             else:
                 payload["database_id"] = database_id
+                payload["position"] = {"type": spec.position}
         return payload
 
     def _ensure_views(self, resources: dict[str, NotionResource]) -> tuple[int, int]:

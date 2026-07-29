@@ -1,5 +1,8 @@
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from typing import Any
+
+import pytest
 
 from xyz2notion.notion.client import JsonObject, rich_text
 from xyz2notion.notion.initializer import (
@@ -205,8 +208,13 @@ def test_schema_has_exactly_nine_databases_and_expected_views() -> None:
         "日",
         "思维导图",
     ]
-    assert len(VIEW_SPECS) == 14
+    assert len(VIEW_SPECS) == 19
     assert {
+        "收听总览",
+        "年度趋势",
+        "月度趋势",
+        "周趋势",
+        "每日趋势",
         "Podcast",
         "Episode · 全部",
         "Episode · 在听",
@@ -216,6 +224,28 @@ def test_schema_has_exactly_nine_databases_and_expected_views() -> None:
         "Episode · 收藏",
         "思维导图",
     }.issubset({spec.name for spec in VIEW_SPECS})
+
+
+def test_statistics_charts_are_compact_primary_views() -> None:
+    chart_specs = [spec for spec in VIEW_SPECS if spec.view_type == "chart"]
+    assert [spec.name for spec in chart_specs] == [
+        "收听总览",
+        "年度趋势",
+        "月度趋势",
+        "周趋势",
+        "每日趋势",
+    ]
+    assert all(spec.position == "start" for spec in chart_specs)
+    assert chart_specs[0].chart_type == "number"
+    assert all(spec.chart_type in {"column", "line"} for spec in chart_specs[1:])
+    assert all(
+        spec.filter
+        == {
+            "property": "Exact Listening Seconds",
+            "number": {"greater_than": 0},
+        }
+        for spec in chart_specs[1:]
+    )
 
 
 def test_initializer_creates_complete_clean_room_template() -> None:
@@ -479,6 +509,53 @@ def test_view_configuration_resolves_property_ids() -> None:
         "property": "Played Seconds",
         "number": {"greater_than": 0},
     }
+
+
+def test_chart_configuration_uses_dates_hours_and_compact_presentation() -> None:
+    month = next(spec for spec in VIEW_SPECS if spec.key == "months_chart")
+    configuration = view_configuration(
+        month,
+        {
+            "Start Date": "start",
+            "Listening Hours": "hours",
+        },
+    )
+    assert configuration == {
+        "type": "chart",
+        "chart_type": "line",
+        "x_axis_property_id": "start",
+        "y_axis_property_id": "hours",
+        "sort": "x_ascending",
+        "color_theme": "teal",
+        "height": "small",
+        "legend_position": "off",
+        "show_data_labels": True,
+        "axis_labels": "both",
+        "grid_lines": "horizontal",
+    }
+
+    total = next(spec for spec in VIEW_SPECS if spec.key == "total_time_chart")
+    assert view_configuration(total, {"Listening Hours": "hours"}) == {
+        "type": "chart",
+        "chart_type": "number",
+        "color_theme": "teal",
+        "height": "small",
+        "legend_position": "off",
+        "show_data_labels": True,
+        "value": {"aggregator": "sum", "property_id": "hours"},
+    }
+
+
+def test_chart_configuration_rejects_incomplete_chart_specs() -> None:
+    month = next(spec for spec in VIEW_SPECS if spec.key == "months_chart")
+    total = next(spec for spec in VIEW_SPECS if spec.key == "total_time_chart")
+
+    with pytest.raises(ValueError, match="has no chart_type"):
+        view_configuration(replace(month, chart_type=None), {})
+    with pytest.raises(ValueError, match="has no value property"):
+        view_configuration(total, {})
+    with pytest.raises(ValueError, match="has incomplete axes"):
+        view_configuration(month, {"Start Date": "start"})
 
 
 def test_episode_views_have_user_facing_cards_and_expected_filters() -> None:

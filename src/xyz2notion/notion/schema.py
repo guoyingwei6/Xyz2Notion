@@ -25,12 +25,17 @@ class ViewSpec:
     key: str
     source: str
     name: str
-    view_type: Literal["table", "gallery"]
+    view_type: Literal["table", "gallery", "chart"]
     visible_properties: tuple[str, ...]
     filter: JsonObject | None = None
     sorts: tuple[JsonObject, ...] = ()
     linked_on_home: bool = True
     cover_property: str | None = None
+    chart_type: Literal["column", "bar", "line", "donut", "number"] | None = None
+    chart_x_property: str | None = None
+    chart_y_property: str | None = None
+    chart_value_property: str | None = None
+    position: Literal["start", "end"] = "end"
 
 
 @dataclass(frozen=True)
@@ -296,6 +301,16 @@ def relational_properties(resources: dict[str, NotionResource]) -> dict[str, Jso
 
 VIEW_SPECS: tuple[ViewSpec, ...] = (
     ViewSpec(
+        key="total_time_chart",
+        source="all",
+        name="收听总览",
+        view_type="chart",
+        visible_properties=(),
+        chart_type="number",
+        chart_value_property="Listening Hours",
+        position="start",
+    ),
+    ViewSpec(
         key="total_time",
         source="all",
         name="总收听时长",
@@ -309,6 +324,21 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
             "Statistics Source",
         ),
         sorts=({"property": "Listening Seconds", "direction": "descending"},),
+    ),
+    ViewSpec(
+        key="years_chart",
+        source="year",
+        name="年度趋势",
+        view_type="chart",
+        visible_properties=(),
+        filter={
+            "property": "Exact Listening Seconds",
+            "number": {"greater_than": 0},
+        },
+        chart_type="column",
+        chart_x_property="Start Date",
+        chart_y_property="Listening Hours",
+        position="start",
     ),
     ViewSpec(
         key="years",
@@ -326,6 +356,21 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         sorts=({"property": "Start Date", "direction": "descending"},),
     ),
     ViewSpec(
+        key="months_chart",
+        source="month",
+        name="月度趋势",
+        view_type="chart",
+        visible_properties=(),
+        filter={
+            "property": "Exact Listening Seconds",
+            "number": {"greater_than": 0},
+        },
+        chart_type="line",
+        chart_x_property="Start Date",
+        chart_y_property="Listening Hours",
+        position="start",
+    ),
+    ViewSpec(
         key="months",
         source="month",
         name="月度统计",
@@ -341,6 +386,21 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         sorts=({"property": "Start Date", "direction": "descending"},),
     ),
     ViewSpec(
+        key="weeks_chart",
+        source="week",
+        name="周趋势",
+        view_type="chart",
+        visible_properties=(),
+        filter={
+            "property": "Exact Listening Seconds",
+            "number": {"greater_than": 0},
+        },
+        chart_type="line",
+        chart_x_property="Start Date",
+        chart_y_property="Listening Hours",
+        position="start",
+    ),
+    ViewSpec(
         key="weeks",
         source="week",
         name="周统计",
@@ -354,6 +414,21 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
             "Statistics Source",
         ),
         sorts=({"property": "Start Date", "direction": "descending"},),
+    ),
+    ViewSpec(
+        key="days_chart",
+        source="day",
+        name="每日趋势",
+        view_type="chart",
+        visible_properties=(),
+        filter={
+            "property": "Exact Listening Seconds",
+            "number": {"greater_than": 0},
+        },
+        chart_type="line",
+        chart_x_property="Start Date",
+        chart_y_property="Listening Hours",
+        position="start",
     ),
     ViewSpec(
         key="days",
@@ -500,6 +575,42 @@ def view_configuration(spec: ViewSpec, property_ids: dict[str, str]) -> JsonObje
                 "type": "property",
                 "property_id": property_ids[spec.cover_property],
             }
+        return configuration
+    if spec.view_type == "chart":
+        if spec.chart_type is None:
+            raise ValueError(f"Chart view {spec.name!r} has no chart_type")
+        configuration = {
+            "type": "chart",
+            "chart_type": spec.chart_type,
+            "color_theme": "teal",
+            "height": "small",
+            "legend_position": "off",
+            "show_data_labels": True,
+        }
+        if spec.chart_type == "number":
+            if spec.chart_value_property is None or spec.chart_value_property not in property_ids:
+                raise ValueError(f"Chart view {spec.name!r} has no value property")
+            configuration["value"] = {
+                "aggregator": "sum",
+                "property_id": property_ids[spec.chart_value_property],
+            }
+            return configuration
+        if (
+            spec.chart_x_property is None
+            or spec.chart_x_property not in property_ids
+            or spec.chart_y_property is None
+            or spec.chart_y_property not in property_ids
+        ):
+            raise ValueError(f"Chart view {spec.name!r} has incomplete axes")
+        configuration.update(
+            {
+                "x_axis_property_id": property_ids[spec.chart_x_property],
+                "y_axis_property_id": property_ids[spec.chart_y_property],
+                "sort": "x_ascending",
+                "axis_labels": "both",
+                "grid_lines": "horizontal",
+            }
+        )
         return configuration
     return {
         "type": "table",
