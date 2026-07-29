@@ -41,11 +41,16 @@ def test_runtime_workflows_use_concurrency_and_private_safe_summaries() -> None:
 
 
 def test_schedules_avoid_the_top_of_the_hour() -> None:
-    for name in ("sync-metadata.yml", "process-ai.yml"):
-        text, _workflow_data = _workflow(name)
-        cron_lines = [line.strip() for line in text.splitlines() if "cron:" in line]
-        assert cron_lines
-        assert all('cron: "0 ' not in line for line in cron_lines)
+    text, _workflow_data = _workflow("sync-metadata.yml")
+    cron_lines = [line.strip() for line in text.splitlines() if "cron:" in line]
+    assert cron_lines
+    assert all('cron: "0 ' not in line for line in cron_lines)
+
+
+def test_process_ai_is_manual_during_initial_validation() -> None:
+    text, workflow = _workflow("process-ai.yml")
+    assert "cron:" not in text
+    assert "workflow_dispatch" in workflow[True]  # type: ignore[index,operator]
 
 
 def test_ai_workflows_receive_only_expected_provider_secrets() -> None:

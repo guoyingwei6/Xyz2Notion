@@ -61,11 +61,11 @@ ASR 和免费文本模型。项目只接受代码已核对的免费模型白名�
 | --- | --- | --- |
 | `Initialize Notion` | 手动 | 幂等创建或修复九个数据库和首页 |
 | `Sync Podcast Metadata` | 每天 00:17 UTC、手动 | 同步订阅、进度、统计和热力图 |
-| `Process Episode AI` | 每 6 小时的第 43 分、手动 | 推进 ASR、摘要和发布状态机 |
+| `Process Episode AI` | 手动 | 推进 ASR、摘要和发布状态机；初期验收完成后再恢复定时 |
 | `Retry Failed Episode AI` | 手动 | 只恢复 `FAILED_RETRYABLE` 单集 |
 | `Xyz2Notion Maintenance` | 手动 | 迁移、单集重做、统计或热力图重建 |
 
-定时任务刻意避开整点。所有会写入 Notion 的工作流共用
+元数据定时任务刻意避开整点。所有会写入 Notion 的工作流共用
 `xyz2notion-runtime` concurrency group，避免迁移、初始化、元数据和 AI 同时改页。
 
 首次使用顺序：

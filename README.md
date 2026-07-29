@@ -32,9 +32,9 @@ Fork 本仓库，在 `Settings → Secrets and variables → Actions` 至少添�
 
 ### 3. 生成文字稿与 AI 内容
 
-手动运行 `Process Episode AI`。之后元数据每天自动同步，AI 状态机每 6 小时推进。
-听悟 Cookie 明确失效时自动降级到 SiliconFlow；工作流中断后从用户自己 Notion
-里的私有检查点继续。
+手动运行 `Process Episode AI`。元数据每天自动同步；AI 工作流在初期验收阶段仅
+手动运行，避免未经确认连续处理大量节目。听悟 Cookie 明确失效时自动降级到
+SiliconFlow；工作流中断后从用户自己 Notion 里的私有检查点继续。
 
 只有同时满足以下条件的单集才会进入 AI 队列：
 
