@@ -233,9 +233,24 @@ class StatisticsSynchronizer:
         summary = (
             f"🎧 累计收听 {hours_text} 小时 · {total.episode_count} 期 · {total.played_days} 天"
         )
-        for block in list_children(self.root_page_id):
+        blocks = list_children(self.root_page_id)
+        managed_block: Mapping[str, Any] | None = None
+        for block in blocks:
             if _block_marker_url(block) != HOME_SUMMARY_MARKER_URL:
                 continue
+            managed_block = block
+            break
+        if managed_block is None:
+            placeholders = [
+                block
+                for block in blocks
+                if block.get("type") == "paragraph"
+                and _block_visible_text(block) == "🎧 收听数据将在首次统计同步后显示。"
+            ]
+            if len(placeholders) == 1:
+                managed_block = placeholders[0]
+        if managed_block is not None:
+            block = managed_block
             if _block_visible_text(block) == summary:
                 return
             update_block(
@@ -249,7 +264,6 @@ class StatisticsSynchronizer:
                     }
                 },
             )
-            return
 
 
 def _caption_text(block: Mapping[str, Any]) -> str:

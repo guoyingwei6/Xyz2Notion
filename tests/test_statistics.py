@@ -338,6 +338,37 @@ def test_statistics_notion_sync_is_idempotent_and_writes_rank_and_source() -> No
     assert HOME_SUMMARY_MARKER_URL in str(fake.blocks["root"][0])
 
 
+def test_statistics_notion_sync_recovers_exact_unmarked_summary_placeholder() -> None:
+    fake = FakeStatisticsNotion()
+    fake.blocks["root"].append(
+        {
+            "id": "summary",
+            "type": "paragraph",
+            "paragraph": {
+                "rich_text": [
+                    {
+                        "type": "text",
+                        "plain_text": "🎧 收听数据将在首次统计同步后显示。",
+                        "text": {"content": "🎧 收听数据将在首次统计同步后显示。"},
+                    }
+                ]
+            },
+        }
+    )
+    statistics = calculate_statistics(
+        statistics_snapshot(),
+        today=date(2026, 2, 15),
+    )
+
+    StatisticsSynchronizer(fake, notion_resources(), root_page_id="root").sync(
+        statistics,
+        today=date(2026, 2, 15),
+    )
+
+    assert "累计收听" in str(fake.blocks["root"][0])
+    assert HOME_SUMMARY_MARKER_URL in str(fake.blocks["root"][0])
+
+
 def test_heatmap_publisher_creates_skips_and_updates_one_managed_block() -> None:
     fake = FakeStatisticsNotion()
     daily = calculate_statistics(
