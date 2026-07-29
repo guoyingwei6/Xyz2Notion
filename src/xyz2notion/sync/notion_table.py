@@ -155,6 +155,20 @@ class NotionTable:
             result[key] = page
         return result
 
+    def keys(self) -> tuple[str, ...]:
+        """Return the stable keys present when this table was loaded."""
+        return tuple(self._pages)
+
+    def property_value(self, key: str, property_name: str) -> object:
+        """Return one canonical property value for safe reconciliation checks."""
+        page = self._pages.get(key)
+        if page is None:
+            return None
+        properties = page.get("properties")
+        if not isinstance(properties, Mapping):
+            return None
+        return _canonical_property(properties.get(property_name))
+
     def upsert(
         self,
         key: str,

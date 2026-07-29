@@ -246,6 +246,19 @@ class MetadataSynchronizer:
             )
             self._record(result, actions, fields)
 
+        snapshot_eids = {episode.eid for episode in snapshot.episodes}
+        for eid in set(episode_table.keys()) - snapshot_eids:
+            stale_properties: dict[str, Any] = {}
+            if episode_table.property_value(eid, "In Playlist") == ("checkbox", True):
+                stale_properties["In Playlist"] = {"checkbox": False}
+            if episode_table.property_value(eid, "Favorited") == ("checkbox", True):
+                stale_properties["Favorited"] = {"checkbox": False}
+            if episode_table.property_value(eid, "Playlist Position") != ("number", None):
+                stale_properties["Playlist Position"] = {"number": None}
+            if stale_properties:
+                result = episode_table.upsert(eid, stale_properties)
+                self._record(result, actions, fields)
+
         return SyncReport(
             created=actions["created"],
             updated=actions["updated"],
@@ -286,6 +299,7 @@ class MetadataSynchronizer:
             "Liked": {"checkbox": episode.liked},
             "Favorited": {"checkbox": episode.favorited},
             "In Playlist": {"checkbox": episode.in_playlist},
+            "Playlist Position": {"number": episode.playlist_position},
         }
         cover = _file(episode.image_url, "Episode cover")
         if cover:

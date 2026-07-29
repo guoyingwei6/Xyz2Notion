@@ -230,6 +230,7 @@ def test_initializer_creates_complete_clean_room_template() -> None:
     assert "Progress Percent" in episode_properties
     assert "Progress Ring" in episode_properties
     assert episode_properties["Progress Ring"]["rich_text"] == {}
+    assert episode_properties["Playlist Position"]["number"] == {"format": "number"}
     assert "ASR Provider" in episode_properties
     assert "Content Version" in episode_properties
 
@@ -408,7 +409,6 @@ def test_view_configuration_resolves_property_ids() -> None:
             "Listening Status": "status",
             "Progress Ring": "ring",
             "Played Seconds": "played",
-            "Skip AI": "skip",
             "Published At": "published",
             "Cover": "cover",
         },
@@ -418,10 +418,39 @@ def test_view_configuration_resolves_property_ids() -> None:
         "title",
         "status",
         "ring",
-        "skip",
         "published",
     }
     assert spec.filter == {
         "property": "Played Seconds",
         "number": {"greater_than": 0},
+    }
+
+
+def test_episode_views_have_user_facing_cards_and_expected_filters() -> None:
+    episode_specs = {spec.key: spec for spec in VIEW_SPECS if spec.source == "episode"}
+    assert set(episode_specs) == {
+        "episodes_all",
+        "episodes_listening",
+        "episodes_played",
+        "episodes_liked",
+        "episodes_playlist",
+        "episodes_favorited",
+    }
+    for spec in episode_specs.values():
+        assert "Skip AI" not in spec.visible_properties
+        assert "ASR Status" not in spec.visible_properties
+        assert {"Name", "Listening Status", "Progress Ring"}.issubset(spec.visible_properties)
+
+    playlist = episode_specs["episodes_playlist"]
+    assert playlist.filter == {
+        "property": "In Playlist",
+        "checkbox": {"equals": True},
+    }
+    assert playlist.sorts == (
+        {"property": "Playlist Position", "direction": "ascending"},
+        {"property": "Published At", "direction": "descending"},
+    )
+    assert episode_specs["episodes_favorited"].filter == {
+        "property": "Favorited",
+        "checkbox": {"equals": True},
     }

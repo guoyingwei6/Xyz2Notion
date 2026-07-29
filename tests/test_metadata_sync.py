@@ -283,6 +283,35 @@ def test_user_fields_blocks_and_processed_asr_status_are_preserved() -> None:
     assert episode["children"] == [{"type": "paragraph", "text": "用户页面块"}]
 
 
+def test_removed_playlist_and_favorite_flags_are_cleared_without_deleting_page() -> None:
+    fake = FakeRows()
+    fake.pages["ds-episode"] = [
+        {
+            "id": "legacy-library-page",
+            "properties": {
+                "EID": {"rich_text": [{"plain_text": "removed-episode"}]},
+                "In Playlist": {"checkbox": True},
+                "Favorited": {"checkbox": True},
+                "Playlist Position": {"number": 7},
+                "My Notes": {"rich_text": [{"plain_text": "保留"}]},
+            },
+            "children": [{"type": "paragraph", "text": "用户内容"}],
+        }
+    ]
+
+    report = MetadataSynchronizer(fake, resources()).sync(sample_snapshot())
+
+    legacy = fake.page("legacy-library-page")
+    assert legacy["properties"]["In Playlist"] == {"checkbox": False}
+    assert legacy["properties"]["Favorited"] == {"checkbox": False}
+    assert legacy["properties"]["Playlist Position"] == {"number": None}
+    assert legacy["properties"]["My Notes"]["rich_text"][0]["plain_text"] == "保留"
+    assert legacy["children"] == [{"type": "paragraph", "text": "用户内容"}]
+    assert report.changed_fields["In Playlist"] == 2
+    assert report.changed_fields["Favorited"] == 2
+    assert report.changed_fields["Playlist Position"] == 2
+
+
 def test_notion_table_compares_real_response_shapes_and_updates_visuals() -> None:
     fake = FakeRows()
     fake.pages["ds-custom"] = [

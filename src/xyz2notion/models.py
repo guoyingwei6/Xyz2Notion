@@ -142,6 +142,7 @@ class Episode(ContractModel):
     liked: bool = False
     favorited: bool = False
     in_playlist: bool = False
+    playlist_position: NonNegativeInt | None = None
     last_played_at: AwareDatetime | None = None
 
     @model_validator(mode="after")

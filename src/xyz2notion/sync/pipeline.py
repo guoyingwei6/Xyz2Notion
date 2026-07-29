@@ -76,6 +76,7 @@ def collect_metadata(
         if eid not in history_eids and eid not in favorite_eids
     ]
     playlist_set = set(playlist_eids)
+    playlist_positions = {eid: position for position, eid in enumerate(playlist_eids, start=1)}
     favorite_set = set(favorite_eids)
 
     combined_episodes: list[JsonObject] = []
@@ -87,6 +88,7 @@ def collect_metadata(
         if not eid:
             continue
         episode["_xyz_in_playlist"] = eid in playlist_set
+        episode["_xyz_playlist_position"] = playlist_positions.get(eid)
         episode["_xyz_favorited"] = eid in favorite_set or bool(episode.get("isFavorited"))
         combined_episodes.append({"episode": episode})
     known_pids = {

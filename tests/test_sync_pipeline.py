@@ -170,6 +170,35 @@ def test_collect_metadata_keeps_playlist_and_favorites_as_non_statistical_rows()
     assert by_eid["favorite-episode"].played_seconds == 0
 
 
+def test_collect_metadata_preserves_playlist_order() -> None:
+    class WithOrderedPlaylist(FakeXiaoyuzhou):
+        def playlist_eids(self) -> list[str]:
+            return ["playlist-second", "playlist-first"]
+
+        def episode(self, eid: str) -> JsonObject:
+            return {
+                "eid": eid,
+                "pid": "playlist-podcast",
+                "title": eid,
+                "pubDate": "2026-01-03T00:00:00Z",
+            }
+
+        def podcast(self, pid: str) -> JsonObject:
+            return {"pid": pid, "title": f"Podcast {pid}"}
+
+        def playback_progress(
+            self,
+            eids: Sequence[str],
+            *,
+            batch_size: int = 100,
+        ) -> list[JsonObject]:
+            return [{"eid": eid, "progress": 1 if eid == "history-episode" else 0} for eid in eids]
+
+    by_eid = {episode.eid: episode for episode in collect_metadata(WithOrderedPlaylist()).episodes}
+    assert by_eid["playlist-second"].playlist_position == 1
+    assert by_eid["playlist-first"].playlist_position == 2
+
+
 def test_collect_monthly_wrapped_fetches_history_but_not_current_month() -> None:
     fake = FakeXiaoyuzhou()
     snapshot = MetadataSnapshot(
