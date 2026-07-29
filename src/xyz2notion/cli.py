@@ -14,9 +14,11 @@ from xyz2notion.config import (
     load_config,
     load_runtime_credentials,
 )
-from xyz2notion.notion.client import NotionClient
+from xyz2notion.notion.client import NotionAPIError, NotionClient
 from xyz2notion.notion.initializer import NotionInitializer
 from xyz2notion.security import CredentialKind, allowed_hosts
+from xyz2notion.sync.metadata import MetadataSynchronizer
+from xyz2notion.sync.pipeline import collect_metadata
 from xyz2notion.xiaoyuzhou.client import XiaoyuzhouAPIError, XiaoyuzhouClient
 
 
@@ -43,6 +45,14 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(
         "xiaoyuzhou-check",
         help="verify Xiaoyuzhou authentication without printing account data",
+    )
+    sync_metadata = subparsers.add_parser(
+        "sync-metadata",
+        help="sync Xiaoyuzhou metadata and listening progress to Notion",
+    )
+    sync_metadata.add_argument(
+        "--page-id",
+        help="target root page ID; defaults to NOTION_PAGE_ID",
     )
     return parser
 
@@ -88,6 +98,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         except (ConfigurationError, MissingCredentialError) as exc:
             print(f"Configuration error: {exc}", file=sys.stderr)
             return 2
+        except NotionAPIError as exc:
+            print(f"Notion error: {exc}", file=sys.stderr)
+            return 4
         print(
             "Notion initialization OK "
             f"(databases created: {result.created_databases}, "
@@ -114,6 +127,45 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"Xiaoyuzhou error: {exc}", file=sys.stderr)
             return 3
         print("Xiaoyuzhou authentication OK")
+        return 0
+    if args.command == "sync-metadata":
+        try:
+            credentials = load_runtime_credentials()
+            credentials.require("xiaoyuzhou_refresh_token", "notion_token")
+            page_id = args.page_id or credentials.notion_page_id
+            if not page_id:
+                raise MissingCredentialError(
+                    "Missing target page: set NOTION_PAGE_ID or pass --page-id"
+                )
+            if credentials.xiaoyuzhou_refresh_token is None or credentials.notion_token is None:
+                raise AssertionError("credential requirements did not narrow tokens")
+            with (
+                XiaoyuzhouClient(
+                    credentials.xiaoyuzhou_refresh_token,
+                    credentials.xiaoyuzhou_device_id,
+                ) as xiaoyuzhou,
+                NotionClient(credentials.notion_token) as notion,
+            ):
+                initialization = NotionInitializer(notion, page_id).initialize()
+                snapshot = collect_metadata(xiaoyuzhou)
+                report = MetadataSynchronizer(
+                    notion,
+                    initialization.resources,
+                ).sync(snapshot)
+        except (ConfigurationError, MissingCredentialError) as exc:
+            print(f"Configuration error: {exc}", file=sys.stderr)
+            return 2
+        except XiaoyuzhouAPIError as exc:
+            print(f"Xiaoyuzhou error: {exc}", file=sys.stderr)
+            return 3
+        except NotionAPIError as exc:
+            print(f"Notion error: {exc}", file=sys.stderr)
+            return 4
+        print(
+            "Metadata synchronization OK "
+            f"(created: {report.created}, updated: {report.updated}, "
+            f"unchanged: {report.unchanged})"
+        )
         return 0
 
     parser.print_help()

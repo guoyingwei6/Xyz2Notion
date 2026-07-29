@@ -47,7 +47,7 @@ uv run xyz2notion notion-init --page-id YOUR_PAGE_ID
 
 - 按父页面和精确数据库名称复用九个数据库；
 - 按数据源、首页父页面和视图名称复用视图；
-- 只添加或更新 Xyz2Notion 管理的属性；
+- 只添加缺失的 Xyz2Notion 管理属性，不重写已有 Formula、Relation 或选项；
 - 不传 `null` 删除未知属性；
 - 不删除任何数据库、视图、页面块或用户笔记；
 - 首页标记已存在时不重复创建布局。

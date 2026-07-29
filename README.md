@@ -73,6 +73,15 @@ uv run xyz2notion notion-init
 且不会删除用户自行添加的字段、视图或笔记。完整说明见
 [`docs/notion-template.md`](docs/notion-template.md)。
 
+初始化完成后，同步订阅、收听过的播客、全部单集、播放进度和统计关系：
+
+```bash
+uv run xyz2notion sync-metadata
+```
+
+命令会先增量协调 Notion 结构，再按 Author ID、PID、EID 和周期键执行最小差异
+upsert；不会覆盖未知属性、用户笔记或单集页面块。
+
 ## 安全原则
 
 - 凭证只能发送到对应服务的精确域名。

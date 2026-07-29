@@ -205,6 +205,13 @@ def test_initializer_creates_complete_clean_room_template() -> None:
     assert episode_properties["Podcast"]["relation"]["data_source_id"] == (
         result.resources["podcast"].data_source_id
     )
+    assert episode_properties["Podcast"]["relation"]["dual_property"] == {
+        "synced_property_name": "Episodes"
+    }
+    podcast_properties = fake.data_sources[result.resources["podcast"].data_source_id]["properties"]
+    assert podcast_properties["Authors"]["relation"]["dual_property"] == {
+        "synced_property_name": "Podcasts"
+    }
     assert "Progress Percent" in episode_properties
     assert "Progress Ring" in episode_properties
     assert "ASR Provider" in episode_properties

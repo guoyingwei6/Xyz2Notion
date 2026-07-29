@@ -230,6 +230,17 @@ def test_all_read_endpoints_use_expected_contracts() -> None:
                     "loadMoreKey": None,
                 },
             )
+        if request.url.path == "/v1/podcast/get":
+            assert dict(request.url.params) == {"pid": "podcast-fixture-1"}
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "pid": "podcast-fixture-1",
+                        "title": "Fixture Podcast",
+                    }
+                },
+            )
         if request.url.path == "/v1/episode/list":
             return httpx.Response(
                 200,
@@ -267,6 +278,7 @@ def test_all_read_endpoints_use_expected_contracts() -> None:
 
     client = client_for(httpx.MockTransport(handle))
     assert client.mileage()[0]["playedSeconds"] == 3600
+    assert client.podcast("podcast-fixture-1")["title"] == "Fixture Podcast"
     assert client.episodes("podcast-fixture-1")[0]["eid"] == "episode-fixture-1"
     assert client.play_history()[0]["episode"]["eid"] == "episode-fixture-1"
     assert len(client.playback_progress(["e1", "e1", "e2"], batch_size=1)) == 2
@@ -309,7 +321,10 @@ def test_validation_and_malformed_contracts() -> None:
         client.monthly_wrapped(2026, 1, uid="user-fixture")
     assert client.monthly_wrapped(2026, 1, uid="user-fixture") == {}
     with pytest.raises(ValueError, match="pid"):
+        client.podcast("")
+    with pytest.raises(ValueError, match="pid"):
         client.episodes("")
+    assert client.playback_progress([]) == []
     with pytest.raises(ValueError, match="batch_size"):
         client.playback_progress(["e1"], batch_size=0)
     with pytest.raises(ValueError, match="month"):

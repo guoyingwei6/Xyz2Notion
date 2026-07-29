@@ -304,7 +304,7 @@ class NotionInitializer:
                 created_count += 1
             database_id = str(database["id"])
             data_source_id = _data_source_id(database)
-            self.api.update_data_source(data_source_id, spec.properties)
+            self._add_missing_properties(data_source_id, spec.properties)
             data_source = self.api.retrieve_data_source(data_source_id)
             resources[spec.key] = NotionResource(
                 database_id=database_id,
@@ -318,7 +318,7 @@ class NotionInitializer:
         resources: dict[str, NotionResource],
     ) -> dict[str, NotionResource]:
         for key, properties in relational_properties(resources).items():
-            self.api.update_data_source(resources[key].data_source_id, properties)
+            self._add_missing_properties(resources[key].data_source_id, properties)
         refreshed: dict[str, NotionResource] = {}
         for key, resource in resources.items():
             data_source = self.api.retrieve_data_source(resource.data_source_id)
@@ -328,6 +328,19 @@ class NotionInitializer:
                 property_ids=_property_ids(data_source),
             )
         return refreshed
+
+    def _add_missing_properties(
+        self,
+        data_source_id: str,
+        desired: Mapping[str, Any],
+    ) -> None:
+        """Add schema fields without rewriting existing formulas, options, or relations."""
+        data_source = self.api.retrieve_data_source(data_source_id)
+        current = data_source.get("properties")
+        current_names = set(current) if isinstance(current, dict) else set()
+        missing = {name: value for name, value in desired.items() if name not in current_names}
+        if missing:
+            self.api.update_data_source(data_source_id, missing)
 
     def _ensure_home_blocks(self) -> bool:
         blocks = self.api.list_block_children(self.root_page_id)

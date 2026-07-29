@@ -62,12 +62,20 @@ def select_property(options: tuple[tuple[str, str], ...]) -> JsonObject:
     }
 
 
-def relation_property(target_data_source_id: str) -> JsonObject:
-    return {
-        "relation": {
-            "data_source_id": target_data_source_id,
-            "single_property": {},
+def relation_property(
+    target_data_source_id: str,
+    *,
+    synced_property_name: str | None = None,
+) -> JsonObject:
+    relation: JsonObject = {"data_source_id": target_data_source_id}
+    if synced_property_name:
+        relation["dual_property"] = {
+            "synced_property_name": synced_property_name,
         }
+    else:
+        relation["single_property"] = {}
+    return {
+        "relation": relation,
     }
 
 
@@ -233,23 +241,38 @@ def relational_properties(resources: dict[str, NotionResource]) -> dict[str, Jso
     episode = resources["episode"].data_source_id
     podcast = resources["podcast"].data_source_id
     author = resources["author"].data_source_id
-    mindmap = resources["mindmap"].data_source_id
     result: dict[str, JsonObject] = {
-        "author": {
-            "Podcasts": relation_property(podcast),
-        },
         "podcast": {
-            "Authors": relation_property(author),
-            "Episodes": relation_property(episode),
+            "Authors": relation_property(
+                author,
+                synced_property_name="Podcasts",
+            ),
         },
         "episode": {
-            "Podcast": relation_property(podcast),
-            "All Period": relation_property(resources["all"].data_source_id),
-            "Year Period": relation_property(resources["year"].data_source_id),
-            "Month Period": relation_property(resources["month"].data_source_id),
-            "Week Period": relation_property(resources["week"].data_source_id),
-            "Day Period": relation_property(resources["day"].data_source_id),
-            "Mindmaps": relation_property(mindmap),
+            "Podcast": relation_property(
+                podcast,
+                synced_property_name="Episodes",
+            ),
+            "All Period": relation_property(
+                resources["all"].data_source_id,
+                synced_property_name="Episodes",
+            ),
+            "Year Period": relation_property(
+                resources["year"].data_source_id,
+                synced_property_name="Episodes",
+            ),
+            "Month Period": relation_property(
+                resources["month"].data_source_id,
+                synced_property_name="Episodes",
+            ),
+            "Week Period": relation_property(
+                resources["week"].data_source_id,
+                synced_property_name="Episodes",
+            ),
+            "Day Period": relation_property(
+                resources["day"].data_source_id,
+                synced_property_name="Episodes",
+            ),
             "Progress Percent": formula_property(
                 'if(prop("Duration Seconds") > 0, '
                 'round(prop("Played Seconds") / prop("Duration Seconds") * 100), 0)'
@@ -262,7 +285,10 @@ def relational_properties(resources: dict[str, NotionResource]) -> dict[str, Jso
             ),
         },
         "mindmap": {
-            "Episode": relation_property(episode),
+            "Episode": relation_property(
+                episode,
+                synced_property_name="Mindmaps",
+            ),
         },
     }
     for key in ("all", "year", "month", "week", "day"):

@@ -270,6 +270,31 @@ class NotionClient:
             body["icon"] = {"type": "emoji", "emoji": icon}
         return self.request("POST", "/pages", json_body=body)
 
+    def create_data_source_page(
+        self,
+        data_source_id: str,
+        properties: Mapping[str, Any],
+        *,
+        icon: Mapping[str, Any] | None = None,
+        cover: Mapping[str, Any] | None = None,
+        children: Sequence[Mapping[str, Any]] = (),
+    ) -> JsonObject:
+        """Create one row page under a data source."""
+        body: JsonObject = {
+            "parent": {
+                "type": "data_source_id",
+                "data_source_id": data_source_id,
+            },
+            "properties": dict(properties),
+        }
+        if icon is not None:
+            body["icon"] = dict(icon)
+        if cover is not None:
+            body["cover"] = dict(cover)
+        if children:
+            body["children"] = [dict(child) for child in children]
+        return self.request("POST", "/pages", json_body=body)
+
     def create_database(
         self,
         parent_page_id: str,

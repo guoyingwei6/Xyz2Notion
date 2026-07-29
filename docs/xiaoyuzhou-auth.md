@@ -23,6 +23,7 @@ Refresh Token 只发送给刷新端点，其他请求只携带短期 Access Toke
 
 - 订阅：`/v1/subscription/list`
 - 累计里程：`/v1/mileage/list`
+- 播客详情：`/v1/podcast/get`
 - 单集：`/v1/episode/list`
 - 收听历史：`/v1/episode-played/list-history`
 - 播放进度：`/v1/playback-progress/list`

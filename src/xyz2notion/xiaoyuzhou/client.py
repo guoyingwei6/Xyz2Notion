@@ -325,6 +325,16 @@ class XiaoyuzhouClient:
         """Return podcasts with cumulative listening seconds."""
         return list(self._paginate("/v1/mileage/list", {"rank": rank}))
 
+    def podcast(self, pid: str) -> JsonObject:
+        """Return one podcast, used when history references an unsubscribed show."""
+        if not pid:
+            raise ValueError("pid cannot be empty")
+        payload = self.request("GET", "/v1/podcast/get", params={"pid": pid})
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            raise XiaoyuzhouAPIError("Xiaoyuzhou podcast response has invalid data")
+        return data
+
     def episodes(self, pid: str, *, limit: int = 25) -> list[JsonObject]:
         """Return every episode currently exposed for a podcast."""
         if not pid:

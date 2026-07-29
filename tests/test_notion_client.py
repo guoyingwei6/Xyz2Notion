@@ -42,6 +42,24 @@ def test_request_sets_current_version_and_auth_header() -> None:
         client.close()
 
 
+def test_create_data_source_page_uses_2026_parent_contract() -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        payload = request.read().decode()
+        assert request.method == "POST"
+        assert request.url.path == "/v1/pages"
+        assert '"type":"data_source_id"' in payload
+        assert '"data_source_id":"ds-1"' in payload
+        assert '"Name"' in payload
+        return httpx.Response(200, json={"object": "page", "id": "row-1"})
+
+    client = client_for(httpx.MockTransport(handle))
+    created = client.create_data_source_page(
+        "ds-1",
+        {"Name": {"title": rich_text("Row")}},
+    )
+    assert created["id"] == "row-1"
+
+
 def test_base_url_must_be_notion_allowlisted() -> None:
     with pytest.raises(UnsafeCredentialDestinationError):
         NotionClient("notion-example", base_url="https://evil.example/v1")
