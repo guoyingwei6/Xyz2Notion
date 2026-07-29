@@ -183,6 +183,7 @@ class StatisticsSynchronizer:
                     "Start Date": _date_value(start),
                     "End Date": _date_value(end),
                     "Exact Listening Seconds": {"number": period.listening_seconds},
+                    "Exact Listening Hours": {"number": round(period.listening_seconds / 3600, 3)},
                     "Podcast Count": {"number": period.podcast_count},
                     "Played Days": {"number": period.played_days},
                     "Statistics Source": _text(period.source),

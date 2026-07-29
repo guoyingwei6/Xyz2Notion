@@ -523,7 +523,7 @@ def test_chart_configuration_uses_dates_hours_and_compact_presentation() -> None
         month,
         {
             "Start Date": "start",
-            "Listening Hours": "hours",
+            "Exact Listening Hours": "hours",
         },
     )
     assert configuration == {
@@ -549,7 +549,7 @@ def test_chart_configuration_uses_dates_hours_and_compact_presentation() -> None
     }
 
     total = next(spec for spec in VIEW_SPECS if spec.key == "total_time_chart")
-    assert view_configuration(total, {"Listening Hours": "hours"}) == {
+    assert view_configuration(total, {"Exact Listening Hours": "hours"}) == {
         "type": "chart",
         "chart_type": "number",
         "color_theme": "teal",

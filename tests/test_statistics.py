@@ -304,6 +304,7 @@ def test_statistics_notion_sync_is_idempotent_and_writes_rank_and_source() -> No
         january["properties"]["Statistics Source"]["rich_text"][0]["text"]["content"]
         == "monthly_wrapped"
     )
+    assert january["properties"]["Exact Listening Hours"]["number"] == 0.417
     first_rank = next(
         page
         for page in fake.pages["ds-podcast"]
