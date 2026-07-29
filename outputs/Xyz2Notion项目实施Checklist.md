@@ -65,11 +65,11 @@ updated: 2026-07-29
 
 - [x] 空项目安装成功，`xyz2notion doctor` 返回正常。
 - [x] Lint、格式、严格类型检查和 19 个测试在本地通过，覆盖率 95%。
-- [ ] GitHub Actions CI 通过。
+- [x] GitHub Actions CI 通过：[运行 30417768808](https://github.com/guoyingwei6/Xyz2Notion/actions/runs/30417768808)。
 - [x] 安全测试能拦截非白名单、跨服务、HTTP 和伪造子域名凭证请求。
 
-P0 当前状态：代码与本地验证已完成；等待将仓库推送到 GitHub 后取得首次 CI
-绿灯，再关闭阶段门并进入 P1。
+P0 当前状态：已完成。公开仓库、质量检查、类型检查、19 个测试和 Gitleaks
+均通过，P1 阶段门已打开。
 
 ---
 
