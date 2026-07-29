@@ -32,3 +32,11 @@ def test_config_schema_command(capsys: object) -> None:
     assert main(["config-schema"]) == 0
     output = capsys.readouterr().out  # type: ignore[attr-defined]
     assert '"schema_version"' in output
+
+
+def test_notion_init_reports_missing_token(capsys: object, monkeypatch: object) -> None:
+    monkeypatch.delenv("NOTION_TOKEN", raising=False)  # type: ignore[attr-defined]
+    monkeypatch.delenv("NOTION_PAGE_ID", raising=False)  # type: ignore[attr-defined]
+    assert main(["notion-init"]) == 2
+    error = capsys.readouterr().err  # type: ignore[attr-defined]
+    assert "Missing required credential" in error

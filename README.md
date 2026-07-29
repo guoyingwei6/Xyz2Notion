@@ -52,6 +52,18 @@ uv run xyz2notion config-check --config config.yaml
 状态以原子 JSON 文件保存；GitHub Actions 中断后会从最后状态继续，而不是
 重新执行已经完成的步骤。
 
+## 初始化 Notion
+
+授权空白页面并配置 `NOTION_TOKEN`、`NOTION_PAGE_ID` 后运行：
+
+```bash
+uv run xyz2notion notion-init
+```
+
+初始化器会幂等创建九个数据库、关系、公式、统计视图、Gallery 和首页布局，
+且不会删除用户自行添加的字段、视图或笔记。完整说明见
+[`docs/notion-template.md`](docs/notion-template.md)。
+
 ## 安全原则
 
 - 凭证只能发送到对应服务的精确域名。
