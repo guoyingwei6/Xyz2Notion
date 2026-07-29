@@ -176,6 +176,7 @@ def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
                 siliconflow=siliconflow,
                 dashscope=dashscope,
                 summary_policy=_summary_policy(config),
+                summary_enabled=config.summary.enabled,
             )
             page_by_id = {str(page.get("id")): page for page in pages}
             outcomes = [

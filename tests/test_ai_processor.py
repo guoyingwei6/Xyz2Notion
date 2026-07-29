@@ -208,6 +208,22 @@ def test_no_asr_provider_pauses_without_persisting_failure() -> None:
     assert store.saved == []
 
 
+def test_disabled_summary_pauses_after_transcription_without_repeating_asr() -> None:
+    state = EpisodeAIState(
+        record=PipelineRecord(eid="episode").transition(PipelineState.TRANSCRIBED),
+        transcript=transcript(),
+    )
+    store = FakeStateStore(state)
+    outcome = EpisodeAIProcessor(
+        FakeNotion(),
+        store,
+        summary_enabled=False,
+    ).process(CANDIDATE, {})
+    assert outcome.action == "summary_paused"
+    assert outcome.state is PipelineState.TRANSCRIBED
+    assert store.saved == []
+
+
 def test_transcribed_checkpoint_waits_for_summary_key_without_repeating_asr() -> None:
     record = PipelineRecord(eid="episode").transition(PipelineState.TRANSCRIBED)
     store = FakeStateStore(EpisodeAIState(record=record, transcript=transcript()))

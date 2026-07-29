@@ -7,12 +7,44 @@ Xyz2Notion 是一个完全自托管的开源工具，用 GitHub Actions 将小�
 Notion 和可选语音识别服务的凭证，所有任务运行在用户自己的 GitHub Actions
 中。
 
-## 当前状态
+## 三步开始
 
-项目已实现自主 Notion 模板、元数据与统计同步、听悟 Cookie → SiliconFlow
-降级转写、千问摘要、脑图和可恢复的 GitHub Actions 编排；仍按
+### 1. Fork 并配置凭证
+
+Fork 本仓库，在 `Settings → Secrets and variables → Actions` 至少添加：
+
+- `XIAOYUZHOU_REFRESH_TOKEN`
+- `NOTION_TOKEN`
+- `NOTION_PAGE_ID`
+
+转写建议再添加 `TINGWU_COOKIE` 和 `SILICONFLOW_API_KEY`；没有听悟原生摘要时，
+还需要 `DASHSCOPE_API_KEY`。获取方法和必需性见
+[GitHub Actions 与 Secrets](docs/github-actions.md)。
+
+### 2. 初始化并同步
+
+在 Fork 的 `Actions` 页面依次手动运行：
+
+1. `Initialize Notion`
+2. `Sync Podcast Metadata`
+
+它会在已授权的空白 Notion 页面中创建九个数据库、12 个视图、统计关系和首页，
+再同步订阅、历史、进度、排行和热力图。
+
+### 3. 生成文字稿与 AI 内容
+
+手动运行 `Process Episode AI`。之后元数据每天自动同步，AI 状态机每 6 小时推进。
+听悟 Cookie 明确失效时自动降级到 SiliconFlow；工作流中断后从用户自己 Notion
+里的私有检查点继续。
+
+> 建议第一次把 `config.yaml` 中的 `episodes_per_run` 设为 1，先用一个短单集验证。
+
+## 项目状态
+
+v0.1.0 已实现自主 Notion 模板、元数据与统计同步、听悟 Cookie → SiliconFlow
+降级转写、千问摘要、脑图、迁移和可恢复的 GitHub Actions 编排。真实账户验收按
 [实施 Checklist](outputs/Xyz2Notion项目实施Checklist.md)
-完成真实账户 QA、迁移和正式发布。
+继续记录；缺少用户凭证的项目不会用 Mock 冒充真实通过。
 
 ## 本地开发
 
@@ -66,6 +98,10 @@ GitHub Secrets、四个运行工作流、调度时间和手动重试方法见
 [`docs/github-actions.md`](docs/github-actions.md)。
 旧 Podcast2Notion 模板的原地迁移、dry-run、单集重做和统计重建见
 [`docs/migration.md`](docs/migration.md)。
+配置字段见 [`docs/configuration.md`](docs/configuration.md)，成本边界见
+[`docs/costs.md`](docs/costs.md)，故障处理与限制见
+[`docs/troubleshooting.md`](docs/troubleshooting.md)，测试证据见
+[`docs/qa-matrix.md`](docs/qa-matrix.md)。
 
 ## 可恢复运行
 

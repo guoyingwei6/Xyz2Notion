@@ -1,0 +1,48 @@
+[
+  {
+    "case": "mandarin_interview",
+    "duration_ms": 900000,
+    "segments": [
+      {"start_ms": 0, "end_ms": 450000, "text": "主持人：欢迎来到今天的访谈。", "speaker": "主持人"},
+      {"start_ms": 450000, "end_ms": 900000, "text": "嘉宾：我们从实际问题开始讨论。", "speaker": "嘉宾"}
+    ]
+  },
+  {
+    "case": "chinese_english_mixed",
+    "duration_ms": 600000,
+    "segments": [
+      {"start_ms": 0, "end_ms": 600000, "text": "今天讨论 machine learning workflow 与数据质量。"}
+    ]
+  },
+  {
+    "case": "dialect_visible",
+    "duration_ms": 480000,
+    "segments": [
+      {"start_ms": 0, "end_ms": 480000, "text": "这段包含方言词，测试下游保持原始识别文本。"}
+    ]
+  },
+  {
+    "case": "multiple_speakers",
+    "duration_ms": 720000,
+    "segments": [
+      {"start_ms": 0, "end_ms": 240000, "text": "甲发言。", "speaker": "甲"},
+      {"start_ms": 240000, "end_ms": 480000, "text": "乙回应。", "speaker": "乙"},
+      {"start_ms": 480000, "end_ms": 720000, "text": "丙补充。", "speaker": "丙"}
+    ]
+  },
+  {
+    "case": "background_music_remote",
+    "duration_ms": 540000,
+    "segments": [
+      {"start_ms": 0, "end_ms": 540000, "text": "远场与背景音乐场景的合成转写结果。"}
+    ]
+  },
+  {
+    "case": "over_one_hour",
+    "duration_ms": 3660000,
+    "segments": [
+      {"start_ms": 0, "end_ms": 1800000, "text": "长节目第一部分。"},
+      {"start_ms": 1800000, "end_ms": 3660000, "text": "长节目第二部分。"}
+    ]
+  }
+]

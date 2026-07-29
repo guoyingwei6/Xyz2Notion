@@ -124,6 +124,7 @@ class EpisodeAIProcessor:
         siliconflow: SiliconFlowClient | None = None,
         dashscope: DashScopeSummaryClient | None = None,
         summary_policy: SummaryPolicy | None = None,
+        summary_enabled: bool = True,
         tingwu_directory: str = "Xyz2Notion 播客",
     ) -> None:
         self.notion = notion
@@ -132,6 +133,7 @@ class EpisodeAIProcessor:
         self.siliconflow = siliconflow
         self.dashscope = dashscope
         self.summary_policy = summary_policy or SummaryPolicy()
+        self.summary_enabled = summary_enabled
         self.tingwu_directory = tingwu_directory
 
     def _save(self, page_id: str, state: EpisodeAIState) -> EpisodeAIState:
@@ -315,7 +317,7 @@ class EpisodeAIProcessor:
                     if self.dashscope is None:
                         return ProcessingOutcome(
                             candidate.eid,
-                            "waiting_summary_key",
+                            ("waiting_summary_key" if self.summary_enabled else "summary_paused"),
                             state.record.state,
                         )
                     summary = TranscriptEnricher(
