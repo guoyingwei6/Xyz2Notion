@@ -88,11 +88,25 @@ class LimitConfig(StrictConfigModel):
         return self
 
 
+class SummaryConfig(StrictConfigModel):
+    """Qwen summary generation and transparent cost-estimation settings."""
+
+    enabled: bool = True
+    model: str = Field(default="qwen-flash", min_length=1)
+    prompt_version: str = Field(default="summary-v1", min_length=1)
+    chunk_tokens: int = Field(default=24_000, ge=1_000, le=100_000)
+    chunk_minutes: int = Field(default=30, ge=5, le=120)
+    max_output_tokens: int = Field(default=8_192, ge=512, le=32_768)
+    input_cny_per_million_tokens: float = Field(default=0.15, ge=0)
+    output_cny_per_million_tokens: float = Field(default=1.5, ge=0)
+
+
 class AppConfig(StrictConfigModel):
     """Complete secret-free application configuration."""
 
     schema_version: Literal[1] = 1
     asr: AsrConfig = Field(default_factory=AsrConfig)
+    summary: SummaryConfig = Field(default_factory=SummaryConfig)
     limits: LimitConfig = Field(default_factory=LimitConfig)
     state_file: str = Field(default=".xyz2notion/state.json", min_length=1)
 

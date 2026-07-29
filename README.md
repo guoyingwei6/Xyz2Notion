@@ -56,6 +56,11 @@ uv run xyz2notion xiaoyuzhou-check
 预算为 0。SiliconFlow 音频切片、免费模型降级和时间轴精度说明见
 [`docs/siliconflow-asr.md`](docs/siliconflow-asr.md)。
 
+听悟 Cookie 的域名隔离、断点续查和降级规则见
+[`docs/tingwu-cookie.md`](docs/tingwu-cookie.md)。文字稿的千问结构化摘要、长文本
+分段、Token 与费用记录见
+[`docs/ai-enrichment.md`](docs/ai-enrichment.md)。
+
 ## 可恢复运行
 
 每个单集使用独立状态机记录发现、ASR 提交、转写、AI 增强和发布阶段。

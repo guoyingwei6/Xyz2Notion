@@ -13,6 +13,7 @@ from xyz2notion.config import (
     ConfigurationError,
     LimitConfig,
     MissingCredentialError,
+    SummaryConfig,
     config_schema_json,
     derive_device_id,
     load_config,
@@ -29,6 +30,8 @@ def test_example_config_is_valid_and_secret_free() -> None:
     )
     assert config.asr.paid_enabled is False
     assert config.asr.paid_budget_cny == 0
+    assert config.summary.model == "qwen-flash"
+    assert config.summary.prompt_version == "summary-v1"
     assert config.limits.episodes_per_run == 3
     raw = Path("config.example.yaml").read_text(encoding="utf-8")
     assert "TOKEN" not in raw
@@ -91,6 +94,14 @@ def test_paid_provider_requires_explicit_budget() -> None:
 def test_daily_limit_cannot_exceed_monthly_limit() -> None:
     with pytest.raises(ValidationError, match="daily ASR"):
         LimitConfig(asr_minutes_per_day=31, asr_minutes_per_month=30)
+
+
+def test_summary_limits_and_prices_are_validated() -> None:
+    assert SummaryConfig().input_cny_per_million_tokens == 0.15
+    with pytest.raises(ValidationError):
+        SummaryConfig(chunk_tokens=999)
+    with pytest.raises(ValidationError):
+        SummaryConfig(output_cny_per_million_tokens=-1)
 
 
 def test_derived_device_id_is_stable_and_valid() -> None:

@@ -235,10 +235,16 @@ class SummaryResult(ContractModel):
     summary: NonEmptyStr
     chapters: tuple[Chapter, ...] = ()
     highlights: tuple[str, ...] = ()
+    quotes: tuple[str, ...] = ()
+    terms: tuple[str, ...] = ()
+    people: tuple[str, ...] = ()
     questions: tuple[str, ...] = ()
     mindmap: MindmapNode
     prompt_version: NonEmptyStr
     model: NonEmptyStr
+    input_tokens: NonNegativeInt = 0
+    output_tokens: NonNegativeInt = 0
+    estimated_cost_cny: float = Field(default=0, ge=0)
     created_at: AwareDatetime = Field(default_factory=utc_now)
 
 

@@ -10,6 +10,17 @@ asr:
     - FunAudioLLM/SenseVoiceSmall
     - TeleAI/TeleSpeechASR
 
+summary:
+  enabled: true
+  model: qwen-flash
+  prompt_version: summary-v1
+  chunk_tokens: 24000
+  chunk_minutes: 30
+  max_output_tokens: 8192
+  # 2026-07-29 Beijing list-price snapshot, configurable when pricing changes.
+  input_cny_per_million_tokens: 0.15
+  output_cny_per_million_tokens: 1.5
+
 limits:
   episodes_per_run: 3
   asr_minutes_per_day: 240

@@ -42,6 +42,54 @@
         }
       }
     },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "default": "qwen-flash"
+        },
+        "prompt_version": {
+          "type": "string",
+          "minLength": 1,
+          "default": "summary-v1"
+        },
+        "chunk_tokens": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 100000,
+          "default": 24000
+        },
+        "chunk_minutes": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 120,
+          "default": 30
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 512,
+          "maximum": 32768,
+          "default": 8192
+        },
+        "input_cny_per_million_tokens": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0.15
+        },
+        "output_cny_per_million_tokens": {
+          "type": "number",
+          "minimum": 0,
+          "default": 1.5
+        }
+      }
+    },
     "limits": {
       "type": "object",
       "additionalProperties": false,
