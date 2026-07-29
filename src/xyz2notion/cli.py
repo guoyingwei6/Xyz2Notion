@@ -719,6 +719,8 @@ _LEGACY_DASHBOARD_LAYOUT_TYPES = (
     "callout",
     "heading_2",
     "paragraph",
+    "paragraph",
+    "paragraph",
     "image",
     "child_database",
     "child_database",
@@ -728,8 +730,6 @@ _LEGACY_DASHBOARD_LAYOUT_TYPES = (
     "child_database",
     "child_database",
     "child_database",
-    "divider",
-    "callout",
 )
 
 

@@ -880,10 +880,10 @@ def test_rebuild_dashboard_layout_preserves_data_page_and_bootstraps_home(
         "callout",
         "heading_2",
         "paragraph",
+        "paragraph",
+        "paragraph",
         "image",
         *(["child_database"] * 8),
-        "divider",
-        "callout",
     ]
     # Notion may reorder managed root blocks while preserving the exact set.
     layout_types = [layout_types[0], *reversed(layout_types[1:])]
