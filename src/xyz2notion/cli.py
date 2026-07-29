@@ -420,6 +420,11 @@ def _run_audit_dashboard(args: argparse.Namespace) -> int:
         and tuple(block_types[index - len(managed_prefix) : index]) == managed_prefix
         for index in marker_indexes
     )
+    managed_bundle_shape = (*managed_prefix, "paragraph")
+    layout_bundle_shape_candidates = sum(
+        tuple(block_types[index : index + len(managed_bundle_shape)]) == managed_bundle_shape
+        for index in range(len(block_types) - len(managed_bundle_shape) + 1)
+    )
     child_database = block_types.count("child_database")
     column_list = block_types.count("column_list")
     marker_count = len(marker_indexes)
@@ -429,6 +434,7 @@ def _run_audit_dashboard(args: argparse.Namespace) -> int:
         f"(total={len(blocks)}, child_database={child_database}, "
         f"column_list={column_list}, marker_count={marker_count}, "
         f"managed_bundle_candidates={managed_bundle_candidates}, "
+        f"layout_bundle_shape_candidates={layout_bundle_shape_candidates}, "
         f"other_blocks={other_blocks})"
     )
     return 0

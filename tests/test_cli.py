@@ -303,7 +303,8 @@ def test_audit_dashboard_reports_only_aggregate_counts_without_writes(
     output = capsys.readouterr().out  # type: ignore[attr-defined]
     assert output.strip() == (
         "Dashboard audit OK (total=9, child_database=1, column_list=1, "
-        "marker_count=2, managed_bundle_candidates=1, other_blocks=5)"
+        "marker_count=2, managed_bundle_candidates=1, "
+        "layout_bundle_shape_candidates=1, other_blocks=5)"
     )
     assert "private-" not in output
     assert cli_module.HOME_MARKER_URL not in output
