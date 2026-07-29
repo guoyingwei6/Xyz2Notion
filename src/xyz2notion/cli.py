@@ -777,7 +777,8 @@ def _run_rebuild_dashboard_layout(args: argparse.Namespace) -> int:
                     f"(expected_total={args.expected_total}, actual_total={len(blocks)}, "
                     f"data_pages={len(data_pages)}, "
                     f"child_database={block_types.count('child_database')}, "
-                    f"column_list={block_types.count('column_list')})",
+                    f"column_list={block_types.count('column_list')}, "
+                    f"type_counts={dict(sorted(Counter(block_types).items()))})",
                     file=sys.stderr,
                 )
                 return 7
