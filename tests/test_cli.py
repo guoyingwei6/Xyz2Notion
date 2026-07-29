@@ -84,6 +84,16 @@ def test_process_ai_reports_missing_notion_token(
     assert "Missing required credential" in error
 
 
+def test_migrate_reports_missing_notion_token(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.delenv("NOTION_TOKEN", raising=False)  # type: ignore[attr-defined]
+    assert main(["migrate", "--dry-run"]) == 2
+    error = capsys.readouterr().err  # type: ignore[attr-defined]
+    assert "Missing required credential" in error
+
+
 class FakeContextClient:
     def __init__(self, *_args: object, **_kwargs: object) -> None:
         pass
@@ -96,6 +106,9 @@ class FakeContextClient:
 
     def profile(self) -> dict[str, str]:
         return {"uid": "never-printed"}
+
+    def list_block_children(self, _block_id: str) -> list[object]:
+        return []
 
 
 def test_xiaoyuzhou_check_succeeds_without_printing_identity(
@@ -294,3 +307,177 @@ def test_process_ai_reports_only_aggregate_counts(
     assert "ASR_RUNNING=1" in output
     assert "private episode title" not in output
     assert "private-eid" not in output
+
+
+def test_migration_dry_run_reports_only_counts(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionClient", FakeContextClient)  # type: ignore[attr-defined]
+
+    class FakeInitializer:
+        def __init__(self, _api: object, page_id: str) -> None:
+            assert page_id == "fixture-page"
+
+        def discover_existing_resources(self) -> dict[str, object]:
+            return {"episode": object()}
+
+    class FakeMigrator:
+        def __init__(self, _api: object, resources: object, page_id: str) -> None:
+            assert resources == {"episode": resources["episode"]}  # type: ignore[index]
+            assert page_id == "fixture-page"
+
+        def migrate(self, *, dry_run: bool) -> object:
+            assert dry_run is True
+            return SimpleNamespace(
+                scanned_pages=7,
+                planned_updates=4,
+                updated_pages=0,
+                legacy_embeds_found=2,
+                legacy_embeds_removed=0,
+                duplicate_keys=(),
+                dry_run=True,
+            )
+
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "LegacyTemplateMigrator", FakeMigrator)  # type: ignore[attr-defined]
+    assert main(["migrate", "--dry-run"]) == 0
+    output = capsys.readouterr().out  # type: ignore[attr-defined]
+    assert "scanned=7" in output
+    assert "planned=4" in output
+
+
+def test_migration_apply_reports_aggregate_result(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionClient", FakeContextClient)  # type: ignore[attr-defined]
+
+    class FakeInitializer:
+        def __init__(self, _api: object, _page_id: str) -> None:
+            pass
+
+        def initialize(self) -> object:
+            return SimpleNamespace(resources={"episode": object()})
+
+    class FakeMigrator:
+        def __init__(self, _api: object, _resources: object, _page_id: str) -> None:
+            pass
+
+        def migrate(self, *, dry_run: bool) -> object:
+            assert dry_run is False
+            return SimpleNamespace(
+                scanned_pages=8,
+                planned_updates=5,
+                updated_pages=5,
+                legacy_embeds_found=3,
+                legacy_embeds_removed=3,
+                duplicate_keys=(),
+                dry_run=False,
+            )
+
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "LegacyTemplateMigrator", FakeMigrator)  # type: ignore[attr-defined]
+    assert main(["migrate"]) == 0
+    output = capsys.readouterr().out  # type: ignore[attr-defined]
+    assert "Migration complete" in output
+    assert "updated=5" in output
+    assert "removed=3" in output
+
+
+def test_redo_episode_success_does_not_print_eid(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionClient", FakeContextClient)  # type: ignore[attr-defined]
+
+    class FakeInitializer:
+        def __init__(self, _api: object, _page_id: str) -> None:
+            pass
+
+        def initialize(self) -> object:
+            return SimpleNamespace(
+                resources={
+                    "episode": SimpleNamespace(data_source_id="episode-source"),
+                }
+            )
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        cli_module,
+        "reset_episode_ai",
+        lambda _api, source, eid: calls.append((source, eid)),
+    )
+    assert main(["redo-episode", "--eid", "private-eid"]) == 0
+    output = capsys.readouterr().out  # type: ignore[attr-defined]
+    assert calls == [("episode-source", "private-eid")]
+    assert output.strip() == "Episode AI state reset OK (count=1)"
+    assert "private-eid" not in output
+
+
+def _install_rebuild_fakes(monkeypatch: object) -> None:
+    monkeypatch.setenv("XIAOYUZHOU_REFRESH_TOKEN", "fixture-refresh")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "XiaoyuzhouClient", FakeContextClient)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionClient", FakeContextClient)  # type: ignore[attr-defined]
+
+    class FakeInitializer:
+        def __init__(self, _api: object, _page_id: str) -> None:
+            pass
+
+        def initialize(self) -> object:
+            return SimpleNamespace(resources={"year": object()})
+
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "collect_metadata", lambda _api: "snapshot")  # type: ignore[attr-defined]
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        cli_module,
+        "collect_monthly_wrapped",
+        lambda _api, _snapshot: "wrapped",
+    )
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        cli_module,
+        "calculate_statistics",
+        lambda _snapshot, _wrapped: SimpleNamespace(daily="daily"),
+    )
+
+
+def test_rebuild_statistics_success(capsys: object, monkeypatch: object) -> None:
+    _install_rebuild_fakes(monkeypatch)
+
+    class FakeSynchronizer:
+        def __init__(self, _api: object, resources: object) -> None:
+            assert resources == {"year": resources["year"]}  # type: ignore[index]
+
+        def sync(self, _statistics: object) -> object:
+            return SimpleNamespace(created=2, updated=3, unchanged=4)
+
+    monkeypatch.setattr(cli_module, "StatisticsSynchronizer", FakeSynchronizer)  # type: ignore[attr-defined]
+    assert main(["rebuild-statistics"]) == 0
+    output = capsys.readouterr().out  # type: ignore[attr-defined]
+    assert "created=2, updated=3, unchanged=4" in output
+
+
+def test_rebuild_heatmap_success(capsys: object, monkeypatch: object) -> None:
+    _install_rebuild_fakes(monkeypatch)
+
+    class FakeHeatmap:
+        def __init__(self, _api: object, page_id: str) -> None:
+            assert page_id == "fixture-page"
+
+        def publish(self, _year: int, daily: object) -> object:
+            assert daily == "daily"
+            return SimpleNamespace(action="updated")
+
+    monkeypatch.setattr(cli_module, "HeatmapPublisher", FakeHeatmap)  # type: ignore[attr-defined]
+    assert main(["rebuild-heatmap"]) == 0
+    output = capsys.readouterr().out  # type: ignore[attr-defined]
+    assert output.strip() == "Heatmap rebuild OK (action=updated)"

@@ -20,6 +20,34 @@ from xyz2notion.notion.schema import (
 DATA_PAGE_TITLE = "Xyz2Notion 数据层"
 HOME_MARKER = "XYZ2NOTION_MANAGED_HOME_V1"
 DEFAULT_COVER_URL = "https://raw.githubusercontent.com/guoyingwei6/Xyz2Notion/main/assets/cover.svg"
+LEGACY_DATABASE_TITLES: dict[str, tuple[str, ...]] = {
+    "author": ("Author", "作者"),
+    "podcast": ("Podcast",),
+    "episode": ("Episode",),
+    "all": ("全部",),
+    "year": ("年",),
+    "month": ("月",),
+    "week": ("周",),
+    "day": ("日",),
+    "mindmap": ("思维导图",),
+}
+LEGACY_SIGNATURES: dict[str, tuple[frozenset[str], ...]] = {
+    "author": (frozenset({"Name"}), frozenset({"标题"})),
+    "podcast": (
+        frozenset({"Name", "PID"}),
+        frozenset({"播客", "Pid"}),
+    ),
+    "episode": (
+        frozenset({"Name", "EID"}),
+        frozenset({"标题", "Eid", "音频"}),
+    ),
+    "all": (frozenset({"Name"}), frozenset({"标题"})),
+    "year": (frozenset({"Name"}), frozenset({"标题"})),
+    "month": (frozenset({"Name"}), frozenset({"标题"})),
+    "week": (frozenset({"Name"}), frozenset({"标题"})),
+    "day": (frozenset({"Name"}), frozenset({"标题"})),
+    "mindmap": (frozenset({"Name"}), frozenset({"标题"})),
+}
 
 
 class NotionInitializerAPI(Protocol):
@@ -232,6 +260,7 @@ class NotionInitializer:
             raise ValueError("root_page_id cannot be empty")
         self.api = api
         self.root_page_id = root_page_id
+        self._root_databases: dict[str, list[str]] | None = None
 
     def initialize(self) -> InitializationResult:
         """Run an additive, idempotent initialization."""
@@ -249,6 +278,22 @@ class NotionInitializer:
             updated_views=updated_views,
             created_home=created_home,
         )
+
+    def discover_existing_resources(self) -> dict[str, NotionResource]:
+        """Discover adoptable databases without changing the Notion page."""
+        resources: dict[str, NotionResource] = {}
+        for spec in DATABASE_SPECS:
+            database = self._find_database(spec, "__xyz2notion_discovery__")
+            if database is None:
+                continue
+            data_source_id = _data_source_id(database)
+            data_source = self.api.retrieve_data_source(data_source_id)
+            resources[spec.key] = NotionResource(
+                database_id=str(database["id"]),
+                data_source_id=data_source_id,
+                property_ids=_property_ids(data_source),
+            )
+        return resources
 
     def _ensure_page_branding(self) -> None:
         page = self.api.retrieve_page(self.root_page_id)
@@ -284,7 +329,44 @@ class NotionInitializer:
             database = self.api.retrieve_database(str(database_id))
             if _parent_page_id(database) == parent_page_id:
                 return database
+        for title in LEGACY_DATABASE_TITLES[spec.key]:
+            for database_id in self._databases_under_root().get(title, []):
+                database = self.api.retrieve_database(database_id)
+                try:
+                    data_source = self.api.retrieve_data_source(_data_source_id(database))
+                except (KeyError, ValueError):
+                    continue
+                properties = data_source.get("properties")
+                names = set(properties) if isinstance(properties, dict) else set()
+                if any(signature.issubset(names) for signature in LEGACY_SIGNATURES[spec.key]):
+                    return database
         return None
+
+    def _databases_under_root(self) -> dict[str, list[str]]:
+        """Find only database blocks inside the configured root page tree."""
+        if self._root_databases is not None:
+            return self._root_databases
+        found: dict[str, list[str]] = {}
+        visited: set[str] = set()
+
+        def walk(block_id: str) -> None:
+            if block_id in visited:
+                return
+            visited.add(block_id)
+            for block in self.api.list_block_children(block_id):
+                child_type = block.get("type")
+                child_id = block.get("id")
+                if child_type == "child_database" and child_id:
+                    child = block.get("child_database")
+                    if isinstance(child, dict) and child.get("title"):
+                        found.setdefault(str(child["title"]), []).append(str(child_id))
+                    continue
+                if block.get("has_children") and child_id:
+                    walk(str(child_id))
+
+        walk(self.root_page_id)
+        self._root_databases = found
+        return found
 
     def _ensure_databases(
         self,

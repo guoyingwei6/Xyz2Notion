@@ -19,6 +19,12 @@ from xyz2notion.config import (
     load_runtime_credentials,
 )
 from xyz2notion.enrichment.pipeline import SummaryPolicy
+from xyz2notion.migration.legacy import LegacyTemplateMigrator
+from xyz2notion.migration.schema import (
+    CURRENT_WORKSPACE_SCHEMA_VERSION,
+    detect_workspace_schema_version,
+    migration_plan,
+)
 from xyz2notion.notion.client import NotionAPIError, NotionClient
 from xyz2notion.notion.initializer import NotionInitializer
 from xyz2notion.orchestration.processor import (
@@ -26,6 +32,7 @@ from xyz2notion.orchestration.processor import (
     build_provider_clients,
     episode_candidates,
 )
+from xyz2notion.orchestration.recovery import reset_episode_ai
 from xyz2notion.orchestration.state_store import NotionEpisodeStateStore
 from xyz2notion.security import CredentialKind, allowed_hosts
 from xyz2notion.statistics.calculator import calculate_statistics
@@ -74,6 +81,37 @@ def build_parser() -> argparse.ArgumentParser:
         ai_command = subparsers.add_parser(name, help=help_text)
         ai_command.add_argument("--config", default="config.yaml", help="path to config.yaml")
         ai_command.add_argument(
+            "--page-id",
+            help="target root page ID; defaults to NOTION_PAGE_ID",
+        )
+    migrate = subparsers.add_parser(
+        "migrate",
+        help="adopt and map a legacy Podcast2Notion template in place",
+    )
+    migrate.add_argument(
+        "--page-id",
+        help="target root page ID; defaults to NOTION_PAGE_ID",
+    )
+    migrate.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="report planned counts without changing Notion",
+    )
+    redo = subparsers.add_parser(
+        "redo-episode",
+        help="reset one exact Episode AI state without deleting page content",
+    )
+    redo.add_argument("--eid", required=True, help="exact Xiaoyuzhou Episode ID")
+    redo.add_argument(
+        "--page-id",
+        help="target root page ID; defaults to NOTION_PAGE_ID",
+    )
+    for name, help_text in (
+        ("rebuild-statistics", "recalculate all listening statistics"),
+        ("rebuild-heatmap", "rebuild the current-year listening heatmap"),
+    ):
+        rebuild = subparsers.add_parser(name, help=help_text)
+        rebuild.add_argument(
             "--page-id",
             help="target root page ID; defaults to NOTION_PAGE_ID",
         )
@@ -167,6 +205,141 @@ def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
     return 0
 
 
+def _run_migration(args: argparse.Namespace) -> int:
+    try:
+        credentials = load_runtime_credentials()
+        credentials.require("notion_token")
+        page_id = args.page_id or credentials.notion_page_id
+        if not page_id:
+            raise MissingCredentialError(
+                "Missing target page: set NOTION_PAGE_ID or pass --page-id"
+            )
+        if credentials.notion_token is None:
+            raise AssertionError("credential requirement did not narrow notion_token")
+        with NotionClient(credentials.notion_token) as notion:
+            previous_schema_version = detect_workspace_schema_version(
+                notion.list_block_children(page_id)
+            )
+            migration_plan(previous_schema_version)
+            initializer = NotionInitializer(notion, page_id)
+            resources = (
+                initializer.discover_existing_resources()
+                if args.dry_run
+                else initializer.initialize().resources
+            )
+            report = LegacyTemplateMigrator(
+                notion,
+                resources,
+                page_id,
+            ).migrate(dry_run=args.dry_run)
+    except (ConfigurationError, MissingCredentialError) as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    except NotionAPIError as exc:
+        print(f"Notion error: {exc}", file=sys.stderr)
+        return 4
+    except ValueError as exc:
+        print(f"Migration error: {exc}", file=sys.stderr)
+        return 5
+    if report.duplicate_keys:
+        print(
+            "Migration stopped: duplicate stable keys must be resolved "
+            f"(count={len(report.duplicate_keys)})",
+            file=sys.stderr,
+        )
+        return 5
+    print(
+        f"Migration {'dry-run' if report.dry_run else 'complete'} "
+        f"(scanned={report.scanned_pages}, planned={report.planned_updates}, "
+        f"updated={report.updated_pages}, legacy embeds found={report.legacy_embeds_found}, "
+        f"removed={report.legacy_embeds_removed}, "
+        f"schema={previous_schema_version}->{CURRENT_WORKSPACE_SCHEMA_VERSION})"
+    )
+    return 0
+
+
+def _run_redo_episode(args: argparse.Namespace) -> int:
+    try:
+        credentials = load_runtime_credentials()
+        credentials.require("notion_token")
+        page_id = args.page_id or credentials.notion_page_id
+        if not page_id:
+            raise MissingCredentialError(
+                "Missing target page: set NOTION_PAGE_ID or pass --page-id"
+            )
+        if credentials.notion_token is None:
+            raise AssertionError("credential requirement did not narrow notion_token")
+        with NotionClient(credentials.notion_token) as notion:
+            initialization = NotionInitializer(notion, page_id).initialize()
+            reset_episode_ai(
+                notion,
+                initialization.resources["episode"].data_source_id,
+                args.eid,
+            )
+    except (ConfigurationError, MissingCredentialError) as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    except NotionAPIError as exc:
+        print(f"Notion error: {exc}", file=sys.stderr)
+        return 4
+    except ValueError as exc:
+        print(f"Recovery error: {exc}", file=sys.stderr)
+        return 6
+    print("Episode AI state reset OK (count=1)")
+    return 0
+
+
+def _run_rebuild(args: argparse.Namespace, *, heatmap_only: bool) -> int:
+    try:
+        credentials = load_runtime_credentials()
+        credentials.require("xiaoyuzhou_refresh_token", "notion_token")
+        page_id = args.page_id or credentials.notion_page_id
+        if not page_id:
+            raise MissingCredentialError(
+                "Missing target page: set NOTION_PAGE_ID or pass --page-id"
+            )
+        if credentials.xiaoyuzhou_refresh_token is None or credentials.notion_token is None:
+            raise AssertionError("credential requirements did not narrow tokens")
+        with (
+            XiaoyuzhouClient(
+                credentials.xiaoyuzhou_refresh_token,
+                credentials.xiaoyuzhou_device_id,
+            ) as xiaoyuzhou,
+            NotionClient(credentials.notion_token) as notion,
+        ):
+            initialization = NotionInitializer(notion, page_id).initialize()
+            snapshot = collect_metadata(xiaoyuzhou)
+            wrapped = collect_monthly_wrapped(xiaoyuzhou, snapshot)
+            statistics = calculate_statistics(snapshot, wrapped)
+            if heatmap_only:
+                heatmap = HeatmapPublisher(notion, page_id).publish(
+                    date.today().year,
+                    statistics.daily,
+                )
+                output = f"Heatmap rebuild OK (action={heatmap.action})"
+            else:
+                report = StatisticsSynchronizer(
+                    notion,
+                    initialization.resources,
+                ).sync(statistics)
+                output = (
+                    "Statistics rebuild OK "
+                    f"(created={report.created}, updated={report.updated}, "
+                    f"unchanged={report.unchanged})"
+                )
+    except (ConfigurationError, MissingCredentialError) as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    except XiaoyuzhouAPIError as exc:
+        print(f"Xiaoyuzhou error: {exc}", file=sys.stderr)
+        return 3
+    except NotionAPIError as exc:
+        print(f"Notion error: {exc}", file=sys.stderr)
+        return 4
+    print(output)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the CLI."""
     parser = build_parser()
@@ -186,7 +359,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         except ConfigurationError as exc:
             print(f"Configuration error: {exc}", file=sys.stderr)
             return 2
-        providers = ", ".join(provider.value for provider in config.asr.provider_order)
+        providers = ", ".join(provider.value for provider in config.asr.provider_order) or "paused"
         print(f"Configuration OK (schema v{config.schema_version}, ASR: {providers})")
         return 0
     if args.command == "config-schema":
@@ -292,6 +465,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command in {"process-ai", "retry-failed"}:
         return _run_ai(args, retry_failed=args.command == "retry-failed")
+    if args.command == "migrate":
+        return _run_migration(args)
+    if args.command == "redo-episode":
+        return _run_redo_episode(args)
+    if args.command in {"rebuild-statistics", "rebuild-heatmap"}:
+        return _run_rebuild(
+            args,
+            heatmap_only=args.command == "rebuild-heatmap",
+        )
 
     parser.print_help()
     return 0

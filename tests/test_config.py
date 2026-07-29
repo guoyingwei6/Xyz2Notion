@@ -68,7 +68,6 @@ def test_missing_config_has_clear_error(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "values",
     [
-        {"provider_order": []},
         {"provider_order": ["siliconflow", "siliconflow"]},
         {"siliconflow_models": []},
         {"siliconflow_models": ["model", "model"]},
@@ -89,6 +88,10 @@ def test_paid_provider_requires_explicit_budget() -> None:
         paid_budget_cny=5,
     )
     assert config.paid_budget_cny == 5
+
+
+def test_empty_provider_order_intentionally_pauses_asr() -> None:
+    assert AsrConfig(provider_order=()).provider_order == ()
 
 
 def test_daily_limit_cannot_exceed_monthly_limit() -> None:

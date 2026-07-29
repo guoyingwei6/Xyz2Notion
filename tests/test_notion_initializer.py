@@ -268,6 +268,35 @@ def test_initializer_is_idempotent_and_preserves_user_content() -> None:
     assert marker_count == 1
 
 
+def test_initializer_adopts_matching_legacy_database_without_copying_rows() -> None:
+    fake = FakeNotion()
+    legacy = fake.create_database(
+        "root",
+        "Podcast",
+        {
+            "播客": {"title": {}},
+            "Pid": {"rich_text": {}},
+            "用户笔记": {"rich_text": {}},
+        },
+    )
+    fake.blocks["root"].append(
+        {
+            "id": legacy["id"],
+            "type": "child_database",
+            "child_database": {"title": "Podcast"},
+        }
+    )
+
+    result = NotionInitializer(fake, "root").initialize()
+
+    assert result.resources["podcast"].database_id == legacy["id"]
+    assert result.created_databases == 8
+    properties = fake.data_sources[result.resources["podcast"].data_source_id]["properties"]
+    assert "PID" in properties
+    assert "Name" in properties
+    assert "用户笔记" in properties
+
+
 def test_home_layout_has_columns_and_heatmap_placeholder() -> None:
     blocks = home_blocks()
     column_list = next(block for block in blocks if block["type"] == "column_list")

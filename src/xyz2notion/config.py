@@ -53,8 +53,6 @@ class AsrConfig(StrictConfigModel):
 
     @model_validator(mode="after")
     def validate_provider_policy(self) -> Self:
-        if not self.provider_order:
-            raise ValueError("asr.provider_order must contain at least one provider")
         if len(set(self.provider_order)) != len(self.provider_order):
             raise ValueError("asr.provider_order cannot contain duplicates")
         if not self.siliconflow_models or any(

@@ -76,6 +76,16 @@ def _property_url(properties: Mapping[str, Any], name: str) -> str:
     return str(url) if url else ""
 
 
+def _property_selection(properties: Mapping[str, Any], name: str) -> str:
+    value = properties.get(name)
+    if not isinstance(value, Mapping):
+        return ""
+    selected = value.get("select") or value.get("status")
+    if not isinstance(selected, Mapping):
+        return ""
+    return str(selected.get("name") or "")
+
+
 def episode_candidates(pages: list[JsonObject]) -> tuple[EpisodeCandidate, ...]:
     """Extract processable rows without exposing titles in logs."""
     result: list[EpisodeCandidate] = []
@@ -86,7 +96,8 @@ def episode_candidates(pages: list[JsonObject]) -> tuple[EpisodeCandidate, ...]:
         eid = _property_text(properties, "EID")
         title = _property_text(properties, "Name")
         audio_url = _property_url(properties, "Audio URL")
-        if eid and title and audio_url:
+        asr_status = _property_selection(properties, "ASR Status")
+        if eid and title and audio_url and asr_status != "已发布":
             result.append(EpisodeCandidate(str(page["id"]), eid, title, audio_url))
     return tuple(result)
 
@@ -282,6 +293,12 @@ class EpisodeAIProcessor:
                 PipelineState.ASR_SUBMITTED,
                 PipelineState.ASR_RUNNING,
             }:
+                if self.tingwu is None and self.siliconflow is None:
+                    return ProcessingOutcome(
+                        candidate.eid,
+                        "paused",
+                        state.record.state,
+                    )
                 state, pending = self._advance_asr(candidate, state)
                 state = self._save(candidate.page_id, state)
                 if pending:

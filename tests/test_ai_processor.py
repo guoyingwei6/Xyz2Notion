@@ -166,6 +166,15 @@ def test_candidate_extraction_skips_incomplete_rows() -> None:
                 "Audio URL": {"url": "https://cdn.example/audio"},
             },
         },
+        {
+            "id": "legacy-published",
+            "properties": {
+                "EID": {"rich_text": [{"plain_text": "legacy"}]},
+                "Name": {"title": [{"plain_text": "旧单集"}]},
+                "Audio URL": {"url": "https://cdn.example/legacy"},
+                "ASR Status": {"select": {"name": "已发布"}},
+            },
+        },
         {"id": "skip", "properties": {}},
         {"properties": {}},
     ]
@@ -189,6 +198,14 @@ def test_siliconflow_summary_and_publish_are_checkpointed() -> None:
         PipelineState.ENRICHED,
         PipelineState.PUBLISHED,
     ]
+
+
+def test_no_asr_provider_pauses_without_persisting_failure() -> None:
+    store = FakeStateStore()
+    outcome = EpisodeAIProcessor(FakeNotion(), store).process(CANDIDATE, {})
+    assert outcome.action == "paused"
+    assert outcome.state is PipelineState.DISCOVERED
+    assert store.saved == []
 
 
 def test_transcribed_checkpoint_waits_for_summary_key_without_repeating_asr() -> None:

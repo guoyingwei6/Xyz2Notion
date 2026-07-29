@@ -64,6 +64,8 @@ uv run xyz2notion xiaoyuzhou-check
 [`docs/episode-page.md`](docs/episode-page.md)。
 GitHub Secrets、四个运行工作流、调度时间和手动重试方法见
 [`docs/github-actions.md`](docs/github-actions.md)。
+旧 Podcast2Notion 模板的原地迁移、dry-run、单集重做和统计重建见
+[`docs/migration.md`](docs/migration.md)。
 
 ## 可恢复运行
 
