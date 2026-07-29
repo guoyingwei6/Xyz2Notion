@@ -3,6 +3,8 @@ from types import SimpleNamespace
 import xyz2notion.cli as cli_module
 from xyz2notion import __version__
 from xyz2notion.cli import main
+from xyz2notion.orchestration.processor import ProcessingOutcome
+from xyz2notion.state import PipelineState
 
 
 def test_doctor_reports_installation(capsys: object) -> None:
@@ -68,6 +70,16 @@ def test_sync_metadata_reports_missing_tokens(
     ):
         monkeypatch.delenv(name, raising=False)  # type: ignore[attr-defined]
     assert main(["sync-metadata"]) == 2
+    error = capsys.readouterr().err  # type: ignore[attr-defined]
+    assert "Missing required credential" in error
+
+
+def test_process_ai_reports_missing_notion_token(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.delenv("NOTION_TOKEN", raising=False)  # type: ignore[attr-defined]
+    assert main(["process-ai", "--config", "config.example.yaml"]) == 2
     error = capsys.readouterr().err  # type: ignore[attr-defined]
     assert "Missing required credential" in error
 
@@ -196,3 +208,89 @@ def test_notion_init_success_reports_counts(
     output = capsys.readouterr().out  # type: ignore[attr-defined]
     assert "databases created: 9" in output
     assert "views created: 12" in output
+
+
+def test_process_ai_reports_only_aggregate_counts(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+
+    page = {
+        "id": "episode-page",
+        "properties": {
+            "Name": {"title": [{"plain_text": "private episode title"}]},
+            "EID": {"rich_text": [{"plain_text": "private-eid"}]},
+            "Audio URL": {"url": "https://example.com/audio.mp3"},
+        },
+    }
+
+    class FakeNotion(FakeContextClient):
+        def query_data_source(
+            self,
+            data_source_id: str,
+            _payload: object,
+        ) -> list[object]:
+            assert data_source_id == "episode-source"
+            return [page]
+
+    class FakeInitializer:
+        def __init__(self, _api: object, page_id: str) -> None:
+            assert page_id == "fixture-page"
+
+        def initialize(self) -> object:
+            return SimpleNamespace(
+                resources={
+                    "episode": SimpleNamespace(data_source_id="episode-source"),
+                }
+            )
+
+    class FakeStore:
+        def __init__(self, _api: object) -> None:
+            pass
+
+        def __enter__(self) -> "FakeStore":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            pass
+
+    class FakeProcessor:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def process(
+            self,
+            candidate: object,
+            candidate_page: object,
+            *,
+            retry_failed: bool,
+            only_failed: bool,
+        ) -> ProcessingOutcome:
+            assert candidate_page == page
+            assert retry_failed is False
+            assert only_failed is False
+            return ProcessingOutcome(
+                candidate.eid,  # type: ignore[attr-defined]
+                "pending",
+                PipelineState.ASR_RUNNING,
+            )
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionEpisodeStateStore", FakeStore)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "EpisodeAIProcessor", FakeProcessor)  # type: ignore[attr-defined]
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        cli_module,
+        "build_provider_clients",
+        lambda **_kwargs: (None, None, None),
+    )
+
+    assert main(["process-ai", "--config", "config.example.yaml"]) == 0
+    output = capsys.readouterr().out  # type: ignore[attr-defined]
+    assert "selected=1" in output
+    assert "pending=1" in output
+    assert "ASR_RUNNING=1" in output
+    assert "private episode title" not in output
+    assert "private-eid" not in output

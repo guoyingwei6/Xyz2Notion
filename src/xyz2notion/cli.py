@@ -4,19 +4,29 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections import Counter
 from collections.abc import Sequence
+from contextlib import ExitStack
 from datetime import date
 
 from xyz2notion import __version__
 from xyz2notion.config import (
+    AsrProvider,
     ConfigurationError,
     MissingCredentialError,
     config_schema_json,
     load_config,
     load_runtime_credentials,
 )
+from xyz2notion.enrichment.pipeline import SummaryPolicy
 from xyz2notion.notion.client import NotionAPIError, NotionClient
 from xyz2notion.notion.initializer import NotionInitializer
+from xyz2notion.orchestration.processor import (
+    EpisodeAIProcessor,
+    build_provider_clients,
+    episode_candidates,
+)
+from xyz2notion.orchestration.state_store import NotionEpisodeStateStore
 from xyz2notion.security import CredentialKind, allowed_hosts
 from xyz2notion.statistics.calculator import calculate_statistics
 from xyz2notion.statistics.notion_sync import HeatmapPublisher, StatisticsSynchronizer
@@ -57,7 +67,104 @@ def build_parser() -> argparse.ArgumentParser:
         "--page-id",
         help="target root page ID; defaults to NOTION_PAGE_ID",
     )
+    for name, help_text in (
+        ("process-ai", "advance ASR, summary, and Notion publishing"),
+        ("retry-failed", "retry only resumable failed Episode AI jobs"),
+    ):
+        ai_command = subparsers.add_parser(name, help=help_text)
+        ai_command.add_argument("--config", default="config.yaml", help="path to config.yaml")
+        ai_command.add_argument(
+            "--page-id",
+            help="target root page ID; defaults to NOTION_PAGE_ID",
+        )
     return parser
+
+
+def _summary_policy(config: object) -> SummaryPolicy:
+    summary = config.summary  # type: ignore[attr-defined]
+    return SummaryPolicy(
+        model=summary.model,
+        prompt_version=summary.prompt_version,
+        chunk_tokens=summary.chunk_tokens,
+        chunk_minutes=summary.chunk_minutes,
+        max_output_tokens=summary.max_output_tokens,
+        input_cny_per_million_tokens=summary.input_cny_per_million_tokens,
+        output_cny_per_million_tokens=summary.output_cny_per_million_tokens,
+    )
+
+
+def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
+    try:
+        config = load_config(args.config)
+        credentials = load_runtime_credentials()
+        credentials.require("notion_token")
+        page_id = args.page_id or credentials.notion_page_id
+        if not page_id:
+            raise MissingCredentialError(
+                "Missing target page: set NOTION_PAGE_ID or pass --page-id"
+            )
+        if credentials.notion_token is None:
+            raise AssertionError("credential requirement did not narrow notion_token")
+
+        selected = set(config.asr.provider_order)
+        tingwu_cookie = credentials.tingwu_cookie if AsrProvider.TINGWU_COOKIE in selected else None
+        siliconflow_api_key = (
+            credentials.siliconflow_api_key if AsrProvider.SILICONFLOW in selected else None
+        )
+        dashscope_api_key = credentials.dashscope_api_key if config.summary.enabled else None
+
+        with ExitStack() as stack:
+            notion = stack.enter_context(NotionClient(credentials.notion_token))
+            initialization = NotionInitializer(notion, page_id).initialize()
+            pages = notion.query_data_source(
+                initialization.resources["episode"].data_source_id,
+                {"page_size": 100},
+            )
+            candidates = episode_candidates(pages)[: config.limits.episodes_per_run]
+            tingwu, siliconflow, dashscope = build_provider_clients(
+                tingwu_cookie=tingwu_cookie,
+                siliconflow_api_key=siliconflow_api_key,
+                dashscope_api_key=dashscope_api_key,
+                siliconflow_models=config.asr.siliconflow_models,
+            )
+            for client in (tingwu, siliconflow, dashscope):
+                if client is not None:
+                    stack.enter_context(client)
+            state_store = stack.enter_context(NotionEpisodeStateStore(notion))
+            processor = EpisodeAIProcessor(
+                notion,
+                state_store,
+                tingwu=tingwu,
+                siliconflow=siliconflow,
+                dashscope=dashscope,
+                summary_policy=_summary_policy(config),
+            )
+            page_by_id = {str(page.get("id")): page for page in pages}
+            outcomes = [
+                processor.process(
+                    candidate,
+                    page_by_id[candidate.page_id],
+                    retry_failed=retry_failed,
+                    only_failed=retry_failed,
+                )
+                for candidate in candidates
+            ]
+    except (ConfigurationError, MissingCredentialError) as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    except NotionAPIError as exc:
+        print(f"Notion error: {exc}", file=sys.stderr)
+        return 4
+
+    actions = Counter(outcome.action for outcome in outcomes)
+    states = Counter(outcome.state.value for outcome in outcomes)
+    action_summary = ", ".join(f"{name}={actions[name]}" for name in sorted(actions)) or "none=0"
+    state_summary = ", ".join(f"{name}={states[name]}" for name in sorted(states)) or "none=0"
+    print(
+        f"Episode AI processing OK (selected={len(candidates)}; "
+        f"actions: {action_summary}; states: {state_summary})"
+    )
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -183,6 +290,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"heatmap: {heatmap.action})"
         )
         return 0
+    if args.command in {"process-ai", "retry-failed"}:
+        return _run_ai(args, retry_failed=args.command == "retry-failed")
 
     parser.print_help()
     return 0

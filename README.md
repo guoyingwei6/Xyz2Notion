@@ -9,10 +9,10 @@ Notion 和可选语音识别服务的凭证，所有任务运行在用户自己�
 
 ## 当前状态
 
-项目处于早期开发阶段。P0 已建立项目骨架、CLI、安全域名白名单、日志脱敏、
-单元测试和 CI；业务同步功能将按
+项目已实现自主 Notion 模板、元数据与统计同步、听悟 Cookie → SiliconFlow
+降级转写、千问摘要、脑图和可恢复的 GitHub Actions 编排；仍按
 [实施 Checklist](outputs/Xyz2Notion项目实施Checklist.md)
-逐阶段实现。
+完成真实账户 QA、迁移和正式发布。
 
 ## 本地开发
 
@@ -62,12 +62,15 @@ uv run xyz2notion xiaoyuzhou-check
 [`docs/ai-enrichment.md`](docs/ai-enrichment.md)。
 单集页面的托管区边界、播放器、原生脑图、SVG 脑图和用户笔记保护机制见
 [`docs/episode-page.md`](docs/episode-page.md)。
+GitHub Secrets、四个运行工作流、调度时间和手动重试方法见
+[`docs/github-actions.md`](docs/github-actions.md)。
 
 ## 可恢复运行
 
 每个单集使用独立状态机记录发现、ASR 提交、转写、AI 增强和发布阶段。
-状态以原子 JSON 文件保存；GitHub Actions 中断后会从最后状态继续，而不是
-重新执行已经完成的步骤。
+状态以不可变 JSON 快照保存在用户自己的 Notion 文件属性中；GitHub Actions
+中断后会从最后状态继续，而不是重新执行已经完成的步骤。仓库和 Actions
+Artifact 都不会保存音频、文字稿或摘要。
 
 ## 初始化 Notion
 
@@ -91,6 +94,18 @@ uv run xyz2notion sync-metadata
 upsert，并更新精确月统计、排行和当前年度热力图；不会覆盖未知属性、用户笔记
 或单集页面块。统计口径见
 [`docs/statistics.md`](docs/statistics.md)。
+
+推进单集的转写、摘要和发布：
+
+```bash
+uv run xyz2notion process-ai --config config.yaml
+```
+
+只重试已经标记为“可重试失败”的单集：
+
+```bash
+uv run xyz2notion retry-failed --config config.yaml
+```
 
 ## 安全原则
 

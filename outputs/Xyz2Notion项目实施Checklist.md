@@ -516,32 +516,36 @@ P9 当前状态：程序托管根块、先建后换、用户块保护、播放�
 
 ### Workflow
 
-- [ ] `ci.yml`：Lint、类型检查、测试和安全扫描。
-- [ ] `init-notion.yml`：初始化自主 Notion 模板。
-- [ ] `sync-metadata.yml`：同步小宇宙元数据和统计。
-- [ ] `process-ai.yml`：推进 ASR、总结和发布状态机。
-- [ ] `retry-failed.yml` 或手动重试入口。
-- [ ] 调度避开整点高峰。
-- [ ] 配置 concurrency 防止重复运行。
-- [ ] 设置合理的 job timeout。
-- [ ] 为每次运行生成不含隐私的摘要。
+- [x] `ci.yml`：Lint、类型检查、测试和安全扫描。
+- [x] `init-notion.yml`：初始化自主 Notion 模板。
+- [x] `sync-metadata.yml`：同步小宇宙元数据和统计。
+- [x] `process-ai.yml`：推进 ASR、总结和发布状态机。
+- [x] `retry-failed.yml` 或手动重试入口。
+- [x] 调度避开整点高峰。
+- [x] 配置 concurrency 防止重复运行。
+- [x] 设置合理的 job timeout。
+- [x] 为每次运行生成不含隐私的摘要。
 
 ### Secrets 文档
 
-- [ ] `XIAOYUZHOU_REFRESH_TOKEN`。
-- [ ] `XIAOYUZHOU_DEVICE_ID` 可选 Variable。
-- [ ] `NOTION_TOKEN`。
-- [ ] `NOTION_ROOT_PAGE_ID`。
-- [ ] `TINGWU_COOKIE` 可选。
-- [ ] `SILICONFLOW_API_KEY`。
-- [ ] `DASHSCOPE_API_KEY` 可选。
+- [x] `XIAOYUZHOU_REFRESH_TOKEN`。
+- [x] `XIAOYUZHOU_DEVICE_ID` 可选 Variable。
+- [x] `NOTION_TOKEN`。
+- [x] `NOTION_PAGE_ID`。
+- [x] `TINGWU_COOKIE` 可选。
+- [x] `SILICONFLOW_API_KEY`。
+- [x] `DASHSCOPE_API_KEY` 条件必需。
 
 ### P10 验收
 
-- [ ] 新用户只按 README 添加配置即可运行。
+- [x] 新用户只按 README 添加配置即可运行。
 - [ ] 手动运行和定时运行均成功。
-- [ ] 工作流中断后下一次能继续。
-- [ ] 没有向仓库提交私人数据、音频或完整文字稿。
+- [x] 模拟工作流中断后下一次能从 Notion 检查点继续。
+- [x] 自动化检查确认未配置 Artifact，仓库不提交私人状态、音频或完整文字稿。
+
+P10 当前状态：四个只读权限运行工作流、错峰调度、互斥并发、超时、聚合摘要、
+Notion 私有检查点和只重试可恢复失败的入口已完成；223 个测试通过，覆盖率
+91.02%。真实手动/定时运行等待用户在 Fork 中配置 Secrets。
 
 ---
 
@@ -624,6 +628,6 @@ P9 当前状态：程序托管根块、先建后换、用户块保护、播放�
 
 ## 当前执行位置
 
-- 当前阶段：`P9 单集页面渲染`
-- 下一项：完成 P9 远端 CI 后进入 P10 GitHub Actions 总编排
+- 当前阶段：`P10 GitHub Actions 自动化`
+- 下一项：提交 P10 并验证远端 CI，然后进入 P11 迁移、兼容与恢复
 - 开发原则：每完成一个 Checkbox，立即运行对应验证并更新任务状态

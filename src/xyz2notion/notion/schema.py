@@ -174,11 +174,13 @@ DATABASE_SPECS: tuple[DatabaseSpec, ...] = (
             "ASR Provider": text_property(),
             "ASR Model": text_property(),
             "ASR Task ID": text_property(),
+            "ASR Source Task ID": text_property(),
             "ASR Status": select_property(ASR_STATUS_OPTIONS),
             "ASR Quality": text_property(),
             "ASR Accuracy": number_property("percent"),
             "Failure Reason": text_property(),
             "Content Version": text_property(),
+            "AI State File": {"files": {}},
         },
     ),
     DatabaseSpec(
