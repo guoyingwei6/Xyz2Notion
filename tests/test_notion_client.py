@@ -60,6 +60,49 @@ def test_create_data_source_page_uses_2026_parent_contract() -> None:
     assert created["id"] == "row-1"
 
 
+def test_direct_file_upload_creates_sends_and_returns_id() -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/v1/file_uploads":
+            return httpx.Response(
+                200,
+                json={
+                    "object": "file_upload",
+                    "id": "upload-1",
+                    "status": "pending",
+                },
+            )
+        assert request.url.path == "/v1/file_uploads/upload-1/send"
+        assert request.headers["Content-Type"].startswith("multipart/form-data; boundary=")
+        assert b"heatmap.png" in request.content
+        assert b"png-bytes" in request.content
+        return httpx.Response(
+            200,
+            json={
+                "object": "file_upload",
+                "id": "upload-1",
+                "status": "uploaded",
+            },
+        )
+
+    client = client_for(httpx.MockTransport(handle))
+    upload_id = client.upload_file("heatmap.png", "image/png", b"png-bytes")
+    assert upload_id == "upload-1"
+    assert len(requests) == 2
+
+
+def test_direct_file_upload_validates_inputs() -> None:
+    client = client_for(httpx.MockTransport(lambda _request: httpx.Response(500)))
+    with pytest.raises(ValueError, match="basename"):
+        client.upload_file("../file.png", "image/png", b"x")
+    with pytest.raises(ValueError, match="content_type"):
+        client.upload_file("file.png", "", b"x")
+    with pytest.raises(ValueError, match="content"):
+        client.upload_file("file.png", "image/png", b"")
+
+
 def test_base_url_must_be_notion_allowlisted() -> None:
     with pytest.raises(UnsafeCredentialDestinationError):
         NotionClient("notion-example", base_url="https://evil.example/v1")

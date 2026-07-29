@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
+from datetime import date
 
 from xyz2notion import __version__
 from xyz2notion.config import (
@@ -17,8 +18,10 @@ from xyz2notion.config import (
 from xyz2notion.notion.client import NotionAPIError, NotionClient
 from xyz2notion.notion.initializer import NotionInitializer
 from xyz2notion.security import CredentialKind, allowed_hosts
+from xyz2notion.statistics.calculator import calculate_statistics
+from xyz2notion.statistics.notion_sync import HeatmapPublisher, StatisticsSynchronizer
 from xyz2notion.sync.metadata import MetadataSynchronizer
-from xyz2notion.sync.pipeline import collect_metadata
+from xyz2notion.sync.pipeline import collect_metadata, collect_monthly_wrapped
 from xyz2notion.xiaoyuzhou.client import XiaoyuzhouAPIError, XiaoyuzhouClient
 
 
@@ -148,10 +151,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             ):
                 initialization = NotionInitializer(notion, page_id).initialize()
                 snapshot = collect_metadata(xiaoyuzhou)
+                wrapped = collect_monthly_wrapped(xiaoyuzhou, snapshot)
                 report = MetadataSynchronizer(
                     notion,
                     initialization.resources,
                 ).sync(snapshot)
+                statistics = calculate_statistics(snapshot, wrapped)
+                statistics_report = StatisticsSynchronizer(
+                    notion,
+                    initialization.resources,
+                ).sync(statistics)
+                heatmap = HeatmapPublisher(notion, page_id).publish(
+                    date.today().year,
+                    statistics.daily,
+                )
         except (ConfigurationError, MissingCredentialError) as exc:
             print(f"Configuration error: {exc}", file=sys.stderr)
             return 2
@@ -164,7 +177,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(
             "Metadata synchronization OK "
             f"(created: {report.created}, updated: {report.updated}, "
-            f"unchanged: {report.unchanged})"
+            f"unchanged: {report.unchanged}; "
+            f"statistics created: {statistics_report.created}, "
+            f"statistics updated: {statistics_report.updated}; "
+            f"heatmap: {heatmap.action})"
         )
         return 0
 

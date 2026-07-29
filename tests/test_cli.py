@@ -123,16 +123,53 @@ def test_sync_metadata_success_reports_only_counts(
             assert snapshot == "fixture-snapshot"
             return SimpleNamespace(created=2, updated=1, unchanged=3)
 
+    class FakeStatisticsSynchronizer:
+        def __init__(self, _api: object, resources: object) -> None:
+            assert resources == {}
+
+        def sync(self, statistics: object) -> object:
+            assert statistics.marker == "fixture-statistics"  # type: ignore[attr-defined]
+            return SimpleNamespace(created=4, updated=5, unchanged=6)
+
+    class FakeHeatmapPublisher:
+        def __init__(self, _api: object, page_id: str) -> None:
+            assert page_id == "fixture-page"
+
+        def publish(self, _year: int, daily: object) -> object:
+            assert daily == "fixture-daily"
+            return SimpleNamespace(action="updated")
+
     monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
     monkeypatch.setattr(cli_module, "MetadataSynchronizer", FakeSynchronizer)  # type: ignore[attr-defined]
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        cli_module,
+        "StatisticsSynchronizer",
+        FakeStatisticsSynchronizer,
+    )
+    monkeypatch.setattr(cli_module, "HeatmapPublisher", FakeHeatmapPublisher)  # type: ignore[attr-defined]
     monkeypatch.setattr(  # type: ignore[attr-defined]
         cli_module,
         "collect_metadata",
         lambda _api: "fixture-snapshot",
     )
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        cli_module,
+        "collect_monthly_wrapped",
+        lambda _api, _snapshot: (),
+    )
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        cli_module,
+        "calculate_statistics",
+        lambda _snapshot, _wrapped: SimpleNamespace(
+            marker="fixture-statistics",
+            daily="fixture-daily",
+        ),
+    )
     assert main(["sync-metadata"]) == 0
     output = capsys.readouterr().out  # type: ignore[attr-defined]
-    assert "(created: 2, updated: 1, unchanged: 3)" in output
+    assert "created: 2, updated: 1, unchanged: 3" in output
+    assert "statistics created: 4, statistics updated: 5" in output
+    assert "heatmap: updated" in output
 
 
 def test_notion_init_success_reports_counts(

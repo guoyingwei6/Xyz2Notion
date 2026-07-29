@@ -80,7 +80,9 @@ uv run xyz2notion sync-metadata
 ```
 
 命令会先增量协调 Notion 结构，再按 Author ID、PID、EID 和周期键执行最小差异
-upsert；不会覆盖未知属性、用户笔记或单集页面块。
+upsert，并更新精确月统计、排行和当前年度热力图；不会覆盖未知属性、用户笔记
+或单集页面块。统计口径见
+[`docs/statistics.md`](docs/statistics.md)。
 
 ## 安全原则
 

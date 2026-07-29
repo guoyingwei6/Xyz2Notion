@@ -97,6 +97,19 @@ def formula_property(expression: str) -> JsonObject:
     return {"formula": {"expression": expression}}
 
 
+def period_scalar_properties() -> JsonObject:
+    return {
+        "Name": title_property(),
+        "Period Key": text_property(),
+        "Start Date": {"date": {}},
+        "End Date": {"date": {}},
+        "Exact Listening Seconds": number_property(),
+        "Podcast Count": number_property(),
+        "Played Days": number_property(),
+        "Statistics Source": text_property(),
+    }
+
+
 LISTENING_STATUS_OPTIONS = (
     ("未听", "gray"),
     ("在听", "blue"),
@@ -138,6 +151,7 @@ DATABASE_SPECS: tuple[DatabaseSpec, ...] = (
             "Description": text_property(),
             "URL": {"url": {}},
             "Total Listening Seconds": number_property(),
+            "Rank": number_property(),
             "Updated At": {"date": {}},
         },
     ),
@@ -170,56 +184,31 @@ DATABASE_SPECS: tuple[DatabaseSpec, ...] = (
         key="all",
         title="全部",
         icon="📊",
-        properties={
-            "Name": title_property(),
-            "Period Key": text_property(),
-            "Start Date": {"date": {}},
-            "End Date": {"date": {}},
-        },
+        properties=period_scalar_properties(),
     ),
     DatabaseSpec(
         key="year",
         title="年",
         icon="🗓️",
-        properties={
-            "Name": title_property(),
-            "Period Key": text_property(),
-            "Start Date": {"date": {}},
-            "End Date": {"date": {}},
-        },
+        properties=period_scalar_properties(),
     ),
     DatabaseSpec(
         key="month",
         title="月",
         icon="📅",
-        properties={
-            "Name": title_property(),
-            "Period Key": text_property(),
-            "Start Date": {"date": {}},
-            "End Date": {"date": {}},
-        },
+        properties=period_scalar_properties(),
     ),
     DatabaseSpec(
         key="week",
         title="周",
         icon="📆",
-        properties={
-            "Name": title_property(),
-            "Period Key": text_property(),
-            "Start Date": {"date": {}},
-            "End Date": {"date": {}},
-        },
+        properties=period_scalar_properties(),
     ),
     DatabaseSpec(
         key="day",
         title="日",
         icon="☀️",
-        properties={
-            "Name": title_property(),
-            "Period Key": text_property(),
-            "Start Date": {"date": {}},
-            "End Date": {"date": {}},
-        },
+        properties=period_scalar_properties(),
     ),
     DatabaseSpec(
         key="mindmap",
@@ -297,7 +286,7 @@ def relational_properties(resources: dict[str, NotionResource]) -> dict[str, Jso
             "Listening Seconds": rollup_property("Episodes", "Played Seconds", "sum"),
             "Episode Count": rollup_property("Episodes", "Name", "count_all"),
             "Listening Hours": formula_property(
-                'round(prop("Listening Seconds") / 3600 * 10) / 10'
+                'round(prop("Exact Listening Seconds") / 3600 * 10) / 10'
             ),
         }
     return result
@@ -309,7 +298,14 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         source="all",
         name="总收听时长",
         view_type="table",
-        visible_properties=("Name", "Listening Hours", "Episode Count"),
+        visible_properties=(
+            "Name",
+            "Listening Hours",
+            "Podcast Count",
+            "Episode Count",
+            "Played Days",
+            "Statistics Source",
+        ),
         sorts=({"property": "Listening Seconds", "direction": "descending"},),
     ),
     ViewSpec(
@@ -317,7 +313,14 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         source="year",
         name="年度统计",
         view_type="table",
-        visible_properties=("Name", "Listening Hours", "Episode Count"),
+        visible_properties=(
+            "Name",
+            "Listening Hours",
+            "Podcast Count",
+            "Episode Count",
+            "Played Days",
+            "Statistics Source",
+        ),
         sorts=({"property": "Start Date", "direction": "descending"},),
     ),
     ViewSpec(
@@ -325,7 +328,14 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         source="month",
         name="月度统计",
         view_type="table",
-        visible_properties=("Name", "Listening Hours", "Episode Count"),
+        visible_properties=(
+            "Name",
+            "Listening Hours",
+            "Podcast Count",
+            "Episode Count",
+            "Played Days",
+            "Statistics Source",
+        ),
         sorts=({"property": "Start Date", "direction": "descending"},),
     ),
     ViewSpec(
@@ -333,7 +343,14 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         source="week",
         name="周统计",
         view_type="table",
-        visible_properties=("Name", "Listening Hours", "Episode Count"),
+        visible_properties=(
+            "Name",
+            "Listening Hours",
+            "Podcast Count",
+            "Episode Count",
+            "Played Days",
+            "Statistics Source",
+        ),
         sorts=({"property": "Start Date", "direction": "descending"},),
     ),
     ViewSpec(
@@ -341,7 +358,14 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         source="day",
         name="日统计",
         view_type="table",
-        visible_properties=("Name", "Listening Hours", "Episode Count"),
+        visible_properties=(
+            "Name",
+            "Listening Hours",
+            "Podcast Count",
+            "Episode Count",
+            "Played Days",
+            "Statistics Source",
+        ),
         sorts=({"property": "Start Date", "direction": "descending"},),
     ),
     ViewSpec(
@@ -349,7 +373,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         source="podcast",
         name="收听时长排行榜",
         view_type="table",
-        visible_properties=("Name", "Cover", "Total Listening Seconds"),
+        visible_properties=("Rank", "Name", "Cover", "Total Listening Seconds"),
         sorts=({"property": "Total Listening Seconds", "direction": "descending"},),
     ),
     ViewSpec(

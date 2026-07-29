@@ -22,6 +22,7 @@ NOTION_API_VERSION = "2026-03-11"
 NOTION_API_BASE_URL = "https://api.notion.com/v1"
 NOTION_RICH_TEXT_LIMIT = 2000
 NOTION_CHILDREN_LIMIT = 100
+NOTION_SINGLE_UPLOAD_LIMIT = 20 * 1024 * 1024
 
 JsonObject = dict[str, Any]
 
@@ -392,3 +393,72 @@ class NotionClient:
             if isinstance(results, list):
                 created.extend(result for result in results if isinstance(result, dict))
         return created
+
+    def update_block(
+        self,
+        block_id: str,
+        payload: Mapping[str, Any],
+    ) -> JsonObject:
+        """Update the managed body of one existing block."""
+        return self.request(
+            "PATCH",
+            f"/blocks/{block_id}",
+            json_body=payload,
+        )
+
+    def upload_file(
+        self,
+        filename: str,
+        content_type: str,
+        content: bytes,
+    ) -> str:
+        """Direct-upload a file up to 20 MiB and return its file_upload ID."""
+        if not filename or "/" in filename or "\\" in filename:
+            raise ValueError("filename must be a non-empty basename")
+        if not content_type:
+            raise ValueError("content_type cannot be empty")
+        if not content:
+            raise ValueError("file content cannot be empty")
+        if len(content) > NOTION_SINGLE_UPLOAD_LIMIT:
+            raise ValueError("single-part Notion upload cannot exceed 20 MiB")
+        created = self.request(
+            "POST",
+            "/file_uploads",
+            json_body={
+                "mode": "single_part",
+                "filename": filename,
+                "content_type": content_type,
+            },
+        )
+        upload_id = created.get("id")
+        if not upload_id:
+            raise NotionAPIError("Notion file upload response has no id")
+        url = f"{self.base_url}/file_uploads/{upload_id}/send"
+        validate_credential_destination(url, CredentialKind.NOTION)
+        headers = {
+            key: value for key, value in self._headers.items() if key.lower() != "content-type"
+        }
+        for attempt in range(self.max_retries + 1):
+            response: httpx.Response | None = None
+            try:
+                response = self._client.post(
+                    url,
+                    headers=headers,
+                    files={"file": (filename, content, content_type)},
+                )
+            except (httpx.TimeoutException, httpx.TransportError) as exc:
+                if attempt >= self.max_retries:
+                    raise NotionAPIError(
+                        f"Notion file upload transport failure: {type(exc).__name__}",
+                        retryable=True,
+                    ) from exc
+            else:
+                if response.status_code not in self._retryable_statuses:
+                    uploaded = self._decode_response(response)
+                    if uploaded.get("status") != "uploaded":
+                        raise NotionAPIError("Notion file upload did not reach uploaded status")
+                    return str(upload_id)
+                if attempt >= self.max_retries:
+                    self._raise_response_error(response, retryable=True)
+            self._sleep(self._retry_delay(response, attempt))
+        raise AssertionError("file upload retry loop exhausted unexpectedly")
