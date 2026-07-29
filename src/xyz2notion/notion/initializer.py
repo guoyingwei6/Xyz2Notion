@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from xyz2notion.notion.client import JsonObject, rich_text
+from xyz2notion.notion.client import JsonObject, NotionAPIError, rich_text
 from xyz2notion.notion.schema import (
     DATABASE_SPECS,
     VIEW_SPECS,
@@ -420,9 +420,17 @@ class NotionInitializer:
         data_source = self.api.retrieve_data_source(data_source_id)
         current = data_source.get("properties")
         current_names = set(current) if isinstance(current, dict) else set()
-        missing = {name: value for name, value in desired.items() if name not in current_names}
-        if missing:
-            self.api.update_data_source(data_source_id, missing)
+        missing = ((name, value) for name, value in desired.items() if name not in current_names)
+        for name, value in missing:
+            try:
+                self.api.update_data_source(data_source_id, {name: value})
+            except NotionAPIError as exc:
+                raise NotionAPIError(
+                    f"Failed to add Notion property {name!r}: {exc}",
+                    status_code=exc.status_code,
+                    code=exc.code,
+                    retryable=exc.retryable,
+                ) from exc
 
     def _ensure_home_blocks(self) -> bool:
         blocks = self.api.list_block_children(self.root_page_id)
