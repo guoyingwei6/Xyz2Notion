@@ -17,6 +17,7 @@ from xyz2notion.config import (
 from xyz2notion.notion.client import NotionClient
 from xyz2notion.notion.initializer import NotionInitializer
 from xyz2notion.security import CredentialKind, allowed_hosts
+from xyz2notion.xiaoyuzhou.client import XiaoyuzhouAPIError, XiaoyuzhouClient
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,6 +39,10 @@ def build_parser() -> argparse.ArgumentParser:
     notion_init.add_argument(
         "--page-id",
         help="target root page ID; defaults to NOTION_PAGE_ID",
+    )
+    subparsers.add_parser(
+        "xiaoyuzhou-check",
+        help="verify Xiaoyuzhou authentication without printing account data",
     )
     return parser
 
@@ -88,6 +93,27 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"(databases created: {result.created_databases}, "
             f"views created: {result.created_views}, views updated: {result.updated_views})"
         )
+        return 0
+    if args.command == "xiaoyuzhou-check":
+        try:
+            credentials = load_runtime_credentials()
+            credentials.require("xiaoyuzhou_refresh_token")
+            if credentials.xiaoyuzhou_refresh_token is None:
+                raise AssertionError(
+                    "credential requirement did not narrow xiaoyuzhou_refresh_token"
+                )
+            with XiaoyuzhouClient(
+                credentials.xiaoyuzhou_refresh_token,
+                credentials.xiaoyuzhou_device_id,
+            ) as xiaoyuzhou:
+                xiaoyuzhou.profile()
+        except (ConfigurationError, MissingCredentialError) as exc:
+            print(f"Configuration error: {exc}", file=sys.stderr)
+            return 2
+        except XiaoyuzhouAPIError as exc:
+            print(f"Xiaoyuzhou error: {exc}", file=sys.stderr)
+            return 3
+        print("Xiaoyuzhou authentication OK")
         return 0
 
     parser.print_help()

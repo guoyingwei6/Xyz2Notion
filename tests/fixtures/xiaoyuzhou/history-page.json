@@ -1,0 +1,12 @@
+{
+  "data": [
+    {
+      "episode": {
+        "eid": "episode-fixture-1",
+        "pid": "podcast-fixture-1",
+        "title": "Fixture Episode"
+      }
+    }
+  ],
+  "loadMoreKey": null
+}

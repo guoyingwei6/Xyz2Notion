@@ -40,3 +40,14 @@ def test_notion_init_reports_missing_token(capsys: object, monkeypatch: object) 
     assert main(["notion-init"]) == 2
     error = capsys.readouterr().err  # type: ignore[attr-defined]
     assert "Missing required credential" in error
+
+
+def test_xiaoyuzhou_check_reports_missing_token(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.delenv("XIAOYUZHOU_REFRESH_TOKEN", raising=False)  # type: ignore[attr-defined]
+    monkeypatch.delenv("REFRESH_TOKEN", raising=False)  # type: ignore[attr-defined]
+    assert main(["xiaoyuzhou-check"]) == 2
+    error = capsys.readouterr().err  # type: ignore[attr-defined]
+    assert "Missing required credential" in error

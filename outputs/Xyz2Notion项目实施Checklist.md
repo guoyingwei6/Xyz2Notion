@@ -187,7 +187,9 @@ P1 当前状态：已完成。GitHub CI
 - [ ] 对真实页面做视觉验收并按截图微调布局（等待凭证）。
 
 P2 当前状态：实现与模拟集成验收完成；真实 Notion 页面验收等待用户凭证，
-不阻塞后续不依赖凭证的阶段。
+不阻塞后续不依赖凭证的阶段。实现提交为 `3ecc86a`，GitHub CI
+[运行 30418989624](https://github.com/guoyingwei6/Xyz2Notion/actions/runs/30418989624)
+已通过。
 
 ---
 
@@ -197,32 +199,38 @@ P2 当前状态：实现与模拟集成验收完成；真实 Notion 页面验收
 
 ### 认证
 
-- [ ] 从 Secret 读取 `XIAOYUZHOU_REFRESH_TOKEN`。
-- [ ] 携带稳定 `X-Jike-Device-ID`。
-- [ ] 调用 `app_auth_tokens.refresh`。
-- [ ] 只在内存保存短期 Access Token。
-- [ ] Access Token 失效时自动刷新并重试。
-- [ ] Refresh Token 失效时输出可操作提示。
-- [ ] 认证请求和日志中不泄漏 Token。
+- [x] 从 Secret 读取 `XIAOYUZHOU_REFRESH_TOKEN`。
+- [x] 携带稳定 `X-Jike-Device-ID`。
+- [x] 调用 `app_auth_tokens.refresh`。
+- [x] 只在内存保存短期 Access Token。
+- [x] Access Token 失效时自动刷新并重试。
+- [x] Refresh Token 失效时输出可操作提示。
+- [x] 认证请求和日志中不泄漏 Token。
 
 ### API
 
-- [ ] 实现订阅列表。
-- [ ] 实现播客累计里程。
-- [ ] 实现播放历史。
-- [ ] 实现单集列表。
-- [ ] 实现播放进度。
-- [ ] 实现个人 Profile/UID。
-- [ ] 实现历史月份 monthly-wrapped。
-- [ ] 实现分页和游标。
-- [ ] 保存最小测试 Fixture，删除所有真实身份信息。
+- [x] 实现订阅列表。
+- [x] 实现播客累计里程。
+- [x] 实现播放历史。
+- [x] 实现单集列表。
+- [x] 实现播放进度。
+- [x] 实现个人 Profile/UID。
+- [x] 实现历史月份 monthly-wrapped。
+- [x] 实现分页和游标。
+- [x] 保存最小测试 Fixture，删除所有真实身份信息。
 
 ### P3 验收
 
-- [ ] 有效 Refresh Token 能换取 Access Token。
-- [ ] 能读取订阅、历史、进度和里程。
-- [ ] 无效 Token 不会死循环或泄漏响应内容。
-- [ ] 小宇宙接口契约测试通过。
+- [x] 模拟有效 Refresh Token 能换取 Access Token。
+- [x] 模拟读取订阅、历史、进度和里程。
+- [x] 无效 Token 不会死循环或泄漏响应内容。
+- [x] 小宇宙接口契约测试通过。
+- [ ] 使用真实 Refresh Token 完成 `xiaoyuzhou-check`（等待
+  `XIAOYUZHOU_REFRESH_TOKEN`）。
+- [ ] 使用真实账号抽样读取订阅、历史、进度和里程并保存脱敏证据（等待凭证）。
+
+P3 当前状态：认证、自动刷新、七类只读接口、分页、脱敏 Fixture 和契约测试
+已经实现；真实账号验收等待用户凭证，不阻塞后续离线开发。
 
 ---
 

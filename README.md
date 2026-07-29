@@ -43,6 +43,15 @@ uv run xyz2notion config-check --config config.yaml
 `XYZ2NOTION_INSTALLATION_ID`、`GITHUB_REPOSITORY` 或 Notion 页面 ID
 稳定派生 UUID；显式填写则始终使用用户提供的设备 ID。
 
+放入小宇宙 Refresh Token 后，可以执行不会输出 UID 或 Token 的认证检查：
+
+```bash
+uv run xyz2notion xiaoyuzhou-check
+```
+
+认证方式、Device ID 和只读接口说明见
+[`docs/xiaoyuzhou-auth.md`](docs/xiaoyuzhou-auth.md)。
+
 默认 ASR 顺序为通义听悟 Cookie → SiliconFlow，付费 DashScope 默认关闭且
 预算为 0。
 

@@ -1,0 +1,10 @@
+{
+  "data": [
+    {
+      "pid": "podcast-fixture-1",
+      "title": "Fixture Podcast",
+      "brief": "Synthetic contract fixture"
+    }
+  ],
+  "loadMoreKey": null
+}
