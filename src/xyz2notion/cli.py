@@ -62,6 +62,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--page-id",
         help="target root page ID; defaults to NOTION_PAGE_ID",
     )
+    rebuild_dashboard = subparsers.add_parser(
+        "rebuild-dashboard",
+        help="archive an exact set of root linked database blocks and rebuild views",
+    )
+    rebuild_dashboard.add_argument(
+        "--page-id",
+        help="target root page ID; defaults to NOTION_PAGE_ID",
+    )
+    rebuild_dashboard.add_argument(
+        "--confirm",
+        required=True,
+        help="required destructive-operation confirmation",
+    )
+    rebuild_dashboard.add_argument(
+        "--expected-count",
+        required=True,
+        type=int,
+        help="exact expected root child_database block count",
+    )
     subparsers.add_parser(
         "xiaoyuzhou-check",
         help="verify Xiaoyuzhou authentication without printing account data",
@@ -346,6 +365,80 @@ def _run_rebuild(args: argparse.Namespace, *, heatmap_only: bool) -> int:
     return 0
 
 
+def _run_rebuild_dashboard(args: argparse.Namespace) -> int:
+    expected_confirmation = f"ARCHIVE_{args.expected_count}_LINKED_DATABASE_BLOCKS"
+    if args.expected_count <= 0 or args.confirm != expected_confirmation:
+        print(
+            "Dashboard rebuild refused: confirmation or expected count did not match",
+            file=sys.stderr,
+        )
+        return 7
+
+    try:
+        credentials = load_runtime_credentials()
+        credentials.require("notion_token")
+        page_id = args.page_id or credentials.notion_page_id
+        if not page_id:
+            raise MissingCredentialError(
+                "Missing target page: set NOTION_PAGE_ID or pass --page-id"
+            )
+        if credentials.notion_token is None:
+            raise AssertionError("credential requirement did not narrow notion_token")
+
+        with NotionClient(credentials.notion_token) as notion:
+            child_databases = [
+                block
+                for block in notion.list_block_children(page_id)
+                if block.get("type") == "child_database"
+            ]
+            if len(child_databases) != args.expected_count:
+                print(
+                    "Dashboard rebuild refused: actual root child_database count "
+                    f"did not match (expected={args.expected_count}, "
+                    f"actual={len(child_databases)})",
+                    file=sys.stderr,
+                )
+                return 7
+
+            block_ids = [block.get("id") for block in child_databases]
+            if not all(isinstance(block_id, str) and block_id for block_id in block_ids):
+                print(
+                    "Dashboard rebuild refused: a root child_database block had no ID",
+                    file=sys.stderr,
+                )
+                return 7
+
+            for block_id in block_ids:
+                if not isinstance(block_id, str):
+                    raise AssertionError("preflight validation did not narrow block ID")
+                notion.delete_block(block_id)
+            remaining_count = sum(
+                block.get("type") == "child_database"
+                for block in notion.list_block_children(page_id)
+            )
+            if remaining_count:
+                print(
+                    "Dashboard rebuild refused: root child_database blocks remained "
+                    f"after archive (remaining={remaining_count})",
+                    file=sys.stderr,
+                )
+                return 7
+            result = NotionInitializer(notion, page_id).initialize()
+    except (ConfigurationError, MissingCredentialError) as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    except NotionAPIError as exc:
+        print(f"Notion error: {exc}", file=sys.stderr)
+        return 4
+
+    print(
+        "Dashboard rebuild OK "
+        f"(archived={len(block_ids)}, databases created={result.created_databases}, "
+        f"views created={result.created_views}, views updated={result.updated_views})"
+    )
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the CLI."""
     parser = build_parser()
@@ -396,6 +489,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"views created: {result.created_views}, views updated: {result.updated_views})"
         )
         return 0
+    if args.command == "rebuild-dashboard":
+        return _run_rebuild_dashboard(args)
     if args.command == "xiaoyuzhou-check":
         try:
             credentials = load_runtime_credentials()

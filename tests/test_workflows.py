@@ -40,6 +40,29 @@ def test_runtime_workflows_use_concurrency_and_private_safe_summaries() -> None:
         assert "upload-artifact" not in text
 
 
+def test_init_workflow_requires_exact_dashboard_rebuild_confirmation() -> None:
+    text, workflow = _workflow("init-notion.yml")
+    dispatch = workflow[True]["workflow_dispatch"]  # type: ignore[index,operator]
+    inputs = dispatch["inputs"]  # type: ignore[index]
+    assert inputs["operation"]["default"] == "initialize"  # type: ignore[index]
+    assert inputs["operation"]["options"] == [  # type: ignore[index]
+        "initialize",
+        "rebuild-dashboard",
+    ]
+    assert inputs["confirmation"]["required"] is False  # type: ignore[index]
+    assert inputs["expected_count"]["required"] is False  # type: ignore[index]
+    assert "default" not in inputs["confirmation"]  # type: ignore[operator]
+    assert "default" not in inputs["expected_count"]  # type: ignore[operator]
+    assert 'OPERATION" == "initialize"' in text
+    assert "uv run xyz2notion notion-init" in text
+    assert 'OPERATION" == "rebuild-dashboard"' in text
+    assert 'EXPECTED_COUNT" =~ ^[1-9][0-9]*$' in text
+    assert 'CONFIRMATION" != "ARCHIVE_${EXPECTED_COUNT}_LINKED_DATABASE_BLOCKS"' in text
+    assert "rebuild-dashboard" in text
+    assert '--confirm "$CONFIRMATION"' in text
+    assert '--expected-count "$EXPECTED_COUNT"' in text
+
+
 def test_schedules_avoid_the_top_of_the_hour() -> None:
     text, _workflow_data = _workflow("sync-metadata.yml")
     cron_lines = [line.strip() for line in text.splitlines() if "cron:" in line]

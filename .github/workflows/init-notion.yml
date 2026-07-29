@@ -2,6 +2,23 @@ name: Initialize Notion
 
 on:
   workflow_dispatch:
+    inputs:
+      operation:
+        description: "Operation to run"
+        required: true
+        default: initialize
+        type: choice
+        options:
+          - initialize
+          - rebuild-dashboard
+      confirmation:
+        description: "For rebuild: ARCHIVE_<count>_LINKED_DATABASE_BLOCKS"
+        required: false
+        type: string
+      expected_count:
+        description: "For rebuild: exact positive root linked database block count"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -28,15 +45,35 @@ jobs:
           python -m pip install uv==0.9.28
           uv sync --locked
 
-      - name: Initialize or reconcile Notion
+      - name: Initialize or rebuild dashboard views
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
+          OPERATION: ${{ inputs.operation }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          EXPECTED_COUNT: ${{ inputs.expected_count }}
         run: |
           set -euo pipefail
-          result="$(uv run xyz2notion notion-init)"
+          if [[ "$OPERATION" == "initialize" ]]; then
+            result="$(uv run xyz2notion notion-init)"
+          elif [[ "$OPERATION" == "rebuild-dashboard" ]]; then
+            if [[ ! "$EXPECTED_COUNT" =~ ^[1-9][0-9]*$ ]]; then
+              printf 'Dashboard rebuild refused: expected_count must be positive\n' >&2
+              exit 2
+            fi
+            if [[ "$CONFIRMATION" != "ARCHIVE_${EXPECTED_COUNT}_LINKED_DATABASE_BLOCKS" ]]; then
+              printf 'Dashboard rebuild refused: confirmation did not match count\n' >&2
+              exit 2
+            fi
+            result="$(uv run xyz2notion rebuild-dashboard \
+              --confirm "$CONFIRMATION" \
+              --expected-count "$EXPECTED_COUNT")"
+          else
+            printf 'Unsupported initialization operation\n' >&2
+            exit 2
+          fi
           printf '%s\n' "$result"
           {
-            printf '## Xyz2Notion Notion initialization\n\n'
+            printf '## Xyz2Notion operation: %s\n\n' "$OPERATION"
             printf '```text\n%s\n```\n' "$result"
           } >> "$GITHUB_STEP_SUMMARY"

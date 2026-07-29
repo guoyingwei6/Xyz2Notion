@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from typing import ClassVar
 
 import xyz2notion.cli as cli_module
 from xyz2notion import __version__
@@ -109,6 +110,9 @@ class FakeContextClient:
 
     def list_block_children(self, _block_id: str) -> list[object]:
         return []
+
+    def delete_block(self, _block_id: str) -> dict[str, bool]:
+        return {"archived": True}
 
 
 def test_xiaoyuzhou_check_succeeds_without_printing_identity(
@@ -228,6 +232,201 @@ def test_notion_init_success_reports_counts(
     output = capsys.readouterr().out  # type: ignore[attr-defined]
     assert "databases created: 9" in output
     assert "views created: 12" in output
+
+
+def test_rebuild_dashboard_refuses_wrong_confirmation_before_api_access(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        cli_module,
+        "NotionClient",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("API accessed")),
+    )
+    assert (
+        main(
+            [
+                "rebuild-dashboard",
+                "--confirm",
+                "wrong",
+                "--expected-count",
+                "180",
+            ]
+        )
+        == 7
+    )
+    assert "rebuild refused" in capsys.readouterr().err.lower()  # type: ignore[attr-defined]
+
+
+def test_rebuild_dashboard_refuses_nonpositive_expected_count_before_api_access(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        cli_module,
+        "NotionClient",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("API accessed")),
+    )
+    assert (
+        main(
+            [
+                "rebuild-dashboard",
+                "--confirm",
+                "ARCHIVE_0_LINKED_DATABASE_BLOCKS",
+                "--expected-count",
+                "0",
+            ]
+        )
+        == 7
+    )
+    assert "rebuild refused" in capsys.readouterr().err.lower()  # type: ignore[attr-defined]
+
+
+def test_rebuild_dashboard_refuses_unexpected_actual_count_without_archiving(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+
+    class FakeNotion(FakeContextClient):
+        deleted: ClassVar[list[str]] = []
+
+        def list_block_children(self, block_id: str) -> list[object]:
+            assert block_id == "fixture-page"
+            return [
+                {"id": "linked-1", "type": "child_database"},
+                {"id": "paragraph-1", "type": "paragraph"},
+            ]
+
+        def delete_block(self, block_id: str) -> dict[str, bool]:
+            self.deleted.append(block_id)
+            return {"archived": True}
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
+    assert (
+        main(
+            [
+                "rebuild-dashboard",
+                "--confirm",
+                "ARCHIVE_180_LINKED_DATABASE_BLOCKS",
+                "--expected-count",
+                "180",
+            ]
+        )
+        == 7
+    )
+    assert FakeNotion.deleted == []
+    error = capsys.readouterr().err  # type: ignore[attr-defined]
+    assert "expected=180, actual=1" in error
+
+
+def test_rebuild_dashboard_archives_only_exact_root_child_databases(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+
+    class FakeNotion(FakeContextClient):
+        deleted: ClassVar[list[str]] = []
+
+        def list_block_children(self, block_id: str) -> list[object]:
+            assert block_id == "fixture-page"
+            if self.deleted:
+                return [
+                    {"id": "paragraph-1", "type": "paragraph"},
+                    {"id": "column-list-1", "type": "column_list"},
+                ]
+            return [
+                *[{"id": f"linked-{index}", "type": "child_database"} for index in range(180)],
+                {"id": "paragraph-1", "type": "paragraph"},
+                {"id": "column-list-1", "type": "column_list"},
+            ]
+
+        def delete_block(self, block_id: str) -> dict[str, bool]:
+            self.deleted.append(block_id)
+            return {"archived": True}
+
+    class FakeInitializer:
+        def __init__(self, _api: object, page_id: str) -> None:
+            assert page_id == "fixture-page"
+
+        def initialize(self) -> object:
+            assert FakeNotion.deleted == [f"linked-{index}" for index in range(180)]
+            return SimpleNamespace(
+                created_databases=0,
+                created_views=14,
+                updated_views=0,
+            )
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+    assert (
+        main(
+            [
+                "rebuild-dashboard",
+                "--confirm",
+                "ARCHIVE_180_LINKED_DATABASE_BLOCKS",
+                "--expected-count",
+                "180",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out  # type: ignore[attr-defined]
+    assert "archived=180" in output
+    assert "views created=14" in output
+    assert "linked-" not in output
+
+
+def test_rebuild_dashboard_refuses_initialize_when_child_database_remains(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+
+    class FakeNotion(FakeContextClient):
+        deleted: ClassVar[list[str]] = []
+
+        def list_block_children(self, block_id: str) -> list[object]:
+            assert block_id == "fixture-page"
+            if self.deleted:
+                return [{"id": "linked-remains", "type": "child_database"}]
+            return [
+                {"id": "linked-1", "type": "child_database"},
+                {"id": "linked-2", "type": "child_database"},
+            ]
+
+        def delete_block(self, block_id: str) -> dict[str, bool]:
+            self.deleted.append(block_id)
+            return {"archived": True}
+
+    class ForbiddenInitializer:
+        def __init__(self, _api: object, _page_id: str) -> None:
+            raise AssertionError("initializer must not run while a linked block remains")
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        cli_module,
+        "NotionInitializer",
+        ForbiddenInitializer,
+    )
+    assert (
+        main(
+            [
+                "rebuild-dashboard",
+                "--confirm",
+                "ARCHIVE_2_LINKED_DATABASE_BLOCKS",
+                "--expected-count",
+                "2",
+            ]
+        )
+        == 7
+    )
+    assert FakeNotion.deleted == ["linked-1", "linked-2"]
+    assert "remaining=1" in capsys.readouterr().err  # type: ignore[attr-defined]
 
 
 def test_process_ai_reports_only_aggregate_counts(
