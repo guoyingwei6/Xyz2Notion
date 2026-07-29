@@ -86,6 +86,19 @@ def _property_selection(properties: Mapping[str, Any], name: str) -> str:
     return str(selected.get("name") or "")
 
 
+def _property_number(properties: Mapping[str, Any], name: str) -> float:
+    value = properties.get(name)
+    if not isinstance(value, Mapping):
+        return 0
+    number = value.get("number")
+    return float(number) if isinstance(number, int | float) else 0
+
+
+def _property_checkbox(properties: Mapping[str, Any], name: str) -> bool:
+    value = properties.get(name)
+    return bool(value.get("checkbox")) if isinstance(value, Mapping) else False
+
+
 def episode_candidates(pages: list[JsonObject]) -> tuple[EpisodeCandidate, ...]:
     """Extract processable rows without exposing titles in logs."""
     result: list[EpisodeCandidate] = []
@@ -97,7 +110,16 @@ def episode_candidates(pages: list[JsonObject]) -> tuple[EpisodeCandidate, ...]:
         title = _property_text(properties, "Name")
         audio_url = _property_url(properties, "Audio URL")
         asr_status = _property_selection(properties, "ASR Status")
-        if eid and title and audio_url and asr_status != "已发布":
+        played_seconds = _property_number(properties, "Played Seconds")
+        skip_ai = _property_checkbox(properties, "Skip AI")
+        if (
+            eid
+            and title
+            and audio_url
+            and played_seconds >= 120
+            and not skip_ai
+            and asr_status not in {"已发布", "最终失败"}
+        ):
             result.append(EpisodeCandidate(str(page["id"]), eid, title, audio_url))
     return tuple(result)
 

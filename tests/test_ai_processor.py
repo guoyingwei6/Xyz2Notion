@@ -167,6 +167,7 @@ def test_candidate_extraction_skips_incomplete_rows() -> None:
                 "EID": {"rich_text": [{"plain_text": "episode"}]},
                 "Name": {"title": [{"text": {"content": "标题"}}]},
                 "Audio URL": {"url": "https://cdn.example/audio"},
+                "Played Seconds": {"number": 120},
             },
         },
         {
@@ -175,7 +176,27 @@ def test_candidate_extraction_skips_incomplete_rows() -> None:
                 "EID": {"rich_text": [{"plain_text": "legacy"}]},
                 "Name": {"title": [{"plain_text": "旧单集"}]},
                 "Audio URL": {"url": "https://cdn.example/legacy"},
+                "Played Seconds": {"number": 120},
                 "ASR Status": {"select": {"name": "已发布"}},
+            },
+        },
+        {
+            "id": "too-short",
+            "properties": {
+                "EID": {"rich_text": [{"plain_text": "short"}]},
+                "Name": {"title": [{"plain_text": "太短"}]},
+                "Audio URL": {"url": "https://cdn.example/short"},
+                "Played Seconds": {"number": 119},
+            },
+        },
+        {
+            "id": "opted-out",
+            "properties": {
+                "EID": {"rich_text": [{"plain_text": "opted-out"}]},
+                "Name": {"title": [{"plain_text": "不转写"}]},
+                "Audio URL": {"url": "https://cdn.example/opted-out"},
+                "Played Seconds": {"number": 600},
+                "Skip AI": {"checkbox": True},
             },
         },
         {"id": "skip", "properties": {}},

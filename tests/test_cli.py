@@ -236,6 +236,7 @@ def test_process_ai_reports_only_aggregate_counts(
             "Name": {"title": [{"plain_text": "private episode title"}]},
             "EID": {"rich_text": [{"plain_text": "private-eid"}]},
             "Audio URL": {"url": "https://example.com/audio.mp3"},
+            "Played Seconds": {"number": 120},
         },
     }
 

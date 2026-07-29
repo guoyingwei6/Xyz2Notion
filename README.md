@@ -36,6 +36,16 @@ Fork 本仓库，在 `Settings → Secrets and variables → Actions` 至少添�
 听悟 Cookie 明确失效时自动降级到 SiliconFlow；工作流中断后从用户自己 Notion
 里的私有检查点继续。
 
+只有同时满足以下条件的单集才会进入 AI 队列：
+
+- 已收听至少 120 秒；
+- 存在可访问的音频链接；
+- 尚未发布文字稿，且不是“最终失败”；
+- Notion 中的 `Skip AI` 未勾选。
+
+不想处理某一期时，在 Notion 勾选 `Skip AI` 即可永久排除。已成功发布的单集不会
+重复转写、摘要或生成思维导图。
+
 > 建议第一次把 `config.yaml` 中的 `episodes_per_run` 设为 1，先用一个短单集验证。
 
 ## 项目状态
