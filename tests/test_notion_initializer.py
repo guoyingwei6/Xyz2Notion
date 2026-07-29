@@ -117,11 +117,11 @@ class FakeNotion:
         database_id: str | None = None,
         data_source_id: str | None = None,
     ) -> list[JsonObject]:
-        del database_id
         return [
             {"id": view_id}
             for view_id, view in self.views.items()
-            if data_source_id is None or view["data_source_id"] == data_source_id
+            if (data_source_id is None or view["data_source_id"] == data_source_id)
+            and (database_id is None or view["parent"]["database_id"] == database_id)
         ]
 
     def retrieve_view(self, view_id: str) -> JsonObject:
@@ -130,28 +130,35 @@ class FakeNotion:
     def create_view(self, payload: Mapping[str, Any]) -> JsonObject:
         self.created_views += 1
         view_id = f"view-{self.created_views}"
-        linked_database_id = f"linked-{self.created_views}"
-        create_database = payload["create_database"]
-        self.databases[linked_database_id] = {
-            "id": linked_database_id,
-            "title": rich_text(str(payload["name"])),
-            "parent": dict(create_database["parent"]),
-            "data_sources": [{"id": payload["data_source_id"]}],
-        }
+        linked_database_id = payload.get("database_id")
+        if linked_database_id is None:
+            linked_database_id = f"linked-{self.created_views}"
+            create_database = payload["create_database"]
+            self.databases[linked_database_id] = {
+                "id": linked_database_id,
+                "title": rich_text(str(payload["name"])),
+                "parent": dict(create_database["parent"]),
+                "data_sources": [{"id": payload["data_source_id"]}],
+            }
+            parent_page_id = str(create_database["parent"]["page_id"])
+            self.blocks.setdefault(parent_page_id, []).append(
+                {
+                    "id": linked_database_id,
+                    "type": "child_database",
+                    "child_database": {"title": str(payload["name"])},
+                }
+            )
+        else:
+            linked_database_id = str(linked_database_id)
+            assert self.databases[linked_database_id]["data_sources"] == [
+                {"id": payload["data_source_id"]}
+            ]
         view = {
             "id": view_id,
             "parent": {"type": "database_id", "database_id": linked_database_id},
             **dict(payload),
         }
         self.views[view_id] = view
-        parent_page_id = str(create_database["parent"]["page_id"])
-        self.blocks.setdefault(parent_page_id, []).append(
-            {
-                "id": linked_database_id,
-                "type": "child_database",
-                "child_database": {"title": str(payload["name"])},
-            }
-        )
         return view
 
     def update_view(self, view_id: str, payload: Mapping[str, Any]) -> JsonObject:
@@ -262,6 +269,18 @@ def test_initializer_creates_complete_clean_room_template() -> None:
         "number": {"greater_than": 0},
     }
 
+    linked_database_ids = {view["parent"]["database_id"] for view in fake.views.values()}
+    assert len(linked_database_ids) == len({spec.source for spec in VIEW_SPECS})
+    episode_views = [
+        view
+        for view in fake.views.values()
+        if view["data_source_id"] == result.resources["episode"].data_source_id
+    ]
+    assert len(episode_views) == 6
+    assert len({view["parent"]["database_id"] for view in episode_views}) == 1
+    assert sum("create_database" in view for view in episode_views) == 1
+    assert sum("database_id" in view for view in episode_views) == 5
+
 
 def test_initializer_is_idempotent_and_preserves_user_content() -> None:
     fake = FakeNotion()
@@ -291,6 +310,34 @@ def test_initializer_is_idempotent_and_preserves_user_content() -> None:
     assert user_block in fake.blocks["root"]
     marker_count = sum(HOME_MARKER_URL in str(block) for block in fake.blocks["root"])
     assert marker_count == 1
+
+
+def test_initializer_rebuilds_missing_view_in_existing_linked_database() -> None:
+    fake = FakeNotion()
+    initializer = NotionInitializer(fake, "root")
+    first = initializer.initialize()
+    episode_data_source_id = first.resources["episode"].data_source_id
+    missing_id = next(
+        view_id for view_id, view in fake.views.items() if view["name"] == "Episode · 全部"
+    )
+    episode_database_id = str(fake.views[missing_id]["parent"]["database_id"])
+    del fake.views[missing_id]
+    child_databases_before = [
+        block for block in fake.blocks["root"] if block["type"] == "child_database"
+    ]
+
+    rebuilt = initializer.initialize()
+
+    assert rebuilt.created_views == 1
+    assert rebuilt.updated_views == len(VIEW_SPECS) - 1
+    replacement = next(view for view in fake.views.values() if view["name"] == "Episode · 全部")
+    assert replacement["data_source_id"] == episode_data_source_id
+    assert replacement["parent"]["database_id"] == episode_database_id
+    assert replacement["database_id"] == episode_database_id
+    assert "create_database" not in replacement
+    assert [
+        block for block in fake.blocks["root"] if block["type"] == "child_database"
+    ] == child_databases_before
 
 
 def test_initializer_migrates_legacy_home_columns_and_hides_marker() -> None:

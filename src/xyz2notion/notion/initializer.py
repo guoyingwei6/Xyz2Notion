@@ -604,6 +604,7 @@ class NotionInitializer:
         source: NotionResource,
         *,
         creating: bool,
+        database_id: str | None = None,
     ) -> JsonObject:
         payload: JsonObject = {
             "name": spec.name,
@@ -615,27 +616,46 @@ class NotionInitializer:
         if creating:
             payload.update(
                 {
-                    "create_database": {
-                        "parent": {
-                            "type": "page_id",
-                            "page_id": self.root_page_id,
-                        }
-                    },
                     "data_source_id": source.data_source_id,
                     "type": spec.view_type,
                 }
             )
+            if database_id is None:
+                payload["create_database"] = {
+                    "parent": {
+                        "type": "page_id",
+                        "page_id": self.root_page_id,
+                    }
+                }
+            else:
+                payload["database_id"] = database_id
         return payload
 
     def _ensure_views(self, resources: dict[str, NotionResource]) -> tuple[int, int]:
         created = 0
         updated = 0
         managed_views = self._managed_views()
+        linked_databases: dict[str, str] = {}
+        for (data_source_id, _name), view in managed_views.items():
+            parent = view.get("parent")
+            if isinstance(parent, dict) and parent.get("database_id"):
+                linked_databases.setdefault(data_source_id, str(parent["database_id"]))
         for spec in VIEW_SPECS:
             source = resources[spec.source]
             existing = managed_views.get((source.data_source_id, spec.name))
             if existing is None:
-                view = self.api.create_view(self._view_payload(spec, source, creating=True))
+                view = self.api.create_view(
+                    self._view_payload(
+                        spec,
+                        source,
+                        creating=True,
+                        database_id=linked_databases.get(source.data_source_id),
+                    )
+                )
+                parent = view.get("parent")
+                if not isinstance(parent, dict) or not parent.get("database_id"):
+                    raise ValueError("Notion create_view response has no parent database ID")
+                linked_databases.setdefault(source.data_source_id, str(parent["database_id"]))
                 managed_views[(source.data_source_id, spec.name)] = view
                 created += 1
             else:
