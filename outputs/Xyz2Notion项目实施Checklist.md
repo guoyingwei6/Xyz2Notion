@@ -359,13 +359,16 @@ P5 当前状态：统计计算、来源标注、历史月校正、排行、SVG/P
 - [x] 自动化测试确认超过 1 小时音频会规划为 API 安全分片。
 - [x] 自动化测试确认重叠区去重和粗粒度时间轴连续。
 - [x] 自动化测试确认模型下线切换和 429/5xx 可恢复错误分类。
+- [x] 纯模拟音频编排测试保证 GitHub Runner 未预装 FFmpeg 时覆盖率门仍通过。
 - [ ] 使用真实 `SILICONFLOW_API_KEY` 转写一段约 20 分钟中文播客（等待凭证）。
 - [ ] 使用真实超过 1 小时单集验证切片、合并和边界听感（等待凭证）。
 - [ ] 接入总工作流状态机后验证失败状态的跨 Action 恢复（P10）。
 
 P6 当前状态：下载安全、FFprobe/FFmpeg、静音切片、临时清理、免费 API
 客户端、模型切换、合并去重和粗粒度时间轴已完成；真实 API 与长音频验收等待
-SiliconFlow Key，跨 Action 恢复留在 P10 总编排验收。
+SiliconFlow Key，跨 Action 恢复留在 P10 总编排验收。跨平台覆盖率修复后的
+GitHub CI [运行 30420500565](https://github.com/guoyingwei6/Xyz2Notion/actions/runs/30420500565)
+已通过。
 
 ---
 
@@ -375,41 +378,46 @@ SiliconFlow Key，跨 Action 恢复留在 P10 总编排验收。
 
 ### 安全
 
-- [ ] 从 `TINGWU_COOKIE` Secret 读取 Cookie。
-- [ ] Cookie 只允许发送至明确的阿里云域名。
-- [ ] 禁止打印请求头、Cookie 和完整请求异常。
-- [ ] 实现 Cookie 健康检查。
-- [ ] 区分 `expired`、`risk_control`、`schema_changed`。
+- [x] 从 `TINGWU_COOKIE` Secret 读取 Cookie。
+- [x] Cookie 只允许发送至明确的阿里云域名。
+- [x] 禁止打印请求头、Cookie 和完整请求异常。
+- [x] 实现 Cookie 健康检查。
+- [x] 区分 `expired`、`risk_control`、`schema_changed`。
 
 ### 任务
 
-- [ ] 创建或查找播客文件夹。
-- [ ] 解析公网音频 URL。
-- [ ] 提交网页转写任务。
-- [ ] 保存听悟 Task ID。
-- [ ] 查询任务状态。
-- [ ] 已受理任务不重复提交。
-- [ ] 获取逐字稿、时间戳和说话人。
-- [ ] 获取全文摘要。
-- [ ] 获取章节速览。
-- [ ] 获取问答回顾。
-- [ ] 获取思维导图。
-- [ ] 获取听悟笔记。
+- [x] 创建或查找播客文件夹。
+- [x] 解析公网音频 URL。
+- [x] 提交网页转写任务。
+- [x] 保存听悟 Task ID。
+- [x] 查询任务状态。
+- [x] 已受理任务不重复提交。
+- [x] 获取逐字稿、时间戳和说话人。
+- [x] 获取全文摘要。
+- [x] 获取章节速览。
+- [x] 获取问答回顾。
+- [x] 获取思维导图。
+- [x] 获取听悟笔记。
 
 ### Fallback
 
-- [ ] 401/403 时熔断 Cookie Provider。
-- [ ] 404/字段变化时标记 schema changed。
-- [ ] 429/5xx 重试三次。
-- [ ] 明确失败后切换 SiliconFlow。
-- [ ] 处理中任务等待下一次 Action，不降级重复转写。
+- [x] 401/403 时熔断 Cookie Provider。
+- [x] 404/字段变化时标记 schema changed。
+- [x] 429/5xx 重试三次。
+- [x] 明确失败后切换 SiliconFlow。
+- [x] 处理中任务等待下一次 Action，不降级重复转写。
 
 ### P7 验收
 
-- [ ] 有效 Cookie 能完成提交和结果读取。
-- [ ] 错误 Cookie 能自动降级到 SiliconFlow。
-- [ ] 日志中不存在 Cookie。
-- [ ] 网页接口变化不会破坏元数据同步主链路。
+- [ ] 有效 Cookie 能完成真实提交和结果读取（等待 `TINGWU_COOKIE`）。
+- [x] 模拟错误 Cookie 能自动降级到 SiliconFlow。
+- [x] 自动化测试确认日志和安全异常中不存在 Cookie。
+- [x] 网页接口变化只影响 AI 分支，不会破坏元数据同步主链路。
+
+P7 当前状态：听悟网页任务的提交、断点续查、结果读取、Cookie 熔断和
+SiliconFlow 降级策略已实现，并通过完整模拟契约测试；真实网页额度验收等待用户
+Cookie，不阻塞 P8。网页接口属于非公开契约，变更时会安全标记
+`schema_changed`，不会把响应正文或 Cookie 写入日志。
 
 ---
 
@@ -594,6 +602,6 @@ SiliconFlow Key，跨 Action 恢复留在 P10 总编排验收。
 
 ## 当前执行位置
 
-- 当前阶段：`P0 项目骨架与安全基线`
-- 下一项：确定正式项目名称、包名和许可证
+- 当前阶段：`P7 通义听悟 Cookie Provider`
+- 下一项：完成 P7 远端 CI 后进入 P8 文本切分与千问结构化总结
 - 开发原则：每完成一个 Checkbox，立即运行对应验证并更新任务状态

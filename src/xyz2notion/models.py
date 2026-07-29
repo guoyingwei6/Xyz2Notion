@@ -52,6 +52,8 @@ class ProviderErrorCategory(StrEnum):
     TIMEOUT = "timeout"
     INVALID_INPUT = "invalid_input"
     UNSUPPORTED = "unsupported"
+    RISK_CONTROL = "risk_control"
+    SCHEMA_CHANGED = "schema_changed"
     UNKNOWN = "unknown"
 
 
