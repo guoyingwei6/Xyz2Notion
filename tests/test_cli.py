@@ -159,8 +159,14 @@ def test_sync_metadata_success_reports_only_counts(
             return SimpleNamespace(created=2, updated=1, unchanged=3)
 
     class FakeStatisticsSynchronizer:
-        def __init__(self, _api: object, resources: object) -> None:
+        def __init__(
+            self,
+            _api: object,
+            resources: object,
+            root_page_id: str | None = None,
+        ) -> None:
             assert resources == {}
+            assert root_page_id == "fixture-page"
 
         def sync(self, statistics: object) -> object:
             assert statistics.marker == "fixture-statistics"  # type: ignore[attr-defined]
@@ -793,6 +799,150 @@ def test_rebuild_dashboard_refuses_initialize_when_child_database_remains(
     assert "remaining=1" in capsys.readouterr().err  # type: ignore[attr-defined]
 
 
+def test_rebuild_dashboard_layout_refuses_wrong_confirmation_before_api_access(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        cli_module,
+        "NotionClient",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("API accessed")),
+    )
+    assert (
+        main(
+            [
+                "rebuild-dashboard-layout",
+                "--confirm",
+                "wrong",
+                "--expected-total",
+                "19",
+            ]
+        )
+        == 7
+    )
+    assert "rebuild refused" in capsys.readouterr().err.lower()  # type: ignore[attr-defined]
+
+
+def test_rebuild_dashboard_layout_refuses_nonmatching_root_without_archiving(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+
+    class FakeNotion(FakeContextClient):
+        deleted: ClassVar[list[str]] = []
+
+        def list_block_children(self, block_id: str) -> list[object]:
+            assert block_id == "fixture-page"
+            return [
+                {
+                    "id": "data-page",
+                    "type": "child_page",
+                    "child_page": {"title": "Xyz2Notion 数据层"},
+                },
+                {"id": "user-note", "type": "paragraph"},
+            ]
+
+        def delete_block(self, block_id: str) -> dict[str, bool]:
+            self.deleted.append(block_id)
+            return {"archived": True}
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
+    assert (
+        main(
+            [
+                "rebuild-dashboard-layout",
+                "--confirm",
+                "REBUILD_MANAGED_DASHBOARD_LAYOUT_19_BLOCKS",
+                "--expected-total",
+                "19",
+            ]
+        )
+        == 7
+    )
+    assert FakeNotion.deleted == []
+    assert "actual_total=2" in capsys.readouterr().err  # type: ignore[attr-defined]
+
+
+def test_rebuild_dashboard_layout_preserves_data_page_and_bootstraps_home(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+    layout_types = [
+        "child_page",
+        "heading_1",
+        "callout",
+        "column_list",
+        "heading_2",
+        "callout",
+        "heading_2",
+        "paragraph",
+        "image",
+        *(["child_database"] * 8),
+        "divider",
+        "callout",
+    ]
+
+    class FakeNotion(FakeContextClient):
+        deleted: ClassVar[list[str]] = []
+
+        def list_block_children(self, block_id: str) -> list[object]:
+            assert block_id == "fixture-page"
+            data = {
+                "id": "data-page",
+                "type": "child_page",
+                "child_page": {"title": "Xyz2Notion 数据层"},
+            }
+            if self.deleted:
+                return [data]
+            return [
+                data
+                if block_type == "child_page"
+                else {"id": f"managed-{index}", "type": block_type}
+                for index, block_type in enumerate(layout_types)
+            ]
+
+        def delete_block(self, block_id: str) -> dict[str, bool]:
+            self.deleted.append(block_id)
+            return {"archived": True}
+
+    class FakeInitializer:
+        def __init__(self, _api: object, page_id: str) -> None:
+            assert page_id == "fixture-page"
+
+        def initialize(self, *, create_home: bool = False) -> object:
+            assert create_home is True
+            assert len(FakeNotion.deleted) == 18
+            assert "data-page" not in FakeNotion.deleted
+            return SimpleNamespace(
+                created_databases=0,
+                created_views=13,
+                updated_views=0,
+            )
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+    assert (
+        main(
+            [
+                "rebuild-dashboard-layout",
+                "--confirm",
+                "REBUILD_MANAGED_DASHBOARD_LAYOUT_19_BLOCKS",
+                "--expected-total",
+                "19",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out  # type: ignore[attr-defined]
+    assert "managed blocks archived=18" in output
+    assert "data pages preserved=1" in output
+    assert "managed-" not in output
+
+
 def test_process_ai_reports_only_aggregate_counts(
     capsys: object,
     monkeypatch: object,
@@ -878,6 +1028,32 @@ def test_process_ai_reports_only_aggregate_counts(
     assert "ASR_RUNNING=1" in output
     assert "private episode title" not in output
     assert "private-eid" not in output
+
+
+def test_episode_asr_status_distinguishes_retryable_rows() -> None:
+    assert (
+        cli_module._episode_asr_status(  # type: ignore[attr-defined]
+            {
+                "properties": {
+                    "ASR Status": {"select": {"name": "可重试失败"}},
+                }
+            }
+        )
+        == "可重试失败"
+    )
+    assert cli_module._episode_asr_status({"properties": {}}) == ""  # type: ignore[attr-defined]
+
+
+def test_ai_pages_are_filtered_before_the_per_run_limit() -> None:
+    normal_1 = {"id": "normal-1", "properties": {}}
+    normal_2 = {"id": "normal-2", "properties": {}}
+    retryable = {
+        "id": "retryable",
+        "properties": {"ASR Status": {"select": {"name": "可重试失败"}}},
+    }
+    pages = [normal_1, normal_2, retryable]
+    assert cli_module._eligible_ai_pages(pages, retry_failed=False)[:1] == [normal_1]  # type: ignore[attr-defined]
+    assert cli_module._eligible_ai_pages(pages, retry_failed=True)[:1] == [retryable]  # type: ignore[attr-defined]
 
 
 def test_migration_dry_run_reports_only_counts(
@@ -1025,8 +1201,14 @@ def test_rebuild_statistics_success(capsys: object, monkeypatch: object) -> None
     _install_rebuild_fakes(monkeypatch)
 
     class FakeSynchronizer:
-        def __init__(self, _api: object, resources: object) -> None:
+        def __init__(
+            self,
+            _api: object,
+            resources: object,
+            root_page_id: str | None = None,
+        ) -> None:
             assert resources == {"year": resources["year"]}  # type: ignore[index]
+            assert root_page_id == "fixture-page"
 
         def sync(self, _statistics: object) -> object:
             return SimpleNamespace(created=2, updated=3, unchanged=4)

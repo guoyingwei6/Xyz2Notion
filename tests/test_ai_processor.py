@@ -13,6 +13,7 @@ from xyz2notion.models import (
     ProviderError,
     ProviderErrorCategory,
     ProviderFailure,
+    SummaryResult,
     TranscriptResult,
     TranscriptSegment,
     TranscriptTimingQuality,
@@ -89,6 +90,17 @@ class FakeNotion:
 
     def upload_file(self, _filename: str, _content_type: str, _content: bytes) -> str:
         return "upload"
+
+
+class FailingPublishNotion(FakeNotion):
+    def append_block_children(
+        self,
+        block_id: str,
+        children: Sequence[Mapping[str, Any]],
+    ) -> list[JsonObject]:
+        if block_id.startswith("block-"):
+            raise RuntimeError("fixture detail must not be persisted")
+        return super().append_block_children(block_id, children)
 
 
 class FakeSummaryClient:
@@ -395,6 +407,37 @@ def test_retryable_failure_resumes_exact_stage_on_manual_retry() -> None:
     waiting = processor.process(CANDIDATE, {})
     assert waiting.action == "waiting_retry"
     completed = processor.process(CANDIDATE, {}, retry_failed=True)
+    assert completed.state is PipelineState.PUBLISHED
+    assert store.state.record.attempts == 1
+
+
+def test_publish_failure_is_checkpointed_and_resumes_without_repeating_ai() -> None:
+    record = PipelineRecord(eid="episode").transition(PipelineState.TRANSCRIBED)
+    record = record.transition(PipelineState.ENRICHED)
+    store = FakeStateStore(
+        EpisodeAIState(
+            record=record,
+            transcript=transcript(),
+            summary=SummaryResult(
+                summary="摘要",
+                mindmap=MindmapNode(node_id="root", title="主题"),
+                prompt_version="summary-v1",
+                model="Qwen/Qwen3-8B",
+            ),
+        )
+    )
+    failed = EpisodeAIProcessor(FailingPublishNotion(), store).process(CANDIDATE, {})
+    assert failed.state is PipelineState.FAILED_RETRYABLE
+    assert store.state.record.resume_state is PipelineState.ENRICHED
+    assert store.state.record.failure is not None
+    assert store.state.record.failure.provider == "notion_publish"
+    assert "fixture detail" not in store.state.record.failure.message
+
+    completed = EpisodeAIProcessor(FakeNotion(), store).process(
+        CANDIDATE,
+        {},
+        retry_failed=True,
+    )
     assert completed.state is PipelineState.PUBLISHED
     assert store.state.record.attempts == 1
 

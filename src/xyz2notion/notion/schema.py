@@ -479,7 +479,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
     ViewSpec(
         key="episodes_all",
         source="episode",
-        name="Episode · 全部",
+        name="Episode · 收听记录",
         view_type="gallery",
         visible_properties=(
             "Name",

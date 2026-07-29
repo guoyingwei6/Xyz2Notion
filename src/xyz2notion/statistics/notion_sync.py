@@ -12,6 +12,7 @@ from typing import Any, Protocol
 
 from xyz2notion.models import PeriodKind
 from xyz2notion.notion.client import JsonObject, rich_text
+from xyz2notion.notion.initializer import HOME_SUMMARY_MARKER_URL
 from xyz2notion.notion.schema import NotionResource
 from xyz2notion.statistics.calculator import (
     DailyListening,
@@ -22,6 +23,7 @@ from xyz2notion.statistics.heatmap import render_heatmap_png
 from xyz2notion.sync.notion_table import NotionRowsAPI, NotionTable, UpsertResult
 
 HEATMAP_MARKER = "XYZ2NOTION_HEATMAP"
+HEATMAP_MARKER_URL_PREFIX = "https://xyz2notion.local/heatmap/"
 
 
 class HeatmapNotionAPI(Protocol):
@@ -130,9 +132,11 @@ class StatisticsSynchronizer:
         self,
         api: NotionRowsAPI,
         resources: dict[str, NotionResource],
+        root_page_id: str | None = None,
     ) -> None:
         self.api = api
         self.resources = resources
+        self.root_page_id = root_page_id
 
     @staticmethod
     def _record(result: UpsertResult, actions: Counter[str], fields: Counter[str]) -> None:
@@ -207,12 +211,45 @@ class StatisticsSynchronizer:
                 },
             )
             self._record(result, actions, fields)
+        self._update_home_summary(statistics)
         return StatisticsSyncReport(
             created=actions["created"],
             updated=actions["updated"],
             unchanged=actions["unchanged"],
             changed_fields=dict(sorted(fields.items())),
         )
+
+    def _update_home_summary(self, statistics: StatisticsSnapshot) -> None:
+        """Refresh the compact V3 summary when block APIs and a root page are available."""
+        if self.root_page_id is None:
+            return
+        list_children = getattr(self.api, "list_block_children", None)
+        update_block = getattr(self.api, "update_block", None)
+        if not callable(list_children) or not callable(update_block):
+            return
+        total = statistics.total
+        hours = total.listening_seconds / 3600
+        hours_text = f"{hours:.1f}".rstrip("0").rstrip(".")
+        summary = (
+            f"🎧 累计收听 {hours_text} 小时 · {total.episode_count} 期 · {total.played_days} 天"
+        )
+        for block in list_children(self.root_page_id):
+            if _block_marker_url(block) != HOME_SUMMARY_MARKER_URL:
+                continue
+            if _block_visible_text(block) == summary:
+                return
+            update_block(
+                str(block["id"]),
+                {
+                    "paragraph": {
+                        "rich_text": _visible_text_with_marker(
+                            summary,
+                            HOME_SUMMARY_MARKER_URL,
+                        )
+                    }
+                },
+            )
+            return
 
 
 def _caption_text(block: Mapping[str, Any]) -> str:
@@ -227,6 +264,63 @@ def _caption_text(block: Mapping[str, Any]) -> str:
         for item in caption
         if isinstance(item, Mapping)
     )
+
+
+def _rich_text_items(block: Mapping[str, Any]) -> Sequence[object]:
+    body = block.get(str(block.get("type")))
+    if not isinstance(body, Mapping):
+        return ()
+    items = body.get("caption") if block.get("type") == "image" else body.get("rich_text")
+    return items if isinstance(items, Sequence) else ()
+
+
+def _text_url(item: Mapping[str, Any]) -> str:
+    href = item.get("href")
+    if href:
+        return str(href)
+    text = item.get("text")
+    link = text.get("link") if isinstance(text, Mapping) else None
+    return str(link.get("url") or "") if isinstance(link, Mapping) else ""
+
+
+def _block_marker_url(block: Mapping[str, Any]) -> str:
+    for item in _rich_text_items(block):
+        if isinstance(item, Mapping):
+            url = _text_url(item)
+            if url:
+                return url
+    return ""
+
+
+def _block_visible_text(block: Mapping[str, Any]) -> str:
+    parts: list[str] = []
+    for item in _rich_text_items(block):
+        if not isinstance(item, Mapping) or _text_url(item):
+            continue
+        parts.append(str(item.get("plain_text") or item.get("text", {}).get("content") or ""))
+    return "".join(parts)
+
+
+def _visible_text_with_marker(text: str, marker_url: str) -> list[JsonObject]:
+    return [
+        *rich_text(text),
+        {
+            "type": "text",
+            "text": {
+                "content": "\u200b",
+                "link": {"url": marker_url},
+            },
+        },
+    ]
+
+
+def _heatmap_marker_url(year: int, content_hash: str) -> str:
+    return f"{HEATMAP_MARKER_URL_PREFIX}{year}/{content_hash}"
+
+
+def _heatmap_hash_from_url(url: str, year: int) -> str:
+    prefix = f"{HEATMAP_MARKER_URL_PREFIX}{year}/"
+    return url.removeprefix(prefix) if url.startswith(prefix) else ""
 
 
 class HeatmapPublisher:
@@ -246,26 +340,87 @@ class HeatmapPublisher:
         marker_prefix = f"{HEATMAP_MARKER}:{year}:"
         marker = f"{marker_prefix}{content_hash}"
         managed_block: JsonObject | None = None
-        for block in self.api.list_block_children(self.root_page_id):
-            if block.get("type") == "image" and _caption_text(block).startswith(marker_prefix):
-                managed_block = block
-                break
-        if managed_block is not None and _caption_text(managed_block) == marker:
+        managed_marker: JsonObject | None = None
+        target_parent = self.root_page_id
+        visited: set[str] = set()
+
+        def walk(parent_id: str) -> None:
+            nonlocal managed_block, managed_marker, target_parent
+            if parent_id in visited:
+                return
+            visited.add(parent_id)
+            blocks = self.api.list_block_children(parent_id)
+            if any(
+                block.get("type") == "heading_2" and _block_visible_text(block) == "播客记录"
+                for block in blocks
+            ):
+                target_parent = parent_id
+            for index, block in enumerate(blocks):
+                caption = _caption_text(block)
+                if (
+                    managed_block is None
+                    and block.get("type") == "image"
+                    and caption.startswith(marker_prefix)
+                ):
+                    managed_block = block
+                marker_url = _block_marker_url(block)
+                if managed_marker is None and _heatmap_hash_from_url(marker_url, year):
+                    managed_marker = block
+                    if block.get("type") == "image":
+                        managed_block = block
+                    else:
+                        for sibling in blocks[index + 1 :]:
+                            if sibling.get("type") == "image":
+                                managed_block = sibling
+                                break
+                child_id = block.get("id")
+                if block.get("has_children") and child_id:
+                    walk(str(child_id))
+
+        walk(self.root_page_id)
+        marker_hash = (
+            _heatmap_hash_from_url(_block_marker_url(managed_marker), year)
+            if managed_marker is not None
+            else ""
+        )
+        if managed_block is not None and marker_hash == content_hash:
             return HeatmapPublishResult(
                 action="unchanged",
                 content_hash=content_hash,
                 block_id=str(managed_block.get("id") or "") or None,
             )
+        if managed_block is not None and _caption_text(managed_block) == marker:
+            existing_image = managed_block.get("image")
+            if isinstance(existing_image, Mapping) and managed_block.get("id"):
+                block_id = str(managed_block["id"])
+                self.api.update_block(
+                    block_id,
+                    {
+                        "image": {
+                            **dict(existing_image),
+                            "caption": _visible_text_with_marker(
+                                "",
+                                _heatmap_marker_url(year, content_hash),
+                            ),
+                        }
+                    },
+                )
+                return HeatmapPublishResult(
+                    action="updated",
+                    content_hash=content_hash,
+                    block_id=block_id,
+                )
 
         upload_id = self.api.upload_file(
             f"xyz2notion-heatmap-{year}-{content_hash}.png",
             "image/png",
             png,
         )
+        marker_url = _heatmap_marker_url(year, content_hash)
         image = {
             "type": "file_upload",
             "file_upload": {"id": upload_id},
-            "caption": rich_text(marker),
+            "caption": _visible_text_with_marker("", marker_url),
         }
         if managed_block is not None and managed_block.get("id"):
             block_id = str(managed_block["id"])
@@ -276,16 +431,20 @@ class HeatmapPublisher:
                 block_id=block_id,
             )
         created = self.api.append_block_children(
-            self.root_page_id,
+            target_parent,
             [
                 {
                     "object": "block",
                     "type": "image",
                     "image": image,
-                }
+                },
             ],
         )
-        block_id = str(created[0].get("id") or "") if created else ""
+        image_block = next(
+            (block for block in created if block.get("type") == "image"),
+            None,
+        )
+        block_id = str(image_block.get("id") or "") if image_block else ""
         return HeatmapPublishResult(
             action="created",
             content_hash=content_hash,

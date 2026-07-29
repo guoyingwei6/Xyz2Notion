@@ -221,6 +221,50 @@ def test_normalizer_handles_numeric_dates_progress_clamp_and_direct_images() -> 
     assert snapshot.episodes[0].listening_status.value == "played"
 
 
+def test_normalizer_uses_xiaoyuzhou_played_and_finished_flags() -> None:
+    source = [{"podcast": {"pid": "podcast-flags"}, "playedSeconds": 100}]
+    history = [
+        {
+            "episode": {
+                "eid": "finished",
+                "pid": "podcast-flags",
+                "title": "Finished",
+                "duration": 600,
+                "isPlayed": True,
+                "isFinished": True,
+                "pubDate": "2026-07-01T00:00:00Z",
+            }
+        },
+        {
+            "episode": {
+                "eid": "started",
+                "pid": "podcast-flags",
+                "title": "Started",
+                "duration": 600,
+                "isPlayed": True,
+                "isFinished": False,
+                "pubDate": "2026-07-02T00:00:00Z",
+            }
+        },
+    ]
+    snapshot = build_metadata_snapshot(
+        subscriptions=[
+            {
+                "pid": "podcast-flags",
+                "title": "Podcast Flags",
+            }
+        ],
+        mileage=source,
+        history=history,
+        progress=[],
+    )
+    episodes = {episode.eid: episode for episode in snapshot.episodes}
+    assert episodes["finished"].played_seconds == 600
+    assert episodes["finished"].listening_status.value == "played"
+    assert episodes["started"].played_seconds == 1
+    assert episodes["started"].listening_status.value == "listening"
+
+
 def test_first_and_second_sync_are_idempotent() -> None:
     fake = FakeRows()
     synchronizer = MetadataSynchronizer(fake, resources())

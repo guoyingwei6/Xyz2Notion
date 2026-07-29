@@ -20,6 +20,7 @@ from xyz2notion.notion.schema import (
 DATA_PAGE_TITLE = "Xyz2Notion 数据层"
 HOME_MARKER = "XYZ2NOTION_MANAGED_HOME_V1"
 HOME_MARKER_URL = "https://xyz2notion.local/managed-home-v2"
+HOME_SUMMARY_MARKER_URL = "https://xyz2notion.local/listening-summary-v3"
 DEFAULT_COVER_URL = "https://raw.githubusercontent.com/guoyingwei6/Xyz2Notion/main/assets/cover.svg"
 MANAGED_COVER_PATH = "guoyingwei6/Xyz2Notion/main/assets/cover.svg"
 LEGACY_DATABASE_TITLES: dict[str, tuple[str, ...]] = {
@@ -203,6 +204,26 @@ def _paragraph(text: str) -> JsonObject:
     }
 
 
+def _marked_paragraph(text: str, marker_url: str) -> JsonObject:
+    """Return visible copy plus an invisible, stable reconciliation marker."""
+    return {
+        "object": "block",
+        "type": "paragraph",
+        "paragraph": {
+            "rich_text": [
+                *rich_text(text),
+                {
+                    "type": "text",
+                    "text": {
+                        "content": "\u200b",
+                        "link": {"url": marker_url},
+                    },
+                },
+            ]
+        },
+    }
+
+
 def _home_marker() -> JsonObject:
     """Return an invisible linked marker that does not clutter the dashboard."""
     return {
@@ -243,25 +264,42 @@ def _is_home_marker(block: Mapping[str, Any]) -> bool:
     return False
 
 
-_MANAGED_HOME_SHAPE = (
-    "heading_1",
-    "callout",
-    "column_list",
-    "divider",
-    "callout",
-    "paragraph",
+_MANAGED_HOME_SHAPES = (
+    (
+        "heading_1",
+        "callout",
+        "column_list",
+        "divider",
+        "callout",
+        "paragraph",
+    ),
+    (
+        "heading_1",
+        "column_list",
+        "divider",
+        "heading_2",
+        "paragraph",
+        "heading_2",
+        "paragraph",
+        "heading_2",
+        "paragraph",
+        "heading_2",
+        "paragraph",
+        "paragraph",
+    ),
 )
 
 
 def _has_managed_home_layout(blocks: Sequence[Mapping[str, Any]]) -> bool:
     """Recognize the managed layout even when Notion reshapes its root blocks."""
     block_types = [str(block.get("type") or "") for block in blocks]
-    width = len(_MANAGED_HOME_SHAPE)
-    if any(
-        tuple(block_types[index : index + width]) == _MANAGED_HOME_SHAPE
-        for index in range(len(block_types) - width + 1)
-    ):
-        return True
+    for shape in _MANAGED_HOME_SHAPES:
+        width = len(shape)
+        if any(
+            tuple(block_types[index : index + width]) == shape
+            for index in range(len(block_types) - width + 1)
+        ):
+            return True
 
     # Notion may omit the zero-width marker paragraph and place linked databases
     # between the remaining layout blocks.  The managed title and column layout
@@ -302,13 +340,9 @@ def _menu() -> JsonObject:
 
 
 def home_blocks() -> list[JsonObject]:
-    """Return the Notion-native dashboard introduction matching the public demo."""
+    """Return the compact V3 dashboard with stable section anchors."""
     return [
         _heading(1, "播客"),
-        _callout(
-            "这里只记录真正播放过的节目; 浏览但没有产生播放进度的单集不会参与统计。",
-            "🎧",
-        ),
         {
             "object": "block",
             "type": "column_list",
@@ -318,19 +352,10 @@ def home_blocks() -> list[JsonObject]:
                         "object": "block",
                         "type": "column",
                         "column": {
-                            "width_ratio": 0.3,
+                            "width_ratio": 0.28,
                             "children": [
                                 _heading(2, "菜单"),
                                 _menu(),
-                                _divider(),
-                                _heading(2, "总收听时长"),
-                                _callout(
-                                    "全部 · 年 · 月 · 周 · 日\n"
-                                    "统计只计算实际播放时长大于 0 的节目。",
-                                    "🎧",
-                                ),
-                                _heading(2, "收听时长排行"),
-                                _paragraph("按真实播放时长从高到低展示 Podcast。"),
                             ],
                         },
                     },
@@ -338,20 +363,10 @@ def home_blocks() -> list[JsonObject]:
                         "object": "block",
                         "type": "column",
                         "column": {
-                            "width_ratio": 0.7,
+                            "width_ratio": 0.72,
                             "children": [
                                 _heading(2, "播客记录"),
-                                _callout(
-                                    "年度收听热力图由每日同步工作流自动更新; "
-                                    "未播放的单集不会点亮记录。",
-                                    "📅",
-                                ),
-                                _heading(2, "Podcast"),
-                                _paragraph("封面画廊 · 仅展示实际收听过的播客"),
-                                _heading(2, "Episode"),
-                                _paragraph("全部 · 在听 · 听过 · 喜欢 · 待听 · 收藏"),
-                                _heading(2, "思维导图"),
-                                _paragraph("每期节目生成的可视化脑图与原生大纲"),
+                                _paragraph("年度热力图每日更新; 只记录实际播放过的日期。"),
                             ],
                         },
                     },
@@ -359,10 +374,17 @@ def home_blocks() -> list[JsonObject]:
             },
         },
         _divider(),
-        _callout(
-            "下方数据库视图由 Xyz2Notion 更新; 你自己的笔记、字段、封面和图标会被保留。",
-            "🪐",
+        _heading(2, "收听总览"),
+        _marked_paragraph(
+            "🎧 收听数据将在首次统计同步后显示。",
+            HOME_SUMMARY_MARKER_URL,
         ),
+        _heading(2, "Podcast"),
+        _paragraph("收听排行与播客封面"),
+        _heading(2, "Episode"),
+        _paragraph("收听记录 · 在听 · 听过 · 喜欢 · 待听 · 收藏"),
+        _heading(2, "思维导图"),
+        _paragraph("每期节目的可视化脑图与原生大纲"),
         _home_marker(),
     ]
 
@@ -645,6 +667,7 @@ class NotionInitializer:
         *,
         creating: bool,
         database_id: str | None = None,
+        after_block_id: str | None = None,
     ) -> JsonObject:
         payload: JsonObject = {
             "name": spec.name,
@@ -661,16 +684,49 @@ class NotionInitializer:
                 }
             )
             if database_id is None:
-                payload["create_database"] = {
+                create_database: JsonObject = {
                     "parent": {
                         "type": "page_id",
                         "page_id": self.root_page_id,
                     }
                 }
+                if after_block_id is not None:
+                    create_database["position"] = {
+                        "type": "after_block",
+                        "block_id": after_block_id,
+                    }
+                payload["create_database"] = create_database
             else:
                 payload["database_id"] = database_id
                 payload["position"] = {"type": spec.position}
         return payload
+
+    @staticmethod
+    def _view_group(spec: ViewSpec) -> str:
+        """Group compatible statistics sources into one linked database module."""
+        if spec.source in {"all", "year", "month", "week", "day"}:
+            return "statistics"
+        return spec.source
+
+    def _section_anchors(self) -> dict[str, str]:
+        anchors: dict[str, str] = {}
+        titles = {
+            "收听总览": "statistics",
+            "Podcast": "podcast",
+            "Episode": "episode",
+            "思维导图": "mindmap",
+        }
+        pending_group: str | None = None
+        for block in self.api.list_block_children(self.root_page_id):
+            group = titles.get(_block_text(block))
+            if block.get("type") == "heading_2" and group and block.get("id"):
+                anchors.setdefault(group, str(block["id"]))
+                pending_group = group
+                continue
+            if pending_group and block.get("type") == "paragraph" and block.get("id"):
+                anchors[pending_group] = str(block["id"])
+                pending_group = None
+        return anchors
 
     def _ensure_views(self, resources: dict[str, NotionResource]) -> tuple[int, int]:
         created = 0
@@ -680,9 +736,28 @@ class NotionInitializer:
         for (data_source_id, _name), view in managed_views.items():
             parent = view.get("parent")
             if isinstance(parent, dict) and parent.get("database_id"):
-                linked_databases.setdefault(data_source_id, str(parent["database_id"]))
-        for spec in VIEW_SPECS:
+                source_key = next(
+                    (
+                        key
+                        for key, resource in resources.items()
+                        if resource.data_source_id == data_source_id
+                    ),
+                    None,
+                )
+                if source_key is not None:
+                    group = (
+                        "statistics"
+                        if source_key in {"all", "year", "month", "week", "day"}
+                        else source_key
+                    )
+                    linked_databases.setdefault(group, str(parent["database_id"]))
+        anchors = self._section_anchors()
+        group_tail = dict(anchors)
+        # The old full-width number chart is intentionally no longer a homepage view.
+        home_specs = (spec for spec in VIEW_SPECS if spec.key != "total_time_chart")
+        for spec in home_specs:
             source = resources[spec.source]
+            group = self._view_group(spec)
             existing = managed_views.get((source.data_source_id, spec.name))
             if existing is None:
                 view = self.api.create_view(
@@ -690,13 +765,16 @@ class NotionInitializer:
                         spec,
                         source,
                         creating=True,
-                        database_id=linked_databases.get(source.data_source_id),
+                        database_id=linked_databases.get(group),
+                        after_block_id=group_tail.get(group),
                     )
                 )
                 parent = view.get("parent")
                 if not isinstance(parent, dict) or not parent.get("database_id"):
                     raise ValueError("Notion create_view response has no parent database ID")
-                linked_databases.setdefault(source.data_source_id, str(parent["database_id"]))
+                database_id = str(parent["database_id"])
+                linked_databases.setdefault(group, database_id)
+                group_tail[group] = database_id
                 managed_views[(source.data_source_id, spec.name)] = view
                 created += 1
             else:

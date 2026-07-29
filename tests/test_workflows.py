@@ -51,6 +51,7 @@ def test_init_workflow_requires_exact_dashboard_rebuild_confirmation() -> None:
         "audit-dashboard",
         "cleanup-dashboard-layout",
         "rebuild-dashboard",
+        "rebuild-dashboard-layout",
     ]
     assert inputs["confirmation"]["required"] is False  # type: ignore[index]
     assert inputs["expected_count"]["required"] is False  # type: ignore[index]
@@ -75,6 +76,10 @@ def test_init_workflow_requires_exact_dashboard_rebuild_confirmation() -> None:
     assert "rebuild-dashboard" in text
     assert '--confirm "$CONFIRMATION"' in text
     assert '--expected-count "$EXPECTED_COUNT"' in text
+    assert 'OPERATION" == "rebuild-dashboard-layout"' in text
+    assert "REBUILD_MANAGED_DASHBOARD_LAYOUT_${EXPECTED_TOTAL}_BLOCKS" in text
+    assert "uv run xyz2notion rebuild-dashboard-layout" in text
+    assert '--expected-total "$EXPECTED_TOTAL"' in text
 
 
 def test_schedules_avoid_the_top_of_the_hour() -> None:

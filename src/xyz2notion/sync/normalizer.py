@@ -97,7 +97,17 @@ def _episode_payload(item: Mapping[str, Any]) -> JsonObject:
     return episode
 
 
-def _normalize_status(played_seconds: int, duration_seconds: int) -> ListeningStatus:
+def _normalize_status(
+    played_seconds: int,
+    duration_seconds: int,
+    *,
+    is_played: bool = False,
+    is_finished: bool = False,
+) -> ListeningStatus:
+    if is_finished:
+        return ListeningStatus.PLAYED
+    if is_played and played_seconds <= 0:
+        return ListeningStatus.LISTENING
     if played_seconds <= 0:
         return ListeningStatus.UNPLAYED
     if duration_seconds and played_seconds >= max(1, duration_seconds - 15):
@@ -171,6 +181,14 @@ def build_metadata_snapshot(
         progress_raw = progress_by_eid.get(eid, {})
         duration = _integer(raw.get("duration"))
         played = _integer(progress_raw.get("progress") or raw.get("progress"))
+        is_finished = bool(raw.get("isFinished"))
+        is_played = bool(raw.get("isPlayed")) or is_finished
+        if is_finished and duration > 0:
+            played = max(played, duration)
+        elif is_played and played <= 0:
+            # Xiaoyuzhou may retain only the played/finished flags after clearing
+            # an episode's resumable position. Keep the row in listening history.
+            played = 1
         played = min(played, duration) if duration else played
         favorited = bool(raw.get("_xyz_favorited") or raw.get("isFavorited"))
         in_playlist = bool(raw.get("_xyz_in_playlist"))
@@ -197,7 +215,12 @@ def build_metadata_snapshot(
             published_at=published_at,
             duration_seconds=duration,
             played_seconds=played,
-            listening_status=_normalize_status(played, duration),
+            listening_status=_normalize_status(
+                played,
+                duration,
+                is_played=is_played,
+                is_finished=is_finished,
+            ),
             liked=bool(raw.get("isPicked")),
             favorited=favorited,
             in_playlist=in_playlist,

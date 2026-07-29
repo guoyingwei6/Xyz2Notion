@@ -27,9 +27,10 @@ from xyz2notion.models import (
     ProviderFailure,
     TranscriptResult,
 )
-from xyz2notion.notion.client import JsonObject
+from xyz2notion.notion.client import JsonObject, NotionAPIError
 from xyz2notion.notion.episode_page import (
     EpisodePageInput,
+    EpisodePagePublishResult,
     EpisodePageRenderer,
 )
 from xyz2notion.orchestration.state_store import (
@@ -180,6 +181,36 @@ class EpisodeAIProcessor:
                 "No usable local ASR provider is configured",
             )
         return transcribe_siliconflow_episode(candidate.audio_url, self.local_whisper)
+
+    def _publish(
+        self,
+        candidate: EpisodeCandidate,
+        state: EpisodeAIState,
+    ) -> EpisodePagePublishResult:
+        if state.transcript is None or state.summary is None:
+            raise _failure(
+                ProviderErrorCategory.SCHEMA_CHANGED,
+                "Persisted ENRICHED state is incomplete",
+            )
+        try:
+            return EpisodePageRenderer(self.notion).publish(
+                EpisodePageInput(
+                    page_id=candidate.page_id,
+                    audio_url=candidate.audio_url,
+                    transcript=state.transcript,
+                    summary=state.summary,
+                )
+            )
+        except ProviderError:
+            raise
+        except (NotionAPIError, RuntimeError) as exc:
+            raise ProviderError(
+                ProviderFailure(
+                    provider="notion_publish",
+                    category=ProviderErrorCategory.UNAVAILABLE,
+                    message=f"Notion episode publishing failed: {type(exc).__name__}",
+                )
+            ) from exc
 
     def _tingwu_task(
         self,
@@ -377,19 +408,7 @@ class EpisodeAIProcessor:
                 state = self._save(candidate.page_id, state)
 
             if state.record.state is PipelineState.ENRICHED:
-                if state.transcript is None or state.summary is None:
-                    raise _failure(
-                        ProviderErrorCategory.SCHEMA_CHANGED,
-                        "Persisted ENRICHED state is incomplete",
-                    )
-                published = EpisodePageRenderer(self.notion).publish(
-                    EpisodePageInput(
-                        page_id=candidate.page_id,
-                        audio_url=candidate.audio_url,
-                        transcript=state.transcript,
-                        summary=state.summary,
-                    )
-                )
+                published = self._publish(candidate, state)
                 state = state.model_copy(
                     update={
                         "record": state.record.transition(PipelineState.PUBLISHED),

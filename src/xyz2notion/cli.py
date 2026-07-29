@@ -25,8 +25,8 @@ from xyz2notion.migration.schema import (
     detect_workspace_schema_version,
     migration_plan,
 )
-from xyz2notion.notion.client import NotionAPIError, NotionClient
-from xyz2notion.notion.initializer import HOME_MARKER_URL, NotionInitializer
+from xyz2notion.notion.client import JsonObject, NotionAPIError, NotionClient
+from xyz2notion.notion.initializer import DATA_PAGE_TITLE, HOME_MARKER_URL, NotionInitializer
 from xyz2notion.orchestration.processor import (
     EpisodeAIProcessor,
     build_provider_clients,
@@ -119,6 +119,25 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help="exact expected root child_database block count",
     )
+    rebuild_layout = subparsers.add_parser(
+        "rebuild-dashboard-layout",
+        help="replace one exact managed root dashboard layout without touching its data page",
+    )
+    rebuild_layout.add_argument(
+        "--page-id",
+        help="target root page ID; defaults to NOTION_PAGE_ID",
+    )
+    rebuild_layout.add_argument(
+        "--confirm",
+        required=True,
+        help="required destructive-operation confirmation",
+    )
+    rebuild_layout.add_argument(
+        "--expected-total",
+        required=True,
+        type=int,
+        help="exact expected root block count before replacement",
+    )
     subparsers.add_parser(
         "xiaoyuzhou-check",
         help="verify Xiaoyuzhou authentication without printing account data",
@@ -185,6 +204,27 @@ def _summary_policy(config: object) -> SummaryPolicy:
     )
 
 
+def _episode_asr_status(page: Mapping[str, object]) -> str:
+    properties = page.get("properties")
+    if not isinstance(properties, Mapping):
+        return ""
+    status_property = properties.get("ASR Status")
+    if not isinstance(status_property, Mapping):
+        return ""
+    selected = status_property.get("select") or status_property.get("status")
+    if not isinstance(selected, Mapping):
+        return ""
+    return str(selected.get("name") or "")
+
+
+def _eligible_ai_pages(
+    pages: Sequence[JsonObject],
+    *,
+    retry_failed: bool,
+) -> list[JsonObject]:
+    return [page for page in pages if (_episode_asr_status(page) == "可重试失败") is retry_failed]
+
+
 def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
     try:
         config = load_config(args.config)
@@ -217,7 +257,8 @@ def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
                 initialization.resources["episode"].data_source_id,
                 {"page_size": 100},
             )
-            candidates = episode_candidates(pages)[: config.limits.episodes_per_run]
+            eligible_pages = _eligible_ai_pages(pages, retry_failed=retry_failed)
+            candidates = episode_candidates(eligible_pages)[: config.limits.episodes_per_run]
             tingwu, siliconflow, local_whisper, summary_client = build_provider_clients(
                 tingwu_cookie=tingwu_cookie,
                 siliconflow_asr_api_key=siliconflow_asr_api_key,
@@ -384,6 +425,7 @@ def _run_rebuild(args: argparse.Namespace, *, heatmap_only: bool) -> int:
                 report = StatisticsSynchronizer(
                     notion,
                     initialization.resources,
+                    page_id,
                 ).sync(statistics)
                 output = (
                     "Statistics rebuild OK "
@@ -668,6 +710,122 @@ def _run_rebuild_dashboard(args: argparse.Namespace) -> int:
     return 0
 
 
+_LEGACY_DASHBOARD_LAYOUT_TYPES = (
+    "child_page",
+    "heading_1",
+    "callout",
+    "column_list",
+    "heading_2",
+    "callout",
+    "heading_2",
+    "paragraph",
+    "image",
+    "child_database",
+    "child_database",
+    "child_database",
+    "child_database",
+    "child_database",
+    "child_database",
+    "child_database",
+    "child_database",
+    "divider",
+    "callout",
+)
+
+
+def _is_data_page(block: Mapping[str, object]) -> bool:
+    child_page = block.get("child_page")
+    return (
+        block.get("type") == "child_page"
+        and isinstance(child_page, Mapping)
+        and child_page.get("title") == DATA_PAGE_TITLE
+    )
+
+
+def _run_rebuild_dashboard_layout(args: argparse.Namespace) -> int:
+    expected_confirmation = f"REBUILD_MANAGED_DASHBOARD_LAYOUT_{args.expected_total}_BLOCKS"
+    if args.expected_total <= 0 or args.confirm != expected_confirmation:
+        print(
+            "Dashboard layout rebuild refused: confirmation or expected total did not match",
+            file=sys.stderr,
+        )
+        return 7
+
+    try:
+        credentials = load_runtime_credentials()
+        credentials.require("notion_token")
+        page_id = args.page_id or credentials.notion_page_id
+        if not page_id:
+            raise MissingCredentialError(
+                "Missing target page: set NOTION_PAGE_ID or pass --page-id"
+            )
+        if credentials.notion_token is None:
+            raise AssertionError("credential requirement did not narrow notion_token")
+
+        with NotionClient(credentials.notion_token) as notion:
+            blocks = notion.list_block_children(page_id)
+            block_types = tuple(str(block.get("type", "")) for block in blocks)
+            data_pages = [block for block in blocks if _is_data_page(block)]
+            if (
+                len(blocks) != args.expected_total
+                or args.expected_total != len(_LEGACY_DASHBOARD_LAYOUT_TYPES)
+                or block_types != _LEGACY_DASHBOARD_LAYOUT_TYPES
+                or len(data_pages) != 1
+            ):
+                print(
+                    "Dashboard layout rebuild refused: root preflight did not match "
+                    f"(expected_total={args.expected_total}, actual_total={len(blocks)}, "
+                    f"data_pages={len(data_pages)}, "
+                    f"child_database={block_types.count('child_database')}, "
+                    f"column_list={block_types.count('column_list')})",
+                    file=sys.stderr,
+                )
+                return 7
+
+            managed_blocks = [block for block in blocks if not _is_data_page(block)]
+            block_ids = [block.get("id") for block in managed_blocks]
+            if (
+                len(block_ids) != args.expected_total - 1
+                or len(set(block_ids)) != args.expected_total - 1
+                or not all(isinstance(block_id, str) and block_id for block_id in block_ids)
+            ):
+                print(
+                    "Dashboard layout rebuild refused: managed block IDs were incomplete "
+                    "or duplicated",
+                    file=sys.stderr,
+                )
+                return 7
+
+            for block_id in block_ids:
+                if not isinstance(block_id, str):
+                    raise AssertionError("preflight validation did not narrow block ID")
+                notion.delete_block(block_id)
+
+            remaining = notion.list_block_children(page_id)
+            if len(remaining) != 1 or not _is_data_page(remaining[0]):
+                print(
+                    "Dashboard layout rebuild stopped: target page did not reduce to the "
+                    "single protected data page",
+                    file=sys.stderr,
+                )
+                return 7
+            result = NotionInitializer(notion, page_id).initialize(create_home=True)
+    except (ConfigurationError, MissingCredentialError) as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    except NotionAPIError as exc:
+        print(f"Notion error: {exc}", file=sys.stderr)
+        return 4
+
+    print(
+        "Dashboard layout rebuild OK "
+        f"(managed blocks archived={len(block_ids)}, data pages preserved=1, "
+        f"databases created={result.created_databases}, "
+        f"views created={result.created_views}, views updated={result.updated_views})"
+    )
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the CLI."""
     parser = build_parser()
@@ -724,6 +882,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_cleanup_dashboard_layout(args)
     if args.command == "rebuild-dashboard":
         return _run_rebuild_dashboard(args)
+    if args.command == "rebuild-dashboard-layout":
+        return _run_rebuild_dashboard_layout(args)
     if args.command == "xiaoyuzhou-check":
         try:
             credentials = load_runtime_credentials()
@@ -777,6 +937,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 statistics_report = StatisticsSynchronizer(
                     notion,
                     initialization.resources,
+                    page_id,
                 ).sync(statistics)
                 heatmap = HeatmapPublisher(notion, page_id).publish(
                     date.today().year,

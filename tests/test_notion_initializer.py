@@ -9,6 +9,7 @@ from xyz2notion.notion.initializer import (
     DATA_PAGE_TITLE,
     HOME_MARKER,
     HOME_MARKER_URL,
+    HOME_SUMMARY_MARKER_URL,
     NotionInitializer,
     home_blocks,
 )
@@ -153,9 +154,9 @@ class FakeNotion:
             )
         else:
             linked_database_id = str(linked_database_id)
-            assert self.databases[linked_database_id]["data_sources"] == [
-                {"id": payload["data_source_id"]}
-            ]
+            linked_sources = self.databases[linked_database_id]["data_sources"]
+            if {"id": payload["data_source_id"]} not in linked_sources:
+                linked_sources.append({"id": payload["data_source_id"]})
         view = {
             "id": view_id,
             "parent": {"type": "database_id", "database_id": linked_database_id},
@@ -216,7 +217,7 @@ def test_schema_has_exactly_nine_databases_and_expected_views() -> None:
         "周趋势",
         "每日趋势",
         "Podcast",
-        "Episode · 全部",
+        "Episode · 收听记录",
         "Episode · 在听",
         "Episode · 听过",
         "Episode · 喜欢",
@@ -259,7 +260,7 @@ def test_initializer_creates_complete_clean_room_template() -> None:
     fake.blocks["root"] = []
     result = NotionInitializer(fake, "root").initialize(create_home=True)
     assert result.created_databases == 9
-    assert result.created_views == len(VIEW_SPECS)
+    assert result.created_views == len(VIEW_SPECS) - 1
     assert result.updated_views == 0
     assert result.created_home is True
     assert fake.created_pages == 1
@@ -308,7 +309,37 @@ def test_initializer_creates_complete_clean_room_template() -> None:
     }
 
     linked_database_ids = {view["parent"]["database_id"] for view in fake.views.values()}
-    assert len(linked_database_ids) == len({spec.source for spec in VIEW_SPECS})
+    assert len(linked_database_ids) == 4
+    statistics_views = [
+        view
+        for view in fake.views.values()
+        if view["data_source_id"]
+        in {
+            result.resources[source].data_source_id
+            for source in ("all", "year", "month", "week", "day")
+        }
+    ]
+    assert len({view["parent"]["database_id"] for view in statistics_views}) == 1
+    assert "收听总览" not in {view["name"] for view in statistics_views}
+    statistics_database = statistics_views[0]["parent"]["database_id"]
+    create_position = next(
+        view["create_database"]["position"]
+        for view in statistics_views
+        if "create_database" in view
+    )
+    overview_anchor = next(
+        block["id"]
+        for block in fake.blocks["root"]
+        if block["type"] == "paragraph" and HOME_SUMMARY_MARKER_URL in str(block)
+    )
+    assert create_position == {
+        "type": "after_block",
+        "block_id": overview_anchor,
+    }
+    assert fake.databases[statistics_database]["data_sources"] == [
+        {"id": result.resources[source].data_source_id}
+        for source in ("all", "year", "month", "week", "day")
+    ]
     episode_views = [
         view
         for view in fake.views.values()
@@ -340,11 +371,11 @@ def test_initializer_is_idempotent_and_preserves_user_content() -> None:
     second = initializer.initialize()
     assert second.created_databases == 0
     assert second.created_views == 0
-    assert second.updated_views == len(VIEW_SPECS)
+    assert second.updated_views == len(VIEW_SPECS) - 1
     assert second.created_home is False
     assert fake.created_pages == 1
     assert fake.created_databases == 9
-    assert fake.created_views == len(VIEW_SPECS)
+    assert fake.created_views == len(VIEW_SPECS) - 1
     assert fake.data_sources[podcast_ds]["properties"]["My Notes"]["id"] == "custom"
     assert user_block in fake.blocks["root"]
     marker_count = sum(HOME_MARKER_URL in str(block) for block in fake.blocks["root"])
@@ -357,7 +388,7 @@ def test_initializer_rebuilds_missing_view_in_existing_linked_database() -> None
     first = initializer.initialize(create_home=True)
     episode_data_source_id = first.resources["episode"].data_source_id
     missing_id = next(
-        view_id for view_id, view in fake.views.items() if view["name"] == "Episode · 全部"
+        view_id for view_id, view in fake.views.items() if view["name"] == "Episode · 收听记录"
     )
     episode_database_id = str(fake.views[missing_id]["parent"]["database_id"])
     del fake.views[missing_id]
@@ -368,8 +399,8 @@ def test_initializer_rebuilds_missing_view_in_existing_linked_database() -> None
     rebuilt = initializer.initialize()
 
     assert rebuilt.created_views == 1
-    assert rebuilt.updated_views == len(VIEW_SPECS) - 1
-    replacement = next(view for view in fake.views.values() if view["name"] == "Episode · 全部")
+    assert rebuilt.updated_views == len(VIEW_SPECS) - 2
+    replacement = next(view for view in fake.views.values() if view["name"] == "Episode · 收听记录")
     assert replacement["data_source_id"] == episode_data_source_id
     assert replacement["parent"]["database_id"] == episode_database_id
     assert replacement["database_id"] == episode_database_id
@@ -448,7 +479,7 @@ def test_initializer_does_not_duplicate_home_when_marker_link_is_omitted() -> No
     result = NotionInitializer(fake, "root").initialize(create_home=True)
 
     assert result.created_home is False
-    assert len(fake.blocks["root"]) == root_count + 9
+    assert len(fake.blocks["root"]) == root_count + 5
 
 
 def test_initializer_does_not_duplicate_reshaped_home_without_marker() -> None:
@@ -472,7 +503,7 @@ def test_initializer_does_not_duplicate_reshaped_home_without_marker() -> None:
     result = NotionInitializer(fake, "root").initialize(create_home=True)
 
     assert result.created_home is False
-    assert len(fake.blocks["root"]) == root_count + 9
+    assert len(fake.blocks["root"]) == root_count + 5
 
 
 def test_initializer_refuses_home_bootstrap_on_page_with_user_content() -> None:
@@ -526,15 +557,18 @@ def test_home_layout_has_columns_and_heatmap_placeholder() -> None:
     assert len(column_list["column_list"]["children"]) == 2
     ratios = [column["column"]["width_ratio"] for column in column_list["column_list"]["children"]]
     assert ratios == [
-        0.3,
-        0.7,
+        0.28,
+        0.72,
     ]
     rendered = str(blocks)
     assert "播客记录" in rendered
-    assert "只记录真正播放过的节目" in rendered
+    assert "年度热力图每日更新" in rendered
     assert "'type': 'table_of_contents'" in rendered
-    assert "全部 · 在听 · 听过 · 喜欢 · 待听 · 收藏" in rendered
+    assert "收听记录 · 在听 · 听过 · 喜欢 · 待听 · 收藏" in rendered
     assert rendered.index("Podcast") < rendered.index("Episode") < rendered.index("思维导图")
+    assert HOME_SUMMARY_MARKER_URL in rendered
+    assert "总收听时长" not in rendered
+    assert rendered.count("播客记录") == 1
 
 
 def test_initializer_preserves_existing_custom_icon_and_cover() -> None:

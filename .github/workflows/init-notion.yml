@@ -14,6 +14,7 @@ on:
           - audit-dashboard
           - cleanup-dashboard-layout
           - rebuild-dashboard
+          - rebuild-dashboard-layout
       confirmation:
         description: "Exact confirmation required for destructive operations"
         required: false
@@ -96,6 +97,19 @@ jobs:
             result="$(uv run xyz2notion rebuild-dashboard \
               --confirm "$CONFIRMATION" \
               --expected-count "$EXPECTED_COUNT")"
+          elif [[ "$OPERATION" == "rebuild-dashboard-layout" ]]; then
+            if [[ ! "$EXPECTED_TOTAL" =~ ^[1-9][0-9]*$ ]]; then
+              printf 'Dashboard layout rebuild refused: expected_total must be positive\n' >&2
+              exit 2
+            fi
+            if [[ "$CONFIRMATION" != \
+              "REBUILD_MANAGED_DASHBOARD_LAYOUT_${EXPECTED_TOTAL}_BLOCKS" ]]; then
+              printf 'Dashboard layout rebuild refused: confirmation did not match total\n' >&2
+              exit 2
+            fi
+            result="$(uv run xyz2notion rebuild-dashboard-layout \
+              --confirm "$CONFIRMATION" \
+              --expected-total "$EXPECTED_TOTAL")"
           else
             printf 'Unsupported initialization operation\n' >&2
             exit 2

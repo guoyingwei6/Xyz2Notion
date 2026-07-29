@@ -6,6 +6,7 @@ from typing import Any
 
 from xyz2notion.models import Episode, ListeningStatus, Podcast
 from xyz2notion.notion.client import JsonObject
+from xyz2notion.notion.initializer import HOME_SUMMARY_MARKER_URL
 from xyz2notion.notion.schema import NotionResource
 from xyz2notion.statistics.calculator import (
     MonthlyWrappedValue,
@@ -180,7 +181,7 @@ def test_leap_year_svg_contains_366_calendar_cells() -> None:
 class FakeStatisticsNotion:
     def __init__(self) -> None:
         self.pages: dict[str, list[JsonObject]] = {}
-        self.blocks: list[JsonObject] = []
+        self.blocks: dict[str, list[JsonObject]] = {"root": []}
         self.created_pages = 0
         self.uploads = 0
 
@@ -222,17 +223,19 @@ class FakeStatisticsNotion:
         return page
 
     def list_block_children(self, block_id: str) -> list[JsonObject]:
-        assert block_id == "root"
-        return list(self.blocks)
+        return list(self.blocks.get(block_id, []))
 
     def append_block_children(
         self,
         block_id: str,
         children: Sequence[Mapping[str, Any]],
     ) -> list[JsonObject]:
-        assert block_id == "root"
-        created = [{"id": f"block-{len(self.blocks) + 1}", **dict(children[0])}]
-        self.blocks.extend(created)
+        target = self.blocks.setdefault(block_id, [])
+        created = [
+            {"id": f"{block_id}-block-{len(target) + index}", **dict(child)}
+            for index, child in enumerate(children, start=1)
+        ]
+        target.extend(created)
         return created
 
     def update_block(
@@ -240,7 +243,9 @@ class FakeStatisticsNotion:
         block_id: str,
         payload: Mapping[str, Any],
     ) -> JsonObject:
-        block = next(block for block in self.blocks if block["id"] == block_id)
+        block = next(
+            block for blocks in self.blocks.values() for block in blocks if block["id"] == block_id
+        )
         block.update(payload)
         return block
 
@@ -276,6 +281,23 @@ def notion_resources() -> dict[str, NotionResource]:
 
 def test_statistics_notion_sync_is_idempotent_and_writes_rank_and_source() -> None:
     fake = FakeStatisticsNotion()
+    fake.blocks["root"].append(
+        {
+            "id": "summary",
+            "type": "paragraph",
+            "paragraph": {
+                "rich_text": [
+                    {
+                        "type": "text",
+                        "text": {
+                            "content": "\u200b",
+                            "link": {"url": HOME_SUMMARY_MARKER_URL},
+                        },
+                    }
+                ]
+            },
+        }
+    )
     statistics = calculate_statistics(
         statistics_snapshot(),
         (
@@ -288,7 +310,7 @@ def test_statistics_notion_sync_is_idempotent_and_writes_rank_and_source() -> No
         ),
         today=date(2026, 2, 15),
     )
-    synchronizer = StatisticsSynchronizer(fake, notion_resources())
+    synchronizer = StatisticsSynchronizer(fake, notion_resources(), root_page_id="root")
     first = synchronizer.sync(statistics, today=date(2026, 2, 15))
     assert first.created == 10
     assert first.updated == 0
@@ -311,6 +333,9 @@ def test_statistics_notion_sync_is_idempotent_and_writes_rank_and_source() -> No
         if page["properties"]["PID"]["rich_text"][0]["text"]["content"] == "p1"
     )
     assert first_rank["properties"]["Rank"]["number"] == 1
+    assert "累计收听" in str(fake.blocks["root"][0])
+    assert "3 期" in str(fake.blocks["root"][0])
+    assert HOME_SUMMARY_MARKER_URL in str(fake.blocks["root"][0])
 
 
 def test_heatmap_publisher_creates_skips_and_updates_one_managed_block() -> None:
@@ -323,15 +348,68 @@ def test_heatmap_publisher_creates_skips_and_updates_one_managed_block() -> None
     first = publisher.publish(2026, daily)
     assert first.action == "created"
     assert fake.uploads == 1
-    assert len(fake.blocks) == 1
+    assert len(fake.blocks["root"]) == 1
+    assert "https://xyz2notion.local/heatmap/2026/" in str(
+        fake.blocks["root"][0]["image"]["caption"]
+    )
 
     second = publisher.publish(2026, daily)
     assert second.action == "unchanged"
     assert fake.uploads == 1
-    assert len(fake.blocks) == 1
+    assert len(fake.blocks["root"]) == 1
 
     changed = (replace(daily[0], listening_seconds=901, level=4), *daily[1:])
     third = publisher.publish(2026, changed)
     assert third.action == "updated"
     assert fake.uploads == 2
-    assert len(fake.blocks) == 1
+    assert len(fake.blocks["root"]) == 1
+
+
+def test_heatmap_is_nested_in_podcast_record_column() -> None:
+    fake = FakeStatisticsNotion()
+    fake.blocks["root"] = [
+        {
+            "id": "columns",
+            "type": "column_list",
+            "has_children": True,
+            "column_list": {},
+        }
+    ]
+    fake.blocks["columns"] = [{"id": "right", "type": "column", "has_children": True, "column": {}}]
+    fake.blocks["right"] = [
+        {
+            "id": "record-heading",
+            "type": "heading_2",
+            "heading_2": {"rich_text": [{"type": "text", "text": {"content": "播客记录"}}]},
+        }
+    ]
+    daily = calculate_statistics(statistics_snapshot(), today=date(2026, 2, 15)).daily
+
+    result = HeatmapPublisher(fake, "root").publish(2026, daily)
+
+    assert result.action == "created"
+    assert len(fake.blocks["right"]) == 2
+    assert fake.blocks["right"][-1]["type"] == "image"
+    assert fake.blocks["right"][-1]["image"]["caption"][0]["text"]["content"] == "\u200b"
+
+
+def test_legacy_heatmap_caption_migrates_once_then_stays_idempotent() -> None:
+    fake = FakeStatisticsNotion()
+    daily = calculate_statistics(statistics_snapshot(), today=date(2026, 2, 15)).daily
+    publisher = HeatmapPublisher(fake, "root")
+    first = publisher.publish(2026, daily)
+    fake.blocks["root"][0]["image"]["caption"] = [
+        {
+            "type": "text",
+            "text": {"content": f"XYZ2NOTION_HEATMAP:2026:{first.content_hash}"},
+        }
+    ]
+
+    migrated = publisher.publish(2026, daily)
+    stable = publisher.publish(2026, daily)
+
+    assert migrated.action == "updated"
+    assert stable.action == "unchanged"
+    assert fake.uploads == 1
+    assert len(fake.blocks["root"]) == 1
+    assert fake.blocks["root"][0]["image"]["caption"][0]["text"]["content"] == "\u200b"
