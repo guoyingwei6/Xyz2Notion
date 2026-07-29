@@ -392,7 +392,14 @@ class NotionClient:
             params["database_id"] = database_id
         if data_source_id:
             params["data_source_id"] = data_source_id
-        return list(self.paginate("GET", "/views", params=params))
+        references: list[JsonObject] = []
+        for item in self.paginate("GET", "/views", params=params):
+            nested = item.get("view")
+            if isinstance(nested, Mapping) and nested.get("id"):
+                references.append({"id": str(nested["id"])})
+            elif item.get("id"):
+                references.append(item)
+        return references
 
     def retrieve_view(self, view_id: str) -> JsonObject:
         return self.request("GET", f"/views/{view_id}")

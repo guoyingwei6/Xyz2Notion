@@ -383,3 +383,25 @@ def test_resource_helpers_use_2026_endpoints() -> None:
     assert ("DELETE", "/v1/blocks/managed") in calls
     with pytest.raises(ValueError, match="required"):
         client.list_views()
+
+
+def test_list_views_unwraps_2026_view_references() -> None:
+    def handle(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {"type": "view", "view": {"id": "nested-view"}},
+                    {"id": "legacy-direct-view"},
+                    {"type": "view", "view": {}},
+                ],
+                "has_more": False,
+                "next_cursor": None,
+            },
+        )
+
+    client = client_for(httpx.MockTransport(handle))
+    assert client.list_views(data_source_id="source") == [
+        {"id": "nested-view"},
+        {"id": "legacy-direct-view"},
+    ]
