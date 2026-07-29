@@ -8,6 +8,8 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
 
+from pydantic import SecretStr
+
 from xyz2notion import __version__
 from xyz2notion.config import (
     AsrProvider,
@@ -25,7 +27,9 @@ from xyz2notion.migration.schema import (
     migration_plan,
 )
 from xyz2notion.notion.client import JsonObject, NotionAPIError, NotionClient
+from xyz2notion.notion.cover_localizer import NotionCoverLocalizer
 from xyz2notion.notion.initializer import DATA_PAGE_TITLE, HOME_MARKER_URL, NotionInitializer
+from xyz2notion.notion.published_ai import PublishedAIReconciler
 from xyz2notion.orchestration.processor import (
     EpisodeAIProcessor,
     build_provider_clients,
@@ -157,6 +161,20 @@ def build_parser() -> argparse.ArgumentParser:
             "--page-id",
             help="target root page ID; defaults to NOTION_PAGE_ID",
         )
+    repair_covers = subparsers.add_parser(
+        "repair-notion-covers",
+        help="upload a bounded number of existing external covers into Notion",
+    )
+    repair_covers.add_argument("--limit", type=int, default=10)
+    repair_covers.add_argument("--confirm", required=True)
+    repair_covers.add_argument("--page-id")
+    reconcile_ai = subparsers.add_parser(
+        "reconcile-published-ai",
+        help="audit up to two published Episode pages and backfill mind-map rows",
+    )
+    reconcile_ai.add_argument("--limit", type=int, default=2)
+    reconcile_ai.add_argument("--confirm", required=True)
+    reconcile_ai.add_argument("--page-id")
     migrate = subparsers.add_parser(
         "migrate",
         help="adopt and map a legacy Podcast2Notion template in place",
@@ -277,6 +295,7 @@ def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
                 summary_client=summary_client,
                 summary_policy=_summary_policy(config),
                 summary_enabled=config.summary.enabled,
+                mindmap_data_source_id=initialization.resources["mindmap"].data_source_id,
             )
             page_by_id = {str(page.get("id")): page for page in pages}
             outcomes = [
@@ -302,6 +321,97 @@ def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
     print(
         f"Episode AI processing OK (selected={len(candidates)}; "
         f"actions: {action_summary}; states: {state_summary})"
+    )
+    return 0
+
+
+def _notion_runtime(args: argparse.Namespace) -> tuple[SecretStr, str]:
+    credentials = load_runtime_credentials()
+    credentials.require("notion_token")
+    page_id = args.page_id or credentials.notion_page_id
+    if not page_id:
+        raise MissingCredentialError("Missing target page: set NOTION_PAGE_ID or pass --page-id")
+    if credentials.notion_token is None:
+        raise AssertionError("credential requirement did not narrow notion_token")
+    return credentials.notion_token, page_id
+
+
+def _run_cover_repair(args: argparse.Namespace) -> int:
+    expected = f"REPAIR_{args.limit}_NOTION_COVERS"
+    if not 1 <= args.limit <= 10 or args.confirm != expected:
+        print(
+            f"Confirmation error: use --limit 1..10 and --confirm {expected}",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        token, page_id = _notion_runtime(args)
+        with NotionClient(token) as notion:
+            initialization = NotionInitializer(notion, page_id).initialize()
+            with NotionCoverLocalizer(
+                notion,
+                (
+                    initialization.resources["podcast"].data_source_id,
+                    initialization.resources["episode"].data_source_id,
+                ),
+            ) as localizer:
+                report = localizer.repair(limit=args.limit)
+    except (ConfigurationError, MissingCredentialError) as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    except NotionAPIError as exc:
+        print(f"Notion error: {exc}", file=sys.stderr)
+        return 4
+    print(
+        "Notion cover repair OK "
+        f"(limit={args.limit}; repaired={report.repaired}; "
+        f"skipped={report.skipped}; failed={report.failed})"
+    )
+    return 0
+
+
+def _run_published_ai_reconciliation(args: argparse.Namespace) -> int:
+    expected = f"RECONCILE_{args.limit}_PUBLISHED_AI"
+    if not 1 <= args.limit <= 2 or args.confirm != expected:
+        print(
+            f"Confirmation error: use --limit 1..2 and --confirm {expected}",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        token, page_id = _notion_runtime(args)
+        with NotionClient(token) as notion:
+            initialization = NotionInitializer(notion, page_id).initialize()
+            pages = notion.query_data_source_page(
+                initialization.resources["episode"].data_source_id,
+                {
+                    "page_size": args.limit,
+                    "filter": {
+                        "property": "ASR Status",
+                        "select": {"equals": "已发布"},
+                    },
+                },
+            )
+            with NotionEpisodeStateStore(notion) as state_store:
+                report = PublishedAIReconciler(
+                    notion,
+                    state_store,
+                    initialization.resources["mindmap"].data_source_id,
+                ).reconcile(pages, limit=args.limit)
+    except (ConfigurationError, MissingCredentialError) as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    except NotionAPIError as exc:
+        print(f"Notion error: {exc}", file=sys.stderr)
+        return 4
+    print(
+        "Published AI reconciliation OK "
+        f"(selected={report.selected}; transcripts={report.transcripts}; "
+        f"summaries={report.summaries}; page_ready={report.page_ready}; "
+        f"mindmaps_created={report.mindmaps_created}; "
+        f"mindmaps_updated={report.mindmaps_updated}; "
+        f"mindmaps_unchanged={report.mindmaps_unchanged}; "
+        f"incomplete={report.incomplete})"
     )
     return 0
 
@@ -908,6 +1018,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command in {"process-ai", "retry-failed"}:
         return _run_ai(args, retry_failed=args.command == "retry-failed")
+    if args.command == "repair-notion-covers":
+        return _run_cover_repair(args)
+    if args.command == "reconcile-published-ai":
+        return _run_published_ai_reconciliation(args)
     if args.command == "migrate":
         return _run_migration(args)
     if args.command == "redo-episode":

@@ -937,6 +937,7 @@ def test_process_ai_reports_only_aggregate_counts(
             return SimpleNamespace(
                 resources={
                     "episode": SimpleNamespace(data_source_id="episode-source"),
+                    "mindmap": SimpleNamespace(data_source_id="mindmap-source"),
                 }
             )
 
@@ -1014,6 +1015,224 @@ def test_ai_pages_are_filtered_before_the_per_run_limit() -> None:
     pages = [normal_1, normal_2, retryable]
     assert cli_module._eligible_ai_pages(pages, retry_failed=False)[:1] == [normal_1]  # type: ignore[attr-defined]
     assert cli_module._eligible_ai_pages(pages, retry_failed=True)[:1] == [retryable]  # type: ignore[attr-defined]
+
+
+def test_notion_cover_repair_requires_limit_bound_confirmation(
+    capsys: object,
+) -> None:
+    assert (
+        main(
+            [
+                "repair-notion-covers",
+                "--limit",
+                "10",
+                "--confirm",
+                "wrong",
+            ]
+        )
+        == 2
+    )
+    assert "REPAIR_10_NOTION_COVERS" in capsys.readouterr().err  # type: ignore[attr-defined]
+
+
+def test_published_ai_reconciliation_requires_bound_confirmation(
+    capsys: object,
+) -> None:
+    assert (
+        main(
+            [
+                "reconcile-published-ai",
+                "--limit",
+                "2",
+                "--confirm",
+                "wrong",
+            ]
+        )
+        == 2
+    )
+    assert "RECONCILE_2_PUBLISHED_AI" in capsys.readouterr().err  # type: ignore[attr-defined]
+
+
+def test_notion_only_repair_reports_missing_credentials(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.delenv("NOTION_TOKEN", raising=False)  # type: ignore[attr-defined]
+    monkeypatch.delenv("NOTION_PAGE_ID", raising=False)  # type: ignore[attr-defined]
+    assert (
+        main(
+            [
+                "repair-notion-covers",
+                "--limit",
+                "1",
+                "--confirm",
+                "REPAIR_1_NOTION_COVERS",
+            ]
+        )
+        == 2
+    )
+    assert "Configuration error" in capsys.readouterr().err  # type: ignore[attr-defined]
+
+
+def test_notion_only_repair_reports_missing_target_page(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "secret_fixture_token")  # type: ignore[attr-defined]
+    monkeypatch.delenv("NOTION_PAGE_ID", raising=False)  # type: ignore[attr-defined]
+    assert (
+        main(
+            [
+                "repair-notion-covers",
+                "--limit",
+                "1",
+                "--confirm",
+                "REPAIR_1_NOTION_COVERS",
+            ]
+        )
+        == 2
+    )
+    assert "Missing target page" in capsys.readouterr().err  # type: ignore[attr-defined]
+
+
+def test_notion_cover_repair_runs_without_xiaoyuzhou_credentials(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "secret_fixture_token")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+
+    class FakeNotion(FakeContextClient):
+        pass
+
+    class FakeInitializer:
+        def __init__(self, _api: object, page_id: str) -> None:
+            assert page_id == "fixture-page"
+
+        def initialize(self) -> object:
+            return SimpleNamespace(
+                resources={
+                    "podcast": SimpleNamespace(data_source_id="podcasts"),
+                    "episode": SimpleNamespace(data_source_id="episodes"),
+                }
+            )
+
+    class FakeLocalizer:
+        def __init__(self, _api: object, sources: object) -> None:
+            assert sources == ("podcasts", "episodes")
+
+        def __enter__(self) -> "FakeLocalizer":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            pass
+
+        def repair(self, *, limit: int) -> object:
+            assert limit == 1
+            return SimpleNamespace(repaired=1, skipped=2, failed=0)
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionCoverLocalizer", FakeLocalizer)  # type: ignore[attr-defined]
+    assert (
+        main(
+            [
+                "repair-notion-covers",
+                "--limit",
+                "1",
+                "--confirm",
+                "REPAIR_1_NOTION_COVERS",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out  # type: ignore[attr-defined]
+    assert "repaired=1" in output
+    assert "failed=0" in output
+
+
+def test_published_ai_reconciliation_runs_notion_only(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "secret_fixture_token")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+
+    class FakeNotion(FakeContextClient):
+        def query_data_source_page(
+            self,
+            data_source_id: str,
+            payload: object,
+        ) -> list[object]:
+            assert data_source_id == "episodes"
+            assert payload == {
+                "page_size": 2,
+                "filter": {
+                    "property": "ASR Status",
+                    "select": {"equals": "已发布"},
+                },
+            }
+            return [{"id": "published"}]
+
+    class FakeInitializer:
+        def __init__(self, _api: object, _page_id: str) -> None:
+            pass
+
+        def initialize(self) -> object:
+            return SimpleNamespace(
+                resources={
+                    "episode": SimpleNamespace(data_source_id="episodes"),
+                    "mindmap": SimpleNamespace(data_source_id="mindmaps"),
+                }
+            )
+
+    class FakeStore:
+        def __init__(self, _api: object) -> None:
+            pass
+
+        def __enter__(self) -> "FakeStore":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            pass
+
+    class FakeReconciler:
+        def __init__(self, _api: object, _store: object, source: str) -> None:
+            assert source == "mindmaps"
+
+        def reconcile(self, pages: object, *, limit: int) -> object:
+            assert pages == [{"id": "published"}]
+            assert limit == 2
+            return SimpleNamespace(
+                selected=1,
+                transcripts=1,
+                summaries=1,
+                page_ready=1,
+                mindmaps_created=1,
+                mindmaps_updated=0,
+                mindmaps_unchanged=0,
+                incomplete=0,
+            )
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionEpisodeStateStore", FakeStore)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "PublishedAIReconciler", FakeReconciler)  # type: ignore[attr-defined]
+    assert (
+        main(
+            [
+                "reconcile-published-ai",
+                "--limit",
+                "2",
+                "--confirm",
+                "RECONCILE_2_PUBLISHED_AI",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out  # type: ignore[attr-defined]
+    assert "transcripts=1" in output
+    assert "mindmaps_created=1" in output
 
 
 def test_migration_dry_run_reports_only_counts(

@@ -231,6 +231,7 @@ DATABASE_SPECS: tuple[DatabaseSpec, ...] = (
         icon="🧠",
         properties={
             "Name": title_property(),
+            "Mindmap Key": text_property(),
             "Mindmap JSON": text_property(),
             "Mermaid": text_property(),
             "Content Version": text_property(),

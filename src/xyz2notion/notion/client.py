@@ -379,6 +379,22 @@ class NotionClient:
             )
         )
 
+    def query_data_source_page(
+        self,
+        data_source_id: str,
+        payload: Mapping[str, Any] | None = None,
+    ) -> list[JsonObject]:
+        """Return only the first bounded query page without following cursors."""
+        response = self.request(
+            "POST",
+            f"/data_sources/{data_source_id}/query",
+            json_body=payload or {"page_size": 100},
+        )
+        results = response.get("results", [])
+        if not isinstance(results, list):
+            raise NotionAPIError("Notion data source query has invalid results")
+        return [item for item in results if isinstance(item, dict)]
+
     def list_views(
         self,
         *,

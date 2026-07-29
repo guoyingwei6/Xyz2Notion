@@ -60,6 +60,35 @@ def test_create_data_source_page_uses_2026_parent_contract() -> None:
     assert created["id"] == "row-1"
 
 
+def test_query_data_source_page_does_not_follow_cursor() -> None:
+    requests = 0
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        assert request.url.path == "/v1/data_sources/ds-1/query"
+        return httpx.Response(
+            200,
+            json={
+                "results": [{"id": "row-1"}, "invalid"],
+                "has_more": True,
+                "next_cursor": "must-not-be-followed",
+            },
+        )
+
+    client = client_for(httpx.MockTransport(handle))
+    assert client.query_data_source_page("ds-1", {"page_size": 1}) == [{"id": "row-1"}]
+    assert requests == 1
+
+
+def test_query_data_source_page_rejects_invalid_results() -> None:
+    client = client_for(
+        httpx.MockTransport(lambda _request: httpx.Response(200, json={"results": {}}))
+    )
+    with pytest.raises(NotionAPIError, match="invalid results"):
+        client.query_data_source_page("ds-1")
+
+
 def test_search_databases_resolves_data_source_parents() -> None:
     requests: list[httpx.Request] = []
 

@@ -103,6 +103,35 @@ class FailingPublishNotion(FakeNotion):
         return super().append_block_children(block_id, children)
 
 
+class FakeMindmapNotion(FakeNotion):
+    def __init__(self) -> None:
+        super().__init__()
+        self.mindmap_pages: list[JsonObject] = []
+
+    def query_data_source(
+        self,
+        _data_source_id: str,
+        _payload: Mapping[str, Any] | None = None,
+    ) -> list[JsonObject]:
+        return list(self.mindmap_pages)
+
+    def create_data_source_page(
+        self,
+        _data_source_id: str,
+        properties: Mapping[str, Any],
+        *,
+        icon: Mapping[str, Any] | None = None,
+        cover: Mapping[str, Any] | None = None,
+        children: Sequence[Mapping[str, Any]] = (),
+    ) -> JsonObject:
+        page = {"id": "mindmap-page", "properties": dict(properties)}
+        self.mindmap_pages.append(page)
+        return page
+
+    def update_page(self, page_id: str, _payload: Mapping[str, Any]) -> JsonObject:
+        return {"id": page_id}
+
+
 class FakeSummaryClient:
     models = ("Qwen/Qwen3-8B",)
     active_model = "Qwen/Qwen3-8B"
@@ -262,6 +291,22 @@ def test_siliconflow_summary_and_publish_are_checkpointed() -> None:
         PipelineState.ENRICHED,
         PipelineState.PUBLISHED,
     ]
+
+
+def test_publish_also_upserts_standalone_mindmap_database() -> None:
+    notion = FakeMindmapNotion()
+    outcome = SiliconProcessor(
+        notion,
+        FakeStateStore(),
+        siliconflow=object(),
+        summary_client=FakeSummaryClient(),
+        mindmap_data_source_id="mindmaps",
+    ).process(CANDIDATE, {})
+    assert outcome.state is PipelineState.PUBLISHED
+    assert len(notion.mindmap_pages) == 1
+    properties = notion.mindmap_pages[0]["properties"]
+    assert properties["Episode"] == {"relation": [{"id": "page"}]}
+    assert properties["Mindmap Key"]["rich_text"][0]["text"]["content"] == "episode"
 
 
 def test_no_asr_provider_pauses_without_persisting_failure() -> None:

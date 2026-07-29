@@ -33,6 +33,7 @@ from xyz2notion.notion.episode_page import (
     EpisodePagePublishResult,
     EpisodePageRenderer,
 )
+from xyz2notion.notion.mindmap_database import MindmapDatabaseSynchronizer
 from xyz2notion.orchestration.state_store import (
     EpisodeAIState,
     NotionEpisodeStateStore,
@@ -152,6 +153,7 @@ class EpisodeAIProcessor:
         summary_policy: SummaryPolicy | None = None,
         summary_enabled: bool = True,
         tingwu_directory: str = "Xyz2Notion 播客",
+        mindmap_data_source_id: str | None = None,
     ) -> None:
         self.notion = notion
         self.state_store = state_store
@@ -162,6 +164,7 @@ class EpisodeAIProcessor:
         self.summary_policy = summary_policy or SummaryPolicy()
         self.summary_enabled = summary_enabled
         self.tingwu_directory = tingwu_directory
+        self.mindmap_data_source_id = mindmap_data_source_id
 
     def _save(self, page_id: str, state: EpisodeAIState) -> EpisodeAIState:
         return self.state_store.save(page_id, state)
@@ -193,7 +196,7 @@ class EpisodeAIProcessor:
                 "Persisted ENRICHED state is incomplete",
             )
         try:
-            return EpisodePageRenderer(self.notion).publish(
+            published = EpisodePageRenderer(self.notion).publish(
                 EpisodePageInput(
                     page_id=candidate.page_id,
                     audio_url=candidate.audio_url,
@@ -201,6 +204,18 @@ class EpisodeAIProcessor:
                     summary=state.summary,
                 )
             )
+            if self.mindmap_data_source_id is not None:
+                MindmapDatabaseSynchronizer(
+                    self.notion,
+                    self.mindmap_data_source_id,
+                ).sync(
+                    eid=candidate.eid,
+                    episode_page_id=candidate.page_id,
+                    episode_title=candidate.title,
+                    summary=state.summary,
+                    content_version=published.content_hash,
+                )
+            return published
         except ProviderError:
             raise
         except (NotionAPIError, RuntimeError) as exc:
