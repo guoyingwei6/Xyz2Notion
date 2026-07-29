@@ -20,6 +20,7 @@ from xyz2notion.models import (
 )
 from xyz2notion.notion.client import JsonObject
 from xyz2notion.orchestration.processor import (
+    MAX_RETRY_ATTEMPTS,
     EpisodeAIProcessor,
     EpisodeCandidate,
     episode_candidates,
@@ -454,6 +455,23 @@ def test_retryable_failure_resumes_exact_stage_on_manual_retry() -> None:
     completed = processor.process(CANDIDATE, {}, retry_failed=True)
     assert completed.state is PipelineState.PUBLISHED
     assert store.state.record.attempts == 1
+
+
+def test_retryable_failure_stops_after_bounded_retry_attempts() -> None:
+    record = PipelineRecord(
+        eid="episode",
+        attempts=MAX_RETRY_ATTEMPTS,
+    )
+    store = FakeStateStore(EpisodeAIState(record=record))
+    processor = SiliconProcessor(
+        FakeNotion(),
+        store,
+        siliconflow=object(),
+        failures=1,
+    )
+    outcome = processor.process(CANDIDATE, {})
+    assert outcome.state is PipelineState.FAILED_FINAL
+    assert store.state.record.attempts == MAX_RETRY_ATTEMPTS
 
 
 def test_publish_failure_is_checkpointed_and_resumes_without_repeating_ai() -> None:

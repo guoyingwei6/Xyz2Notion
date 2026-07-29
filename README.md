@@ -70,6 +70,10 @@ SiliconFlow；如果两条远程通道都不可用，最后才在 GitHub Actions
 `NOTION_PAGE_ID`：封面单次最多本地化 10 张，AI 结果单次最多核对 2 期；
 不会读取小宇宙、听悟或 SiliconFlow 凭证，也不会启动新转写。
 
+完成初期验收后，AI 队列按每 2 小时最多 2 期慢速推进；可重试失败每天处理一次，
+同一期累计重试 3 次后停止。AI 工作流不含小宇宙凭证，只使用已写入 Notion 的
+Episode 音频地址和状态文件。
+
 v0.1.0 已实现自主 Notion 模板、元数据与统计同步、听悟 Cookie → SiliconFlow →
 本地 Whisper 三级降级转写、SiliconFlow 免费摘要、脑图、迁移和可恢复的 GitHub Actions 编排。真实账户验收按
 [实施 Checklist](outputs/Xyz2Notion项目实施Checklist.md)

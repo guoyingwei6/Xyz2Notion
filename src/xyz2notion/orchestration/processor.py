@@ -40,6 +40,8 @@ from xyz2notion.orchestration.state_store import (
 )
 from xyz2notion.state import PipelineState
 
+MAX_RETRY_ATTEMPTS = 3
+
 
 @dataclass(frozen=True)
 class EpisodeCandidate:
@@ -344,7 +346,7 @@ class EpisodeAIProcessor:
     ) -> ProcessingOutcome:
         target = (
             PipelineState.FAILED_RETRYABLE
-            if error.failure.retryable
+            if error.failure.retryable and state.record.attempts < MAX_RETRY_ATTEMPTS
             else PipelineState.FAILED_FINAL
         )
         failed = state.model_copy(

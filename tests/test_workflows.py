@@ -91,10 +91,16 @@ def test_metadata_sync_is_manual_and_requires_exact_safety_confirmation() -> Non
     assert "timeout-minutes: 15" in text
 
 
-def test_process_ai_is_manual_during_initial_validation() -> None:
+def test_process_ai_runs_two_hour_drain_schedule() -> None:
     text, workflow = _workflow("process-ai.yml")
-    assert "cron:" not in text
     assert "workflow_dispatch" in workflow[True]  # type: ignore[index,operator]
+    assert workflow[True]["schedule"] == [{"cron": "23 */2 * * *"}]  # type: ignore[index]
+
+
+def test_retry_failed_runs_once_daily() -> None:
+    _text, workflow = _workflow("retry-failed.yml")
+    assert "workflow_dispatch" in workflow[True]  # type: ignore[index,operator]
+    assert workflow[True]["schedule"] == [{"cron": "47 2 * * *"}]  # type: ignore[index]
 
 
 def test_ai_workflows_receive_only_expected_provider_secrets() -> None:
@@ -133,6 +139,7 @@ def test_all_notion_writers_share_one_concurrency_group() -> None:
         "process-ai.yml",
         "retry-failed.yml",
         "maintenance.yml",
+        "notion-repair.yml",
     ):
         text, _workflow_data = _workflow(name)
         assert "group: xyz2notion-runtime" in text
