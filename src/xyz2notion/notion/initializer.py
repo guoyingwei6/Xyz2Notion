@@ -254,13 +254,24 @@ _MANAGED_HOME_SHAPE = (
 
 
 def _has_managed_home_layout(blocks: Sequence[Mapping[str, Any]]) -> bool:
-    """Recognize the managed layout even if Notion omits the invisible marker link."""
+    """Recognize the managed layout even when Notion reshapes its root blocks."""
     block_types = [str(block.get("type") or "") for block in blocks]
     width = len(_MANAGED_HOME_SHAPE)
-    return any(
+    if any(
         tuple(block_types[index : index + width]) == _MANAGED_HOME_SHAPE
         for index in range(len(block_types) - width + 1)
+    ):
+        return True
+
+    # Notion may omit the zero-width marker paragraph and place linked databases
+    # between the remaining layout blocks.  The managed title and column layout
+    # are stable, visible anchors that survive both transformations.
+    managed_titles = {"播客", "Xyz2Notion · 播客仪表盘"}
+    has_managed_title = any(
+        block.get("type") == "heading_1" and _block_text(block) in managed_titles
+        for block in blocks
     )
+    return has_managed_title and "column_list" in block_types
 
 
 def _divider() -> JsonObject:

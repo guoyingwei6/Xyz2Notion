@@ -448,6 +448,30 @@ def test_initializer_does_not_duplicate_home_when_marker_link_is_omitted() -> No
     assert len(fake.blocks["root"]) == root_count + 9
 
 
+def test_initializer_does_not_duplicate_reshaped_home_without_marker() -> None:
+    fake = FakeNotion()
+    existing = home_blocks()
+    reshaped = [
+        existing[0],
+        existing[1],
+        existing[2],
+        {
+            "id": "interleaved-root-block",
+            "type": "paragraph",
+            "paragraph": {"rich_text": rich_text("保留的用户内容")},
+        },
+        existing[3],
+        existing[4],
+    ]
+    fake.append_block_children("root", reshaped)
+    root_count = len(fake.blocks["root"])
+
+    result = NotionInitializer(fake, "root").initialize()
+
+    assert result.created_home is False
+    assert len(fake.blocks["root"]) == root_count + 9
+
+
 def test_initializer_adopts_matching_legacy_database_without_copying_rows() -> None:
     fake = FakeNotion()
     legacy = fake.create_database(
