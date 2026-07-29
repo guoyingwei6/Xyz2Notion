@@ -7,7 +7,6 @@ import sys
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
-from datetime import date
 
 from xyz2notion import __version__
 from xyz2notion.config import (
@@ -35,10 +34,8 @@ from xyz2notion.orchestration.processor import (
 from xyz2notion.orchestration.recovery import reset_episode_ai
 from xyz2notion.orchestration.state_store import NotionEpisodeStateStore
 from xyz2notion.security import CredentialKind, allowed_hosts
-from xyz2notion.statistics.calculator import calculate_statistics
-from xyz2notion.statistics.notion_sync import HeatmapPublisher, StatisticsSynchronizer
 from xyz2notion.sync.metadata import MetadataSynchronizer
-from xyz2notion.sync.pipeline import collect_metadata, collect_monthly_wrapped
+from xyz2notion.sync.pipeline import collect_metadata
 from xyz2notion.xiaoyuzhou.client import XiaoyuzhouAPIError, XiaoyuzhouClient
 
 
@@ -394,55 +391,13 @@ def _run_redo_episode(args: argparse.Namespace) -> int:
 
 
 def _run_rebuild(args: argparse.Namespace, *, heatmap_only: bool) -> int:
-    try:
-        credentials = load_runtime_credentials()
-        credentials.require("xiaoyuzhou_refresh_token", "notion_token")
-        page_id = args.page_id or credentials.notion_page_id
-        if not page_id:
-            raise MissingCredentialError(
-                "Missing target page: set NOTION_PAGE_ID or pass --page-id"
-            )
-        if credentials.xiaoyuzhou_refresh_token is None or credentials.notion_token is None:
-            raise AssertionError("credential requirements did not narrow tokens")
-        with (
-            XiaoyuzhouClient(
-                credentials.xiaoyuzhou_refresh_token,
-                credentials.xiaoyuzhou_device_id,
-            ) as xiaoyuzhou,
-            NotionClient(credentials.notion_token) as notion,
-        ):
-            initialization = NotionInitializer(notion, page_id).initialize()
-            snapshot = collect_metadata(xiaoyuzhou)
-            wrapped = collect_monthly_wrapped(xiaoyuzhou, snapshot)
-            statistics = calculate_statistics(snapshot, wrapped)
-            if heatmap_only:
-                heatmap = HeatmapPublisher(notion, page_id).publish(
-                    date.today().year,
-                    statistics.daily,
-                )
-                output = f"Heatmap rebuild OK (action={heatmap.action})"
-            else:
-                report = StatisticsSynchronizer(
-                    notion,
-                    initialization.resources,
-                    page_id,
-                ).sync(statistics)
-                output = (
-                    "Statistics rebuild OK "
-                    f"(created={report.created}, updated={report.updated}, "
-                    f"unchanged={report.unchanged})"
-                )
-    except (ConfigurationError, MissingCredentialError) as exc:
-        print(f"Configuration error: {exc}", file=sys.stderr)
-        return 2
-    except XiaoyuzhouAPIError as exc:
-        print(f"Xiaoyuzhou error: {exc}", file=sys.stderr)
-        return 3
-    except NotionAPIError as exc:
-        print(f"Notion error: {exc}", file=sys.stderr)
-        return 4
-    print(output)
-    return 0
+    _ = (args, heatmap_only)
+    print(
+        "Safety stop: statistics and heatmap rebuilds from Xiaoyuzhou are disabled "
+        "until a Notion-side incremental calculation is implemented.",
+        file=sys.stderr,
+    )
+    return 6
 
 
 def _is_dashboard_marker(block: Mapping[str, object]) -> bool:
@@ -929,21 +884,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 played_count = sum(episode.played_seconds > 0 for episode in snapshot.episodes)
                 playlist_count = sum(episode.in_playlist for episode in snapshot.episodes)
                 favorite_count = sum(episode.favorited for episode in snapshot.episodes)
-                wrapped = collect_monthly_wrapped(xiaoyuzhou, snapshot)
                 report = MetadataSynchronizer(
                     notion,
                     initialization.resources,
                 ).sync(snapshot)
-                statistics = calculate_statistics(snapshot, wrapped)
-                statistics_report = StatisticsSynchronizer(
-                    notion,
-                    initialization.resources,
-                    page_id,
-                ).sync(statistics)
-                heatmap = HeatmapPublisher(notion, page_id).publish(
-                    date.today().year,
-                    statistics.daily,
-                )
         except (ConfigurationError, MissingCredentialError) as exc:
             print(f"Configuration error: {exc}", file=sys.stderr)
             return 2
@@ -957,11 +901,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             "Metadata synchronization OK "
             f"(created: {report.created}, updated: {report.updated}, "
             f"unchanged: {report.unchanged}; "
-            f"statistics created: {statistics_report.created}, "
-            f"statistics updated: {statistics_report.updated}; "
+            "statistics: paused for account safety; "
             f"episodes played: {played_count}, "
-            f"playlist: {playlist_count}, favorites: {favorite_count}; "
-            f"heatmap: {heatmap.action})"
+            f"playlist: {playlist_count}, favorites: {favorite_count})"
         )
         return 0
     if args.command in {"process-ai", "retry-failed"}:

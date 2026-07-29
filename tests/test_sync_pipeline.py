@@ -76,9 +76,9 @@ class FakeXiaoyuzhou:
         self,
         eids: Sequence[str],
         *,
-        batch_size: int = 100,
+        batch_size: int = 25,
     ) -> list[JsonObject]:
-        assert batch_size == 100
+        assert batch_size == 25
         self.progress_eids = tuple(eids)
         return [{"eid": eid, "progress": 1} for eid in eids]
 
@@ -107,7 +107,7 @@ def test_collect_metadata_defaults_to_listened_history_only() -> None:
 
 def test_collect_metadata_drops_history_rows_without_playback_progress() -> None:
     fake = FakeXiaoyuzhou()
-    fake.playback_progress = lambda _eids, batch_size=100: []  # type: ignore[method-assign]
+    fake.playback_progress = lambda _eids, batch_size=25: []  # type: ignore[method-assign]
     snapshot = collect_metadata(fake)
     assert snapshot.episodes == ()
     assert snapshot.podcasts == ()
@@ -146,9 +146,9 @@ def test_collect_metadata_keeps_playlist_and_favorites_as_non_statistical_rows()
             self,
             eids: Sequence[str],
             *,
-            batch_size: int = 100,
+            batch_size: int = 25,
         ) -> list[JsonObject]:
-            assert batch_size == 100
+            assert batch_size == 25
             return [
                 {
                     "eid": eid,
@@ -190,7 +190,7 @@ def test_collect_metadata_preserves_playlist_order() -> None:
             self,
             eids: Sequence[str],
             *,
-            batch_size: int = 100,
+            batch_size: int = 25,
         ) -> list[JsonObject]:
             return [{"eid": eid, "progress": 1 if eid == "history-episode" else 0} for eid in eids]
 
@@ -199,7 +199,7 @@ def test_collect_metadata_preserves_playlist_order() -> None:
     assert by_eid["playlist-first"].playlist_position == 2
 
 
-def test_collect_monthly_wrapped_fetches_history_but_not_current_month() -> None:
+def test_collect_monthly_wrapped_fetches_only_previous_complete_month() -> None:
     fake = FakeXiaoyuzhou()
     snapshot = MetadataSnapshot(
         authors=(),
@@ -218,8 +218,34 @@ def test_collect_monthly_wrapped_fetches_history_but_not_current_month() -> None
         ),
     )
     values = collect_monthly_wrapped(fake, snapshot, today=date(2026, 2, 15))
-    assert [(value.year, value.month) for value in values] == [
-        (2025, 12),
-        (2026, 1),
-    ]
-    assert values[0].listening_seconds == 2037
+    assert [(value.year, value.month) for value in values] == [(2026, 1)]
+    assert values[0].listening_seconds == 2027
+
+
+def test_collect_metadata_caps_per_item_recovery_work() -> None:
+    class LargeLibrary(FakeXiaoyuzhou):
+        def __init__(self) -> None:
+            super().__init__()
+            self.requested_eids: list[str] = []
+            self.recovered_pids: list[str] = []
+
+        def playlist_eids(self) -> list[str]:
+            return [f"playlist-{index}" for index in range(10)]
+
+        def episode(self, eid: str) -> JsonObject:
+            self.requested_eids.append(eid)
+            return {
+                "eid": eid,
+                "pid": f"podcast-{eid}",
+                "title": eid,
+                "pubDate": "2026-01-03T00:00:00Z",
+            }
+
+        def podcast(self, pid: str) -> JsonObject:
+            self.recovered_pids.append(pid)
+            return {"pid": pid, "title": pid}
+
+    fake = LargeLibrary()
+    collect_metadata(fake)
+    assert fake.requested_eids == ["playlist-0", "playlist-1", "playlist-2"]
+    assert len(fake.recovered_pids) == 2

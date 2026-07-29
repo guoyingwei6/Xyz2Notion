@@ -10,6 +10,9 @@ from xyz2notion.statistics.calculator import MonthlyWrappedValue
 from xyz2notion.sync.normalizer import MetadataSnapshot, build_metadata_snapshot
 
 JsonObject = dict[str, Any]
+MAX_PLAYLIST_HYDRATIONS = 3
+MAX_PODCAST_RECOVERIES = 2
+MAX_PROGRESS_EPISODES = 25
 
 
 class XiaoyuzhouMetadataAPI(Protocol):
@@ -33,7 +36,7 @@ class XiaoyuzhouMetadataAPI(Protocol):
         self,
         eids: Sequence[str],
         *,
-        batch_size: int = 100,
+        batch_size: int = 25,
     ) -> list[JsonObject]: ...
 
     def profile(self) -> JsonObject: ...
@@ -70,11 +73,10 @@ def collect_metadata(
         if (eid := _nested_id(item, "episode", "eid"))
         or (eid := str(item.get("eid") or "").strip())
     }
-    playlist_only = [
-        api.episode(eid)
-        for eid in playlist_eids
-        if eid not in history_eids and eid not in favorite_eids
-    ]
+    playlist_only_eids = [
+        eid for eid in playlist_eids if eid not in history_eids and eid not in favorite_eids
+    ][:MAX_PLAYLIST_HYDRATIONS]
+    playlist_only = [api.episode(eid) for eid in playlist_only_eids]
     playlist_set = set(playlist_eids)
     playlist_positions = {eid: position for position, eid in enumerate(playlist_eids, start=1)}
     favorite_set = set(favorite_eids)
@@ -97,14 +99,16 @@ def collect_metadata(
     history_pids = {
         pid for item in combined_episodes if (pid := _nested_id(item, "episode", "pid"))
     }
-    recovered_podcasts = [api.podcast(pid) for pid in sorted(history_pids - known_pids)]
+    recovered_podcasts = [
+        api.podcast(pid) for pid in sorted(history_pids - known_pids)[:MAX_PODCAST_RECOVERIES]
+    ]
     subscriptions = [*subscriptions, *recovered_podcasts]
     eids = tuple(
         dict.fromkeys(
             eid for item in combined_episodes if (eid := _nested_id(item, "episode", "eid"))
         )
     )
-    progress = api.playback_progress(eids) if eids else []
+    progress = api.playback_progress(eids[:MAX_PROGRESS_EPISODES], batch_size=25) if eids else []
     return build_metadata_snapshot(
         subscriptions,
         mileage,
@@ -119,34 +123,24 @@ def collect_monthly_wrapped(
     *,
     today: date | None = None,
 ) -> tuple[MonthlyWrappedValue, ...]:
-    """Fetch official totals for every historical month represented by played episodes."""
+    """Fetch only the previous complete month's official total."""
     current_day = today or date.today()
-    played_days = [
-        (episode.last_played_at or episode.published_at).date()
-        for episode in snapshot.episodes
-        if episode.played_seconds > 0
-    ]
-    if not played_days:
+    if not any(episode.played_seconds > 0 for episode in snapshot.episodes):
         return ()
-    cursor_year = min(played_days).year
-    cursor_month = min(played_days).month
     profile = api.profile()
     uid = str(profile.get("uid") or "")
     if not uid:
         return ()
-    results: list[MonthlyWrappedValue] = []
-    while (cursor_year, cursor_month) < (current_day.year, current_day.month):
-        payload = api.monthly_wrapped(cursor_year, cursor_month, uid=uid)
-        results.append(
-            MonthlyWrappedValue(
-                year=cursor_year,
-                month=cursor_month,
-                listening_seconds=max(0, int(payload.get("playedSeconds") or 0)),
-                played_days=max(0, int(payload.get("playedDays") or 0)),
-            )
-        )
-        cursor_month += 1
-        if cursor_month == 13:
-            cursor_year += 1
-            cursor_month = 1
-    return tuple(results)
+    if current_day.month == 1:
+        year, month = current_day.year - 1, 12
+    else:
+        year, month = current_day.year, current_day.month - 1
+    payload = api.monthly_wrapped(year, month, uid=uid)
+    return (
+        MonthlyWrappedValue(
+            year=year,
+            month=month,
+            listening_seconds=max(0, int(payload.get("playedSeconds") or 0)),
+            played_days=max(0, int(payload.get("playedDays") or 0)),
+        ),
+    )

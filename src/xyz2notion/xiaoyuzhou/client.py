@@ -42,10 +42,11 @@ class XiaoyuzhouAPIError(RuntimeError):
 
 
 class XiaoyuzhouClient:
-    """Synchronous read-only API client with one-shot token refresh."""
+    """Synchronous read-only API client with strict anti-abuse limits."""
 
     _authentication_statuses = frozenset({401, 403})
-    _retryable_statuses = frozenset({429, 500, 502, 503, 504})
+    _circuit_breaker_statuses = frozenset({401, 403, 429})
+    _retryable_statuses = frozenset({500, 502, 503, 504})
 
     def __init__(
         self,
@@ -54,10 +55,13 @@ class XiaoyuzhouClient:
         *,
         client: httpx.Client | None = None,
         base_url: str = XIAOYUZHOU_API_BASE_URL,
-        max_retries: int = 3,
-        max_pages: int = 200,
+        max_retries: int = 1,
+        max_pages: int = 1,
+        max_requests_per_run: int = 20,
+        min_request_interval_seconds: float = 3.0,
         timeout_seconds: float = 30,
         sleep: Callable[[float], None] = time.sleep,
+        monotonic: Callable[[], float] = time.monotonic,
         jitter: Callable[[], float] = random.random,
     ) -> None:
         token_value = (
@@ -73,14 +77,24 @@ class XiaoyuzhouClient:
             raise ValueError("max_retries cannot be negative")
         if max_pages < 1:
             raise ValueError("max_pages must be positive")
+        if max_requests_per_run < 1:
+            raise ValueError("max_requests_per_run must be positive")
+        if min_request_interval_seconds < 0:
+            raise ValueError("min_request_interval_seconds cannot be negative")
 
         self.base_url = base_url.rstrip("/")
         validate_credential_destination(self.base_url, CredentialKind.XIAOYUZHOU)
         self.device_id = device_id
         self.max_retries = max_retries
         self.max_pages = max_pages
+        self.max_requests_per_run = max_requests_per_run
+        self.min_request_interval_seconds = min_request_interval_seconds
         self._sleep = sleep
+        self._monotonic = monotonic
         self._jitter = jitter
+        self._request_count = 0
+        self._last_request_started_at: float | None = None
+        self._circuit_open = False
         self._refresh_token = SecretStr(token_value)
         self._access_token: SecretStr | None = None
         self._owns_client = client is None
@@ -135,6 +149,28 @@ class XiaoyuzhouClient:
                     pass
         return min(30.0, 2.0**attempt) + self._jitter()
 
+    def _before_outbound_request(self) -> None:
+        """Apply one shared budget and minimum interval to every HTTP request."""
+        if self._circuit_open:
+            raise XiaoyuzhouAPIError(
+                "Xiaoyuzhou safety circuit is open; stop this run and retry manually later"
+            )
+        if self._request_count >= self.max_requests_per_run:
+            raise XiaoyuzhouAPIError(
+                "Xiaoyuzhou request budget exhausted; stopped before sending another request"
+            )
+        now = self._monotonic()
+        if self._last_request_started_at is not None:
+            remaining = self.min_request_interval_seconds - (now - self._last_request_started_at)
+            if remaining > 0:
+                self._sleep(remaining)
+                now = self._monotonic()
+        self._request_count += 1
+        self._last_request_started_at = now
+
+    def _trip_circuit(self) -> None:
+        self._circuit_open = True
+
     @staticmethod
     def _token_from_response(response: httpx.Response, name: str) -> str | None:
         header_value = response.headers.get(name)
@@ -160,6 +196,7 @@ class XiaoyuzhouClient:
         """Exchange the long-lived secret for in-memory access credentials."""
         url = self._url("/app_auth_tokens.refresh")
         try:
+            self._before_outbound_request()
             response = self._client.post(url, headers=self._refresh_headers())
         except (httpx.TimeoutException, httpx.TransportError) as exc:
             raise XiaoyuzhouAPIError(
@@ -167,6 +204,8 @@ class XiaoyuzhouClient:
                 retryable=True,
             ) from exc
         if response.is_error:
+            if response.status_code in self._circuit_breaker_statuses:
+                self._trip_circuit()
             self._raise_response_error(response, refreshing=True)
 
         access_token = self._token_from_response(response, "X-Jike-Access-Token")
@@ -190,17 +229,18 @@ class XiaoyuzhouClient:
         params: Mapping[str, str | int] | None = None,
         json_body: Mapping[str, Any] | None = None,
     ) -> JsonObject:
-        """Perform an authenticated request and refresh authentication once."""
+        """Perform an authenticated request within the run-wide safety budget."""
         url = self._url(path)
-        refreshed_after_failure = False
         attempt = 0
         while True:
             response: httpx.Response | None = None
             try:
+                headers = self._access_headers()
+                self._before_outbound_request()
                 response = self._client.request(
                     method,
                     url,
-                    headers=self._access_headers(),
+                    headers=headers,
                     params=params,
                     json=json_body,
                 )
@@ -214,13 +254,12 @@ class XiaoyuzhouClient:
                 attempt += 1
                 continue
 
-            if response.status_code in self._authentication_statuses:
-                if refreshed_after_failure:
-                    self._raise_response_error(response, refreshing=True)
-                self._access_token = None
-                self.refresh_access_token()
-                refreshed_after_failure = True
-                continue
+            if response.status_code in self._circuit_breaker_statuses:
+                self._trip_circuit()
+                self._raise_response_error(
+                    response,
+                    refreshing=response.status_code in self._authentication_statuses,
+                )
             if response.status_code in self._retryable_statuses:
                 if attempt >= self.max_retries:
                     self._raise_response_error(response)
@@ -285,9 +324,14 @@ class XiaoyuzhouClient:
         self,
         path: str,
         body: Mapping[str, Any],
+        *,
+        max_items: int = 25,
     ) -> Iterator[JsonObject]:
+        if max_items < 1:
+            raise ValueError("max_items must be positive")
         cursor: object | None = None
         seen_cursors: set[str] = set()
+        emitted = 0
         for _page_number in range(self.max_pages):
             request_body = dict(body)
             if cursor is not None:
@@ -300,6 +344,9 @@ class XiaoyuzhouClient:
                 if not isinstance(item, dict):
                     raise XiaoyuzhouAPIError("Xiaoyuzhou list response contains a non-object item")
                 yield item
+                emitted += 1
+                if emitted >= max_items:
+                    return
             next_cursor = page.get("loadMoreKey")
             if next_cursor is None:
                 return
@@ -308,22 +355,22 @@ class XiaoyuzhouClient:
                 raise XiaoyuzhouAPIError("Xiaoyuzhou pagination returned a repeated cursor")
             seen_cursors.add(cursor_key)
             cursor = next_cursor
-        raise XiaoyuzhouAPIError(
-            f"Xiaoyuzhou pagination exceeded the safety limit of {self.max_pages} pages"
-        )
+        return
 
     def subscriptions(self, *, limit: int = 25) -> list[JsonObject]:
-        """Return every subscribed podcast."""
+        """Return at most the newest 25 subscribed podcasts."""
+        safe_limit = min(max(1, limit), 25)
         return list(
             self._paginate(
                 "/v1/subscription/list",
-                {"limit": limit, "sortBy": "subscribedAt", "sortOrder": "desc"},
+                {"limit": safe_limit, "sortBy": "subscribedAt", "sortOrder": "desc"},
+                max_items=25,
             )
         )
 
     def mileage(self, *, rank: str = "TOTAL") -> list[JsonObject]:
-        """Return podcasts with cumulative listening seconds."""
-        return list(self._paginate("/v1/mileage/list", {"rank": rank}))
+        """Return at most 25 podcast mileage rows."""
+        return list(self._paginate("/v1/mileage/list", {"rank": rank}, max_items=25))
 
     def podcast(self, pid: str) -> JsonObject:
         """Return one podcast, used when history references an unsubscribed show."""
@@ -336,10 +383,17 @@ class XiaoyuzhouClient:
         return data
 
     def episodes(self, pid: str, *, limit: int = 25) -> list[JsonObject]:
-        """Return every episode currently exposed for a podcast."""
+        """Return at most the newest 25 episodes for a podcast."""
         if not pid:
             raise ValueError("pid cannot be empty")
-        return list(self._paginate("/v1/episode/list", {"limit": limit, "pid": pid}))
+        safe_limit = min(max(1, limit), 25)
+        return list(
+            self._paginate(
+                "/v1/episode/list",
+                {"limit": safe_limit, "pid": pid},
+                max_items=25,
+            )
+        )
 
     def episode(self, eid: str) -> JsonObject:
         """Return one episode by EID."""
@@ -352,8 +406,15 @@ class XiaoyuzhouClient:
         return data
 
     def play_history(self, *, limit: int = 25) -> list[JsonObject]:
-        """Return played-history wrapper objects in API order."""
-        return list(self._paginate("/v1/episode-played/list-history", {"limit": limit}))
+        """Return at most the newest 25 played-history rows."""
+        safe_limit = min(max(1, limit), 25)
+        return list(
+            self._paginate(
+                "/v1/episode-played/list-history",
+                {"limit": safe_limit},
+                max_items=25,
+            )
+        )
 
     def playlist_eids(self) -> list[str]:
         """Return the authenticated user's ordered listen-later playlist."""
@@ -362,28 +423,29 @@ class XiaoyuzhouClient:
         items = data.get("list") if isinstance(data, dict) else None
         if not isinstance(items, list) or any(not isinstance(item, str) for item in items):
             raise XiaoyuzhouAPIError("Xiaoyuzhou playlist response has invalid data")
-        return list(dict.fromkeys(item for item in items if item))
+        return list(dict.fromkeys(item for item in items if item))[:25]
 
     def favorites(self) -> list[JsonObject]:
-        """Return all episode bookmarks from the authenticated user's collection."""
-        return list(self._paginate("/v1/favorite/list", {}))
+        """Return at most the newest 25 episode bookmarks."""
+        return list(self._paginate("/v1/favorite/list", {}, max_items=25))
 
     def playback_progress(
         self,
         eids: Sequence[str],
         *,
-        batch_size: int = 100,
+        batch_size: int = 25,
     ) -> list[JsonObject]:
         """Return playback progress in bounded batches."""
         if batch_size < 1:
             raise ValueError("batch_size must be positive")
-        unique_eids = tuple(dict.fromkeys(eid for eid in eids if eid))
+        safe_batch_size = min(batch_size, 25)
+        unique_eids = tuple(dict.fromkeys(eid for eid in eids if eid))[:25]
         results: list[JsonObject] = []
-        for offset in range(0, len(unique_eids), batch_size):
+        for offset in range(0, len(unique_eids), safe_batch_size):
             payload = self.request(
                 "POST",
                 "/v1/playback-progress/list",
-                json_body={"eids": list(unique_eids[offset : offset + batch_size])},
+                json_body={"eids": list(unique_eids[offset : offset + safe_batch_size])},
             )
             data = payload.get("data", [])
             if not isinstance(data, list) or any(not isinstance(item, dict) for item in data):

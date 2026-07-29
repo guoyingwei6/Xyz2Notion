@@ -142,8 +142,13 @@ class MetadataSynchronizer:
         actions[result.action] += 1
         fields.update(result.changed_properties)
 
-    def sync(self, snapshot: MetadataSnapshot) -> SyncReport:
-        """Upsert a full snapshot while preserving user-managed properties and blocks."""
+    def sync(
+        self,
+        snapshot: MetadataSnapshot,
+        *,
+        complete_library_snapshot: bool = False,
+    ) -> SyncReport:
+        """Upsert a bounded snapshot while preserving unseen and user-managed data."""
         actions: Counter[str] = Counter()
         fields: Counter[str] = Counter()
         author_table = NotionTable(
@@ -246,18 +251,19 @@ class MetadataSynchronizer:
             )
             self._record(result, actions, fields)
 
-        snapshot_eids = {episode.eid for episode in snapshot.episodes}
-        for eid in set(episode_table.keys()) - snapshot_eids:
-            stale_properties: dict[str, Any] = {}
-            if episode_table.property_value(eid, "In Playlist") == ("checkbox", True):
-                stale_properties["In Playlist"] = {"checkbox": False}
-            if episode_table.property_value(eid, "Favorited") == ("checkbox", True):
-                stale_properties["Favorited"] = {"checkbox": False}
-            if episode_table.property_value(eid, "Playlist Position") != ("number", None):
-                stale_properties["Playlist Position"] = {"number": None}
-            if stale_properties:
-                result = episode_table.upsert(eid, stale_properties)
-                self._record(result, actions, fields)
+        if complete_library_snapshot:
+            snapshot_eids = {episode.eid for episode in snapshot.episodes}
+            for eid in set(episode_table.keys()) - snapshot_eids:
+                stale_properties: dict[str, Any] = {}
+                if episode_table.property_value(eid, "In Playlist") == ("checkbox", True):
+                    stale_properties["In Playlist"] = {"checkbox": False}
+                if episode_table.property_value(eid, "Favorited") == ("checkbox", True):
+                    stale_properties["Favorited"] = {"checkbox": False}
+                if episode_table.property_value(eid, "Playlist Position") != ("number", None):
+                    stale_properties["Playlist Position"] = {"number": None}
+                if stale_properties:
+                    result = episode_table.upsert(eid, stale_properties)
+                    self._record(result, actions, fields)
 
         return SyncReport(
             created=actions["created"],

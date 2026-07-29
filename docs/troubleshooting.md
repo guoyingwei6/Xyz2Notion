@@ -23,6 +23,10 @@ Actions 摘要只显示聚合数量。具体单集状态在 Notion Episode 的 `
 `X-Jike-Access-Token`。重新登录后覆盖 GitHub Secret。Device ID 可不填；若频繁
 切换设备环境，可固定 `XIAOYUZHOU_DEVICE_ID` Repository Variable。
 
+如果账号出现封禁、风控、401、403 或 429，不要立即更新 Token 后反复重试。
+先在 GitHub Actions 禁用 `Sync Podcast Metadata` 并等待账号恢复。客户端会在
+第一次上述响应时立即熔断；恢复后也只能手动运行一次安全增量同步进行验证。
+
 ### Notion 404/403
 
 确认目标根页面和旧模板数据库都已授权给当前 Integration。更换 Token 后要重新

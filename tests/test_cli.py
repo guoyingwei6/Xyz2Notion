@@ -158,60 +158,18 @@ def test_sync_metadata_success_reports_only_counts(
             assert snapshot is fixture_snapshot
             return SimpleNamespace(created=2, updated=1, unchanged=3)
 
-    class FakeStatisticsSynchronizer:
-        def __init__(
-            self,
-            _api: object,
-            resources: object,
-            root_page_id: str | None = None,
-        ) -> None:
-            assert resources == {}
-            assert root_page_id == "fixture-page"
-
-        def sync(self, statistics: object) -> object:
-            assert statistics.marker == "fixture-statistics"  # type: ignore[attr-defined]
-            return SimpleNamespace(created=4, updated=5, unchanged=6)
-
-    class FakeHeatmapPublisher:
-        def __init__(self, _api: object, page_id: str) -> None:
-            assert page_id == "fixture-page"
-
-        def publish(self, _year: int, daily: object) -> object:
-            assert daily == "fixture-daily"
-            return SimpleNamespace(action="updated")
-
     monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
     monkeypatch.setattr(cli_module, "MetadataSynchronizer", FakeSynchronizer)  # type: ignore[attr-defined]
-    monkeypatch.setattr(  # type: ignore[attr-defined]
-        cli_module,
-        "StatisticsSynchronizer",
-        FakeStatisticsSynchronizer,
-    )
-    monkeypatch.setattr(cli_module, "HeatmapPublisher", FakeHeatmapPublisher)  # type: ignore[attr-defined]
     monkeypatch.setattr(  # type: ignore[attr-defined]
         cli_module,
         "collect_metadata",
         lambda _api, **_kwargs: fixture_snapshot,
     )
-    monkeypatch.setattr(  # type: ignore[attr-defined]
-        cli_module,
-        "collect_monthly_wrapped",
-        lambda _api, _snapshot: (),
-    )
-    monkeypatch.setattr(  # type: ignore[attr-defined]
-        cli_module,
-        "calculate_statistics",
-        lambda _snapshot, _wrapped: SimpleNamespace(
-            marker="fixture-statistics",
-            daily="fixture-daily",
-        ),
-    )
     assert main(["sync-metadata"]) == 0
     output = capsys.readouterr().out  # type: ignore[attr-defined]
     assert "created: 2, updated: 1, unchanged: 3" in output
-    assert "statistics created: 4, statistics updated: 5" in output
+    assert "statistics: paused for account safety" in output
     assert "episodes played: 1, playlist: 2, favorites: 1" in output
-    assert "heatmap: updated" in output
 
 
 def test_notion_init_success_reports_counts(
@@ -1171,68 +1129,8 @@ def test_redo_episode_success_does_not_print_eid(
     assert "private-eid" not in output
 
 
-def _install_rebuild_fakes(monkeypatch: object) -> None:
-    monkeypatch.setenv("XIAOYUZHOU_REFRESH_TOKEN", "fixture-refresh")  # type: ignore[attr-defined]
-    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
-    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
-    monkeypatch.setattr(cli_module, "XiaoyuzhouClient", FakeContextClient)  # type: ignore[attr-defined]
-    monkeypatch.setattr(cli_module, "NotionClient", FakeContextClient)  # type: ignore[attr-defined]
-
-    class FakeInitializer:
-        def __init__(self, _api: object, _page_id: str) -> None:
-            pass
-
-        def initialize(self) -> object:
-            return SimpleNamespace(resources={"year": object()})
-
-    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
-    monkeypatch.setattr(cli_module, "collect_metadata", lambda _api: "snapshot")  # type: ignore[attr-defined]
-    monkeypatch.setattr(  # type: ignore[attr-defined]
-        cli_module,
-        "collect_monthly_wrapped",
-        lambda _api, _snapshot: "wrapped",
-    )
-    monkeypatch.setattr(  # type: ignore[attr-defined]
-        cli_module,
-        "calculate_statistics",
-        lambda _snapshot, _wrapped: SimpleNamespace(daily="daily"),
-    )
-
-
-def test_rebuild_statistics_success(capsys: object, monkeypatch: object) -> None:
-    _install_rebuild_fakes(monkeypatch)
-
-    class FakeSynchronizer:
-        def __init__(
-            self,
-            _api: object,
-            resources: object,
-            root_page_id: str | None = None,
-        ) -> None:
-            assert resources == {"year": resources["year"]}  # type: ignore[index]
-            assert root_page_id == "fixture-page"
-
-        def sync(self, _statistics: object) -> object:
-            return SimpleNamespace(created=2, updated=3, unchanged=4)
-
-    monkeypatch.setattr(cli_module, "StatisticsSynchronizer", FakeSynchronizer)  # type: ignore[attr-defined]
-    assert main(["rebuild-statistics"]) == 0
-    output = capsys.readouterr().out  # type: ignore[attr-defined]
-    assert "created=2, updated=3, unchanged=4" in output
-
-
-def test_rebuild_heatmap_success(capsys: object, monkeypatch: object) -> None:
-    _install_rebuild_fakes(monkeypatch)
-
-    class FakeHeatmap:
-        def __init__(self, _api: object, page_id: str) -> None:
-            assert page_id == "fixture-page"
-
-        def publish(self, _year: int, daily: object) -> object:
-            assert daily == "daily"
-            return SimpleNamespace(action="updated")
-
-    monkeypatch.setattr(cli_module, "HeatmapPublisher", FakeHeatmap)  # type: ignore[attr-defined]
-    assert main(["rebuild-heatmap"]) == 0
-    output = capsys.readouterr().out  # type: ignore[attr-defined]
-    assert output.strip() == "Heatmap rebuild OK (action=updated)"
+def test_rebuild_statistics_and_heatmap_are_safety_stopped(capsys: object) -> None:
+    assert main(["rebuild-statistics"]) == 6
+    assert "Safety stop" in capsys.readouterr().err  # type: ignore[attr-defined]
+    assert main(["rebuild-heatmap"]) == 6
+    assert "Safety stop" in capsys.readouterr().err  # type: ignore[attr-defined]

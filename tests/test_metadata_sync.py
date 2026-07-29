@@ -343,7 +343,10 @@ def test_removed_playlist_and_favorite_flags_are_cleared_without_deleting_page()
         }
     ]
 
-    report = MetadataSynchronizer(fake, resources()).sync(sample_snapshot())
+    report = MetadataSynchronizer(fake, resources()).sync(
+        sample_snapshot(),
+        complete_library_snapshot=True,
+    )
 
     legacy = fake.page("legacy-library-page")
     assert legacy["properties"]["In Playlist"] == {"checkbox": False}
@@ -354,6 +357,28 @@ def test_removed_playlist_and_favorite_flags_are_cleared_without_deleting_page()
     assert report.changed_fields["In Playlist"] == 2
     assert report.changed_fields["Favorited"] == 2
     assert report.changed_fields["Playlist Position"] == 2
+
+
+def test_incremental_snapshot_never_clears_unseen_library_flags() -> None:
+    fake = FakeRows()
+    fake.pages["ds-episode"] = [
+        {
+            "id": "unseen-library-page",
+            "properties": {
+                "EID": {"rich_text": [{"plain_text": "unseen-episode"}]},
+                "In Playlist": {"checkbox": True},
+                "Favorited": {"checkbox": True},
+                "Playlist Position": {"number": 7},
+            },
+        }
+    ]
+
+    MetadataSynchronizer(fake, resources()).sync(sample_snapshot())
+
+    unseen = fake.page("unseen-library-page")
+    assert unseen["properties"]["In Playlist"] == {"checkbox": True}
+    assert unseen["properties"]["Favorited"] == {"checkbox": True}
+    assert unseen["properties"]["Playlist Position"] == {"number": 7}
 
 
 def test_notion_table_compares_real_response_shapes_and_updates_visuals() -> None:

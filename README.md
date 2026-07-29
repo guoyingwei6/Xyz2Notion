@@ -28,7 +28,7 @@ Fork 本仓库，在 `Settings → Secrets and variables → Actions` 至少添�
 2. `Sync Podcast Metadata`
 
 它会在已授权的空白 Notion 页面中创建九个数据库、19 个视图、统计关系和首页，
-再同步播放历史、待听列表、收藏、进度、排行和热力图。
+再以严格限速的小批量方式同步最近播放历史、待听、收藏和进度。
 
 数据口径：
 
@@ -36,13 +36,14 @@ Fork 本仓库，在 `Settings → Secrets and variables → Actions` 至少添�
 - `Episode · 待听` 按小宇宙播放列表顺序显示，未播放时不参与统计；
 - `Episode · 收藏` 显示小宇宙收藏，未播放时不参与统计；
 - `Episode · 喜欢` 对应小宇宙 `isPicked`，与收藏是两个不同状态；
-- 从播放列表或收藏移除后，下次同步只清除对应标记，不删除页面、文字稿或用户笔记；
+- 安全增量同步不会把本轮未抓到的旧记录误判为“已移除”，也不会删除页面、
+  文字稿或用户笔记；
 - 时长、天数、期数、排行和热力图只统计播放秒数大于 0 的记录。
 
 ### 3. 生成文字稿与 AI 内容
 
-手动运行 `Process Episode AI`。元数据每天自动同步；AI 工作流在初期验收阶段仅
-手动运行，避免未经确认连续处理大量节目。听悟 Cookie 明确失效时自动降级到
+手动运行 `Process Episode AI`。元数据和 AI 工作流都仅允许手动运行，避免未经
+确认连续访问账号或处理大量节目。听悟 Cookie 明确失效时自动降级到
 SiliconFlow；如果两条远程通道都不可用，最后才在 GitHub Actions CPU 上运行
 本地 `faster-whisper small`。工作流中断后从用户自己 Notion 里的私有检查点继续。
 
@@ -59,6 +60,10 @@ SiliconFlow；如果两条远程通道都不可用，最后才在 GitHub Actions
 > 建议第一次把 `config.yaml` 中的 `episodes_per_run` 设为 1，先用一个短单集验证。
 
 ## 项目状态
+
+当前安全版本默认暂停小宇宙定时任务和全量历史统计重建。元数据同步采用最新
+25 条的小批量增量，并有每次运行 20 请求、请求间隔 3 秒及 401/403/429
+立即熔断保护。历史统计保留在 Notion 中，待改为完全基于 Notion 数据增量计算。
 
 v0.1.0 已实现自主 Notion 模板、元数据与统计同步、听悟 Cookie → SiliconFlow →
 本地 Whisper 三级降级转写、SiliconFlow 免费摘要、脑图、迁移和可恢复的 GitHub Actions 编排。真实账户验收按
@@ -145,15 +150,15 @@ uv run xyz2notion notion-init --create-home
 追加第二套主页普通布局，也不会删除用户自行添加的字段、视图或笔记。完整说明见
 [`docs/notion-template.md`](docs/notion-template.md)。
 
-初始化完成后，同步订阅、收听过的播客、全部单集、播放进度和统计关系：
+初始化完成后，小批量同步最近播放记录、待听、收藏和播放进度：
 
 ```bash
 uv run xyz2notion sync-metadata
 ```
 
-命令会先增量协调 Notion 结构，再按 Author ID、PID、EID 和周期键执行最小差异
-upsert，并更新精确月统计、排行和当前年度热力图；不会覆盖未知属性、用户笔记
-或单集页面块。统计口径见
+命令有 20 请求硬预算和 3 秒最小请求间隔，再按 Author ID、PID、EID 执行最小
+差异 upsert；不会覆盖未知属性、用户笔记或单集页面块。为避免有限快照覆盖历史，
+当前不会自动重算统计、排行或热力图。统计口径见
 [`docs/statistics.md`](docs/statistics.md)。
 
 推进单集的转写、摘要和发布：
@@ -174,6 +179,8 @@ uv run xyz2notion retry-failed --config config.yaml
 - `malinkang.com`、`notionhub.app` 及其子域名在运行时明确禁止。
 - 日志输出前必须经过统一脱敏。
 - GitHub Actions 默认只有 `contents: read` 权限。
+- 小宇宙工作流默认无定时触发；单次最多 20 个请求，任意请求至少间隔 3 秒。
+- 小宇宙返回 401、403 或 429 时立即熔断，本次运行不刷新、不重试、不继续抓取。
 - 仓库不保存 Token、Cookie、API Key 或真实用户 Fixture。
 
 完整说明见 [SECURITY.md](SECURITY.md)。

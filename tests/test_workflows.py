@@ -82,11 +82,13 @@ def test_init_workflow_requires_exact_dashboard_rebuild_confirmation() -> None:
     assert '--expected-total "$EXPECTED_TOTAL"' in text
 
 
-def test_schedules_avoid_the_top_of_the_hour() -> None:
-    text, _workflow_data = _workflow("sync-metadata.yml")
-    cron_lines = [line.strip() for line in text.splitlines() if "cron:" in line]
-    assert cron_lines
-    assert all('cron: "0 ' not in line for line in cron_lines)
+def test_metadata_sync_is_manual_and_requires_exact_safety_confirmation() -> None:
+    text, workflow = _workflow("sync-metadata.yml")
+    assert "cron:" not in text
+    dispatch = workflow[True]["workflow_dispatch"]  # type: ignore[index,operator]
+    assert dispatch["inputs"]["confirmation"]["required"] is True  # type: ignore[index]
+    assert "RUN_SAFE_INCREMENTAL_SYNC" in text
+    assert "timeout-minutes: 15" in text
 
 
 def test_process_ai_is_manual_during_initial_validation() -> None:

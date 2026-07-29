@@ -25,6 +25,8 @@ def client_for(
     sleeps: list[float] | None = None,
     max_retries: int = 2,
     max_pages: int = 10,
+    max_requests_per_run: int = 100,
+    min_request_interval_seconds: float = 0,
 ) -> XiaoyuzhouClient:
     return XiaoyuzhouClient(
         "refresh-fixture-secret",
@@ -32,6 +34,8 @@ def client_for(
         client=httpx.Client(transport=handler),
         max_retries=max_retries,
         max_pages=max_pages,
+        max_requests_per_run=max_requests_per_run,
+        min_request_interval_seconds=min_request_interval_seconds,
         sleep=(sleeps if sleeps is not None else []).append,
         jitter=lambda: 0,
     )
@@ -71,23 +75,52 @@ def test_auth_uses_refresh_only_and_api_uses_access_only() -> None:
     ]
 
 
-def test_rotated_refresh_token_stays_in_memory_for_next_refresh() -> None:
+def test_conservative_limits_are_defaults_not_optional_call_site_settings() -> None:
+    calls = 0
+    sleeps: list[float] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if request.url.path == "/app_auth_tokens.refresh":
+            return auth_response()
+        return httpx.Response(
+            200,
+            json={
+                "data": [{"pid": f"p{index}"} for index in range(30)],
+                "loadMoreKey": "more-data-exists",
+            },
+        )
+
+    client = XiaoyuzhouClient(
+        "refresh-fixture-secret",
+        "11111111-2222-4333-8444-555555555555",
+        client=httpx.Client(transport=httpx.MockTransport(handle)),
+        sleep=sleeps.append,
+        monotonic=lambda: 0,
+    )
+    assert len(client.subscriptions()) == 25
+    assert client.max_pages == 1
+    assert client.max_requests_per_run == 20
+    assert client.min_request_interval_seconds == 3
+    assert calls == 2
+    assert sleeps == [3.0]
+
+
+def test_401_trips_circuit_without_refreshing_again() -> None:
     refresh_headers: list[str] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/app_auth_tokens.refresh":
             refresh_headers.append(request.headers["X-Jike-Refresh-Token"])
             return auth_response(f"access-{len(refresh_headers)}")
-        if len(refresh_headers) == 1:
-            return httpx.Response(401, json={"code": "TOKEN_EXPIRED"})
-        return httpx.Response(200, json={"data": {"uid": "user-fixture"}})
+        return httpx.Response(401, json={"code": "TOKEN_EXPIRED"})
 
     client = client_for(httpx.MockTransport(handle))
-    assert client.profile()["uid"] == "user-fixture"
-    assert refresh_headers == [
-        "refresh-fixture-secret",
-        "rotated-refresh-fixture-secret",
-    ]
+    with pytest.raises(XiaoyuzhouAPIError) as caught:
+        client.profile()
+    assert caught.value.authentication_failed is True
+    assert refresh_headers == ["refresh-fixture-secret"]
 
 
 def test_auth_failure_refreshes_once_then_stops_without_leak() -> None:
@@ -109,7 +142,7 @@ def test_auth_failure_refreshes_once_then_stops_without_leak() -> None:
     client = client_for(httpx.MockTransport(handle))
     with pytest.raises(XiaoyuzhouAPIError) as caught:
         client.profile()
-    assert calls == 3
+    assert calls == 2
     assert caught.value.authentication_failed is True
     assert caught.value.retryable is False
     assert "should-not-leak" not in str(caught.value)
@@ -136,14 +169,17 @@ def test_refresh_rejects_missing_token_response_and_unsafe_base_url() -> None:
         XiaoyuzhouClient("refresh", "device", max_retries=-1)
     with pytest.raises(ValueError, match="positive"):
         XiaoyuzhouClient("refresh", "device", max_pages=0)
+    with pytest.raises(ValueError, match="max_requests_per_run"):
+        XiaoyuzhouClient("refresh", "device", max_requests_per_run=0)
+    with pytest.raises(ValueError, match="min_request_interval_seconds"):
+        XiaoyuzhouClient("refresh", "device", min_request_interval_seconds=-1)
 
 
-def test_retry_after_and_transport_retries_are_bounded() -> None:
+def test_transport_retry_is_bounded_but_429_trips_circuit() -> None:
     sleeps: list[float] = []
     responses: Iterator[object] = iter(
         (
             httpx.ConnectError("offline"),
-            httpx.Response(429, headers={"Retry-After": "2"}, json={"code": "SLOW"}),
             httpx.Response(200, json={"data": {"uid": "user-fixture"}}),
         )
     )
@@ -160,7 +196,26 @@ def test_retry_after_and_transport_retries_are_bounded() -> None:
 
     client = client_for(httpx.MockTransport(handle), sleeps=sleeps)
     assert client.profile()["uid"] == "user-fixture"
-    assert sleeps == [1.0, 2.0]
+    assert sleeps == [1.0]
+
+    calls = 0
+
+    def rate_limited(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if request.url.path == "/app_auth_tokens.refresh":
+            return auth_response()
+        return httpx.Response(429, json={"code": "SLOW"})
+
+    limited = client_for(httpx.MockTransport(rate_limited))
+    with pytest.raises(XiaoyuzhouAPIError) as caught:
+        limited.profile()
+    assert caught.value.status_code == 429
+    assert caught.value.retryable is False
+    assert calls == 2
+    with pytest.raises(XiaoyuzhouAPIError, match="circuit is open"):
+        limited.profile()
+    assert calls == 2
 
 
 def test_retry_exhaustion_is_safe() -> None:
@@ -376,5 +431,40 @@ def test_repeated_cursor_and_page_limit_stop_pagination() -> None:
         cursor += 1
         return httpx.Response(200, json={"data": [], "loadMoreKey": cursor})
 
-    with pytest.raises(XiaoyuzhouAPIError, match="safety limit"):
-        client_for(httpx.MockTransport(endless), max_pages=2).subscriptions()
+    assert client_for(httpx.MockTransport(endless), max_pages=2).subscriptions() == []
+    assert cursor == 2
+
+
+def test_run_budget_and_minimum_interval_cover_refresh_and_api_calls() -> None:
+    clock = [0.0]
+    sleeps: list[float] = []
+    calls = 0
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        clock[0] += seconds
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if request.url.path == "/app_auth_tokens.refresh":
+            return auth_response()
+        return httpx.Response(200, json={"data": {"uid": "user-fixture"}})
+
+    client = XiaoyuzhouClient(
+        "refresh-fixture-secret",
+        "11111111-2222-4333-8444-555555555555",
+        client=httpx.Client(transport=httpx.MockTransport(handle)),
+        max_requests_per_run=3,
+        min_request_interval_seconds=3,
+        sleep=sleep,
+        monotonic=lambda: clock[0],
+        jitter=lambda: 0,
+    )
+    assert client.profile()["uid"] == "user-fixture"
+    assert client.profile()["uid"] == "user-fixture"
+    assert sleeps == [3.0, 3.0]
+    assert calls == 3
+    with pytest.raises(XiaoyuzhouAPIError, match="budget exhausted"):
+        client.profile()
+    assert calls == 3
