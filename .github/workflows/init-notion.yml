@@ -9,6 +9,7 @@ on:
         default: initialize
         type: choice
         options:
+          - bootstrap
           - initialize
           - audit-dashboard
           - cleanup-dashboard-layout
@@ -61,7 +62,9 @@ jobs:
           EXPECTED_TOTAL: ${{ inputs.expected_total }}
         run: |
           set -euo pipefail
-          if [[ "$OPERATION" == "initialize" ]]; then
+          if [[ "$OPERATION" == "bootstrap" ]]; then
+            result="$(uv run xyz2notion notion-init --create-home)"
+          elif [[ "$OPERATION" == "initialize" ]]; then
             result="$(uv run xyz2notion notion-init)"
           elif [[ "$OPERATION" == "audit-dashboard" ]]; then
             result="$(uv run xyz2notion audit-dashboard)"

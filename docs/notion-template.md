@@ -17,13 +17,13 @@ Xyz2Notion 不复制或分发第三方模板。初始化器使用 Notion 公共 
 4. 本地或工作流执行：
 
 ```bash
-uv run xyz2notion notion-init
+uv run xyz2notion notion-init --create-home
 ```
 
 也可以显式指定页面：
 
 ```bash
-uv run xyz2notion notion-init --page-id YOUR_PAGE_ID
+uv run xyz2notion notion-init --create-home --page-id YOUR_PAGE_ID
 ```
 
 不要在命令行中传入 Token。Token 只从环境变量读取。
@@ -45,11 +45,13 @@ uv run xyz2notion notion-init --page-id YOUR_PAGE_ID
 
 初始化器采用增量协调：
 
+- 主页布局仅在显式传入 `--create-home` 且目标页为空或只含数据层时创建；
+- 日常 `notion-init`、元数据同步和 AI 工作流永不追加主页普通布局；
 - 按父页面和精确数据库名称复用九个数据库；
 - 按数据源、首页父页面和视图名称复用视图；
 - 只添加缺失的 Xyz2Notion 管理属性，不重写已有 Formula、Relation 或选项；
 - 不传 `null` 删除未知属性；
 - 不删除任何数据库、视图、页面块或用户笔记；
-- 首页标记已存在时不重复创建布局。
+- 首页标记或稳定布局锚点已存在时不重复创建布局。
 
 因此重复执行不会生成第二套数据库或视图，用户添加的字段、块和视图会保留。

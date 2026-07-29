@@ -62,6 +62,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--page-id",
         help="target root page ID; defaults to NOTION_PAGE_ID",
     )
+    notion_init.add_argument(
+        "--create-home",
+        action="store_true",
+        help="bootstrap homepage blocks once on an otherwise empty target page",
+    )
     audit_dashboard = subparsers.add_parser(
         "audit-dashboard",
         help="report aggregate root dashboard block counts without changing Notion",
@@ -700,7 +705,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if credentials.notion_token is None:
                 raise AssertionError("credential requirement did not narrow notion_token")
             with NotionClient(credentials.notion_token) as notion:
-                result = NotionInitializer(notion, page_id).initialize()
+                result = NotionInitializer(notion, page_id).initialize(create_home=args.create_home)
         except (ConfigurationError, MissingCredentialError) as exc:
             print(f"Configuration error: {exc}", file=sys.stderr)
             return 2

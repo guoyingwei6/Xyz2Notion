@@ -46,6 +46,7 @@ def test_init_workflow_requires_exact_dashboard_rebuild_confirmation() -> None:
     inputs = dispatch["inputs"]  # type: ignore[index]
     assert inputs["operation"]["default"] == "initialize"  # type: ignore[index]
     assert inputs["operation"]["options"] == [  # type: ignore[index]
+        "bootstrap",
         "initialize",
         "audit-dashboard",
         "cleanup-dashboard-layout",
@@ -59,6 +60,8 @@ def test_init_workflow_requires_exact_dashboard_rebuild_confirmation() -> None:
     assert "default" not in inputs["expected_total"]  # type: ignore[operator]
     assert 'OPERATION" == "initialize"' in text
     assert "uv run xyz2notion notion-init" in text
+    assert 'OPERATION" == "bootstrap"' in text
+    assert "uv run xyz2notion notion-init --create-home" in text
     assert 'OPERATION" == "audit-dashboard"' in text
     assert "uv run xyz2notion audit-dashboard" in text
     assert 'OPERATION" == "cleanup-dashboard-layout"' in text

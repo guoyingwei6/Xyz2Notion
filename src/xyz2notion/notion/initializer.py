@@ -377,13 +377,13 @@ class NotionInitializer:
         self.root_page_id = root_page_id
         self._root_databases: dict[str, list[str]] | None = None
 
-    def initialize(self) -> InitializationResult:
-        """Run an additive, idempotent initialization."""
+    def initialize(self, *, create_home: bool = False) -> InitializationResult:
+        """Run an additive initialization; homepage creation is explicit."""
         self._ensure_page_branding()
         data_page_id = self._ensure_data_page()
         resources, created_databases = self._ensure_databases(data_page_id)
         resources = self._ensure_relations(resources)
-        created_home = self._ensure_home_blocks()
+        created_home = self._ensure_home_blocks(create_if_missing=create_home)
         created_views, updated_views = self._ensure_views(resources)
         return InitializationResult(
             data_page_id=data_page_id,
@@ -550,7 +550,7 @@ class NotionInitializer:
                     retryable=exc.retryable,
                 ) from exc
 
-    def _ensure_home_blocks(self) -> bool:
+    def _ensure_home_blocks(self, *, create_if_missing: bool) -> bool:
         blocks = self.api.list_block_children(self.root_page_id)
         marker = next((block for block in blocks if _is_home_marker(block)), None)
         if marker is None and _has_managed_home_layout(blocks):
@@ -610,6 +610,11 @@ class NotionInitializer:
             if marker_id and HOME_MARKER in _block_text(marker):
                 marker_body = _home_marker()["paragraph"]
                 self.api.update_block(str(marker_id), {"paragraph": marker_body})
+            return False
+        if not create_if_missing:
+            return False
+        safe_bootstrap_types = {"child_page"}
+        if any(str(block.get("type") or "") not in safe_bootstrap_types for block in blocks):
             return False
         self.api.append_block_children(self.root_page_id, home_blocks())
         return True

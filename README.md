@@ -24,10 +24,10 @@ Fork 本仓库，在 `Settings → Secrets and variables → Actions` 至少添�
 
 在 Fork 的 `Actions` 页面依次手动运行：
 
-1. `Initialize Notion`
+1. `Initialize Notion`，首次选择 `bootstrap`
 2. `Sync Podcast Metadata`
 
-它会在已授权的空白 Notion 页面中创建九个数据库、14 个视图、统计关系和首页，
+它会在已授权的空白 Notion 页面中创建九个数据库、19 个视图、统计关系和首页，
 再同步播放历史、待听列表、收藏、进度、排行和热力图。
 
 数据口径：
@@ -137,11 +137,12 @@ Artifact 都不会保存音频、文字稿或摘要。
 授权空白页面并配置 `NOTION_TOKEN`、`NOTION_PAGE_ID` 后运行：
 
 ```bash
-uv run xyz2notion notion-init
+uv run xyz2notion notion-init --create-home
 ```
 
-初始化器会幂等创建九个数据库、关系、公式、统计视图、Gallery 和首页布局，
-且不会删除用户自行添加的字段、视图或笔记。完整说明见
+首次引导会创建九个数据库、关系、公式、统计视图、Gallery 和首页布局。
+此后运行不带 `--create-home` 的 `notion-init`，只协调数据库和视图，绝不会
+追加第二套主页普通布局，也不会删除用户自行添加的字段、视图或笔记。完整说明见
 [`docs/notion-template.md`](docs/notion-template.md)。
 
 初始化完成后，同步订阅、收听过的播客、全部单集、播放进度和统计关系：

@@ -220,7 +220,8 @@ def test_notion_init_success_reports_counts(
         def __init__(self, _api: object, page_id: str) -> None:
             assert page_id == "fixture-page"
 
-        def initialize(self) -> object:
+        def initialize(self, *, create_home: bool = False) -> object:
+            assert create_home is False
             return SimpleNamespace(
                 created_databases=9,
                 created_views=12,
@@ -232,6 +233,31 @@ def test_notion_init_success_reports_counts(
     output = capsys.readouterr().out  # type: ignore[attr-defined]
     assert "databases created: 9" in output
     assert "views created: 12" in output
+
+
+def test_notion_bootstrap_requests_home_creation(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionClient", FakeContextClient)  # type: ignore[attr-defined]
+
+    class FakeInitializer:
+        def __init__(self, _api: object, page_id: str) -> None:
+            assert page_id == "fixture-page"
+
+        def initialize(self, *, create_home: bool = False) -> object:
+            assert create_home is True
+            return SimpleNamespace(
+                created_databases=9,
+                created_views=19,
+                updated_views=0,
+            )
+
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+    assert main(["notion-init", "--create-home"]) == 0
+    assert "views created: 19" in capsys.readouterr().out  # type: ignore[attr-defined]
 
 
 def test_audit_dashboard_reports_only_aggregate_counts_without_writes(

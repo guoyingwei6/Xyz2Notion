@@ -59,7 +59,7 @@ ASR 和免费文本模型。项目只接受代码已核对的免费模型白名�
 
 | 工作流 | 触发 | 作用 |
 | --- | --- | --- |
-| `Initialize Notion` | 手动 | 幂等创建或修复九个数据库和首页 |
+| `Initialize Notion` | 手动 | `bootstrap` 首次建首页；`initialize` 日常只修复数据库和视图 |
 | `Sync Podcast Metadata` | 每天 00:17 UTC、手动 | 同步播放历史、待听、收藏、统计和热力图 |
 | `Process Episode AI` | 手动 | 推进 ASR、摘要和发布状态机；初期验收完成后再恢复定时 |
 | `Retry Failed Episode AI` | 手动 | 只恢复 `FAILED_RETRYABLE` 单集 |
@@ -70,7 +70,7 @@ ASR 和免费文本模型。项目只接受代码已核对的免费模型白名�
 
 首次使用顺序：
 
-1. 在 `Actions` 手动运行 `Initialize Notion`；
+1. 在 `Actions` 手动运行 `Initialize Notion`，首次选择 `bootstrap`；
 2. 手动运行 `Sync Podcast Metadata`；
 3. 手动运行 `Process Episode AI`；
 4. 查看工作流摘要中的聚合计数，以及 Notion Episode 的 `ASR Status`。

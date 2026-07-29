@@ -256,13 +256,15 @@ def test_statistics_charts_are_compact_primary_views() -> None:
 
 def test_initializer_creates_complete_clean_room_template() -> None:
     fake = FakeNotion()
-    result = NotionInitializer(fake, "root").initialize()
+    fake.blocks["root"] = []
+    result = NotionInitializer(fake, "root").initialize(create_home=True)
     assert result.created_databases == 9
     assert result.created_views == len(VIEW_SPECS)
     assert result.updated_views == 0
     assert result.created_home is True
     assert fake.created_pages == 1
-    assert fake.blocks["root"][1]["child_page"]["title"] == DATA_PAGE_TITLE
+    data_page_block = next(block for block in fake.blocks["root"] if block["type"] == "child_page")
+    assert data_page_block["child_page"]["title"] == DATA_PAGE_TITLE
     assert fake.pages["root"]["icon"]["emoji"] == "🪐"
     assert fake.pages["root"]["cover"]["external"]["url"].endswith("assets/cover.svg?v=2")
     assert set(result.resources) == {spec.key for spec in DATABASE_SPECS}
@@ -320,8 +322,9 @@ def test_initializer_creates_complete_clean_room_template() -> None:
 
 def test_initializer_is_idempotent_and_preserves_user_content() -> None:
     fake = FakeNotion()
+    fake.blocks["root"] = []
     initializer = NotionInitializer(fake, "root")
-    first = initializer.initialize()
+    first = initializer.initialize(create_home=True)
     user_block = {
         "id": "user-second",
         "type": "paragraph",
@@ -351,7 +354,7 @@ def test_initializer_is_idempotent_and_preserves_user_content() -> None:
 def test_initializer_rebuilds_missing_view_in_existing_linked_database() -> None:
     fake = FakeNotion()
     initializer = NotionInitializer(fake, "root")
-    first = initializer.initialize()
+    first = initializer.initialize(create_home=True)
     episode_data_source_id = first.resources["episode"].data_source_id
     missing_id = next(
         view_id for view_id, view in fake.views.items() if view["name"] == "Episode · 全部"
@@ -442,7 +445,7 @@ def test_initializer_does_not_duplicate_home_when_marker_link_is_omitted() -> No
     fake.append_block_children("root", existing)
     root_count = len(fake.blocks["root"])
 
-    result = NotionInitializer(fake, "root").initialize()
+    result = NotionInitializer(fake, "root").initialize(create_home=True)
 
     assert result.created_home is False
     assert len(fake.blocks["root"]) == root_count + 9
@@ -466,10 +469,26 @@ def test_initializer_does_not_duplicate_reshaped_home_without_marker() -> None:
     fake.append_block_children("root", reshaped)
     root_count = len(fake.blocks["root"])
 
-    result = NotionInitializer(fake, "root").initialize()
+    result = NotionInitializer(fake, "root").initialize(create_home=True)
 
     assert result.created_home is False
     assert len(fake.blocks["root"]) == root_count + 9
+
+
+def test_initializer_refuses_home_bootstrap_on_page_with_user_content() -> None:
+    fake = FakeNotion()
+    user_block = {
+        "id": "user-content",
+        "type": "paragraph",
+        "paragraph": {"rich_text": rich_text("不要覆盖我的页面")},
+    }
+    fake.blocks["root"].append(user_block)
+
+    result = NotionInitializer(fake, "root").initialize(create_home=True)
+
+    assert result.created_home is False
+    assert user_block in fake.blocks["root"]
+    assert not any(HOME_MARKER_URL in str(block) for block in fake.blocks["root"])
 
 
 def test_initializer_adopts_matching_legacy_database_without_copying_rows() -> None:
