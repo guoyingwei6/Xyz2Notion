@@ -234,11 +234,33 @@ def _is_home_marker(block: Mapping[str, Any]) -> bool:
     for item in items:
         if not isinstance(item, Mapping):
             continue
+        if item.get("href") == HOME_MARKER_URL:
+            return True
         text = item.get("text")
         link = text.get("link") if isinstance(text, Mapping) else None
         if isinstance(link, Mapping) and link.get("url") == HOME_MARKER_URL:
             return True
     return False
+
+
+_MANAGED_HOME_SHAPE = (
+    "heading_1",
+    "callout",
+    "column_list",
+    "divider",
+    "callout",
+    "paragraph",
+)
+
+
+def _has_managed_home_layout(blocks: Sequence[Mapping[str, Any]]) -> bool:
+    """Recognize the managed layout even if Notion omits the invisible marker link."""
+    block_types = [str(block.get("type") or "") for block in blocks]
+    width = len(_MANAGED_HOME_SHAPE)
+    return any(
+        tuple(block_types[index : index + width]) == _MANAGED_HOME_SHAPE
+        for index in range(len(block_types) - width + 1)
+    )
 
 
 def _divider() -> JsonObject:
@@ -520,6 +542,8 @@ class NotionInitializer:
     def _ensure_home_blocks(self) -> bool:
         blocks = self.api.list_block_children(self.root_page_id)
         marker = next((block for block in blocks if _is_home_marker(block)), None)
+        if marker is None and _has_managed_home_layout(blocks):
+            return False
         if marker is not None:
             replacements = {
                 "Xyz2Notion · 播客仪表盘": ("heading_1", "播客"),

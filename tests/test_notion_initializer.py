@@ -431,6 +431,23 @@ def test_initializer_migrates_legacy_home_columns_and_hides_marker() -> None:
     assert HOME_MARKER_URL in str(fake.blocks["root"])
 
 
+def test_initializer_does_not_duplicate_home_when_marker_link_is_omitted() -> None:
+    fake = FakeNotion()
+    existing = home_blocks()
+    existing[-1] = {
+        "id": "marker-without-rich-text",
+        "type": "paragraph",
+        "paragraph": {"rich_text": []},
+    }
+    fake.append_block_children("root", existing)
+    root_count = len(fake.blocks["root"])
+
+    result = NotionInitializer(fake, "root").initialize()
+
+    assert result.created_home is False
+    assert len(fake.blocks["root"]) == root_count + 9
+
+
 def test_initializer_adopts_matching_legacy_database_without_copying_rows() -> None:
     fake = FakeNotion()
     legacy = fake.create_database(
