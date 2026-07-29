@@ -320,8 +320,13 @@ def test_long_text_helpers_preserve_content() -> None:
     assert len(blocks) == 3
     assert split_text("") == [""]
     assert rich_text("") == []
+    emoji_chunks = split_text("😀" * 1001)
+    assert [len(chunk.encode("utf-16-le")) // 2 for chunk in emoji_chunks] == [2000, 2]
+    assert "".join(emoji_chunks) == "😀" * 1001
     with pytest.raises(ValueError, match="positive"):
         split_text("text", 0)
+    with pytest.raises(ValueError, match="cannot fit"):
+        split_text("😀", 1)
 
 
 def test_append_children_uses_batches_of_100_and_position_end() -> None:

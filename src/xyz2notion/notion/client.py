@@ -45,10 +45,27 @@ class NotionAPIError(RuntimeError):
 
 
 def split_text(text: str, limit: int = NOTION_RICH_TEXT_LIMIT) -> list[str]:
-    """Split text without loss so every rich-text object fits Notion limits."""
+    """Split text without loss using Notion's UTF-16 code-unit length."""
     if limit < 1:
         raise ValueError("text chunk limit must be positive")
-    return [text[index : index + limit] for index in range(0, len(text), limit)] or [""]
+    if not text:
+        return [""]
+    chunks: list[str] = []
+    current: list[str] = []
+    current_units = 0
+    for character in text:
+        units = len(character.encode("utf-16-le")) // 2
+        if units > limit:
+            raise ValueError("text chunk limit cannot fit one Unicode character")
+        if current and current_units + units > limit:
+            chunks.append("".join(current))
+            current = []
+            current_units = 0
+        current.append(character)
+        current_units += units
+    if current:
+        chunks.append("".join(current))
+    return chunks
 
 
 def rich_text(text: str) -> list[JsonObject]:
