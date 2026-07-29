@@ -271,8 +271,10 @@ def relational_properties(resources: dict[str, NotionResource]) -> dict[str, Jso
             ),
             "Progress Ring": formula_property(
                 'lets(p, if(prop("Duration Seconds") > 0, '
-                'round(prop("Played Seconds") / prop("Duration Seconds") * 100), 0), '
-                'repeat("●", floor(p / 10)) + repeat("○", 10 - floor(p / 10)) + '
+                'max(0, min(100, round(prop("Played Seconds") / '
+                'prop("Duration Seconds") * 100))), 0), '
+                'substring("●●●●●●●●●●", 0, floor(p / 10)) + '
+                'substring("○○○○○○○○○○", 0, 10 - floor(p / 10)) + '
                 '" " + format(p) + "%")'
             ),
         },
