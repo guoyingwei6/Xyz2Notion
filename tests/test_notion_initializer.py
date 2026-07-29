@@ -244,14 +244,34 @@ def test_statistics_charts_are_compact_primary_views() -> None:
         "week",
         "day",
     ]
-    assert all(
-        spec.filter
-        == {
-            "property": "Exact Listening Seconds",
-            "number": {"greater_than": 0},
+    assert chart_specs[1].filter == {
+        "property": "Exact Listening Seconds",
+        "number": {"greater_than": 0},
+    }
+    for spec, window in zip(
+        chart_specs[2:],
+        ("past_year", "past_month", "past_week"),
+        strict=True,
+    ):
+        assert spec.filter == {
+            "and": [
+                {
+                    "property": "Exact Listening Seconds",
+                    "number": {"greater_than": 0},
+                },
+                {"property": "Start Date", "date": {window: {}}},
+            ],
         }
-        for spec in chart_specs[1:]
-    )
+
+
+def test_statistics_tables_keep_complete_history() -> None:
+    table_specs = {
+        spec.name: spec
+        for spec in VIEW_SPECS
+        if spec.name in {"年度统计", "月度统计", "周统计", "日统计"}
+    }
+    assert set(table_specs) == {"年度统计", "月度统计", "周统计", "日统计"}
+    assert all(spec.filter is None for spec in table_specs.values())
 
 
 def test_initializer_creates_complete_clean_room_template() -> None:
@@ -280,6 +300,10 @@ def test_initializer_creates_complete_clean_room_template() -> None:
     assert podcast_properties["Authors"]["relation"]["dual_property"] == {
         "synced_property_name": "Podcasts"
     }
+    assert (
+        podcast_properties["收听分钟"]["formula"]["expression"]
+        == 'round(prop("Total Listening Seconds") / 60 * 10) / 10'
+    )
     assert "Progress Percent" in episode_properties
     assert "Progress Ring" in episode_properties
     assert episode_properties["Progress Ring"]["rich_text"] == {}
@@ -306,6 +330,17 @@ def test_initializer_creates_complete_clean_room_template() -> None:
         "property": "Total Listening Seconds",
         "number": {"greater_than": 0},
     }
+    assert {item["property_id"] for item in podcast_view["configuration"]["properties"]} == {
+        podcast_properties["Name"]["id"],
+        podcast_properties["收听分钟"]["id"],
+    }
+
+    ranking_view = next(view for view in fake.views.values() if view["name"] == "收听时长排行榜")
+    ranking_property_ids = {
+        item["property_id"] for item in ranking_view["configuration"]["properties"]
+    }
+    assert podcast_properties["收听分钟"]["id"] in ranking_property_ids
+    assert podcast_properties["Total Listening Seconds"]["id"] not in ranking_property_ids
 
     linked_database_ids = {view["parent"]["database_id"] for view in fake.views.values()}
     assert len(linked_database_ids) == 4

@@ -251,6 +251,7 @@ def relational_properties(resources: dict[str, NotionResource]) -> dict[str, Jso
                 author,
                 synced_property_name="Podcasts",
             ),
+            "收听分钟": formula_property('round(prop("Total Listening Seconds") / 60 * 10) / 10'),
         },
         "episode": {
             "Podcast": relation_property(
@@ -365,8 +366,13 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         view_type="chart",
         visible_properties=(),
         filter={
-            "property": "Exact Listening Seconds",
-            "number": {"greater_than": 0},
+            "and": [
+                {
+                    "property": "Exact Listening Seconds",
+                    "number": {"greater_than": 0},
+                },
+                {"property": "Start Date", "date": {"past_year": {}}},
+            ],
         },
         chart_type="line",
         chart_x_property="Start Date",
@@ -396,8 +402,13 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         view_type="chart",
         visible_properties=(),
         filter={
-            "property": "Exact Listening Seconds",
-            "number": {"greater_than": 0},
+            "and": [
+                {
+                    "property": "Exact Listening Seconds",
+                    "number": {"greater_than": 0},
+                },
+                {"property": "Start Date", "date": {"past_month": {}}},
+            ],
         },
         chart_type="line",
         chart_x_property="Start Date",
@@ -427,8 +438,13 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         view_type="chart",
         visible_properties=(),
         filter={
-            "property": "Exact Listening Seconds",
-            "number": {"greater_than": 0},
+            "and": [
+                {
+                    "property": "Exact Listening Seconds",
+                    "number": {"greater_than": 0},
+                },
+                {"property": "Start Date", "date": {"past_week": {}}},
+            ],
         },
         chart_type="line",
         chart_x_property="Start Date",
@@ -456,7 +472,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         source="podcast",
         name="收听时长排行榜",
         view_type="table",
-        visible_properties=("Rank", "Name", "Cover", "Total Listening Seconds"),
+        visible_properties=("Rank", "Name", "Cover", "收听分钟"),
         filter={
             "property": "Total Listening Seconds",
             "number": {"greater_than": 0},
@@ -468,7 +484,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         source="podcast",
         name="Podcast",
         view_type="gallery",
-        visible_properties=("Name", "Total Listening Seconds"),
+        visible_properties=("Name", "收听分钟"),
         filter={
             "property": "Total Listening Seconds",
             "number": {"greater_than": 0},
