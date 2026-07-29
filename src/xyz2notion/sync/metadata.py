@@ -279,6 +279,9 @@ class MetadataSynchronizer:
             "Published At": _date(episode.published_at.isoformat()),
             "Duration Seconds": {"number": episode.duration_seconds},
             "Played Seconds": {"number": episode.played_seconds},
+            "Progress Ring": _text(
+                _progress_ring(episode.played_seconds, episode.duration_seconds)
+            ),
             "Listening Status": {"select": {"name": STATUS_NAMES[episode.listening_status]}},
             "Liked": {"checkbox": episode.liked},
         }
@@ -310,3 +313,10 @@ class MetadataSynchronizer:
                 if page_id:
                     properties[property_name] = _relation([page_id])
         return properties
+
+
+def _progress_ring(played_seconds: int, duration_seconds: int) -> str:
+    percent = round(played_seconds / duration_seconds * 100) if duration_seconds > 0 else 0
+    percent = max(0, min(100, percent))
+    filled = percent // 10
+    return f"{'●' * filled}{'○' * (10 - filled)} {percent}%"

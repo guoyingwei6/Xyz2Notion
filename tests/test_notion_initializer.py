@@ -214,10 +214,7 @@ def test_initializer_creates_complete_clean_room_template() -> None:
     }
     assert "Progress Percent" in episode_properties
     assert "Progress Ring" in episode_properties
-    progress_ring = episode_properties["Progress Ring"]["formula"]["expression"]
-    assert "ifs" in progress_ring
-    assert "substring" not in progress_ring
-    assert "repeat" not in progress_ring
+    assert episode_properties["Progress Ring"]["rich_text"] == {}
     assert "ASR Provider" in episode_properties
     assert "Content Version" in episode_properties
 

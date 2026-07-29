@@ -251,13 +251,13 @@ def test_progress_change_updates_only_changed_managed_field() -> None:
     synchronizer.sync(sample_snapshot(progress_seconds=120))
     fake.updates.clear()
 
-    report = synchronizer.sync(sample_snapshot(progress_seconds=130))
+    report = synchronizer.sync(sample_snapshot(progress_seconds=200))
     assert report.created == 0
     assert report.updated == 1
     assert report.unchanged == 7
-    assert report.changed_fields == {"Played Seconds": 1}
+    assert report.changed_fields == {"Played Seconds": 1, "Progress Ring": 1}
     assert len(fake.updates) == 1
-    assert set(fake.updates[0][1]["properties"]) == {"Played Seconds"}
+    assert set(fake.updates[0][1]["properties"]) == {"Played Seconds", "Progress Ring"}
 
 
 def test_user_fields_blocks_and_processed_asr_status_are_preserved() -> None:

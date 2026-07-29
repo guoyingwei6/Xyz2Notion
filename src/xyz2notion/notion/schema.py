@@ -168,6 +168,7 @@ DATABASE_SPECS: tuple[DatabaseSpec, ...] = (
             "Audio URL": {"url": {}},
             "Duration Seconds": number_property(),
             "Played Seconds": number_property(),
+            "Progress Ring": text_property(),
             "Listening Status": select_property(LISTENING_STATUS_OPTIONS),
             "Liked": {"checkbox": {}},
             "Last Played At": {"date": {}},
@@ -268,21 +269,6 @@ def relational_properties(resources: dict[str, NotionResource]) -> dict[str, Jso
             "Progress Percent": formula_property(
                 'if(prop("Duration Seconds") > 0, '
                 'round(prop("Played Seconds") / prop("Duration Seconds") * 100), 0)'
-            ),
-            "Progress Ring": formula_property(
-                'let(p, if(prop("Duration Seconds") > 0, '
-                'round(prop("Played Seconds") / prop("Duration Seconds") * 100), 0), '
-                'ifs(p >= 100, "●●●●●●●●●●", '
-                'p >= 90, "●●●●●●●●●○", '
-                'p >= 80, "●●●●●●●●○○", '
-                'p >= 70, "●●●●●●●○○○", '
-                'p >= 60, "●●●●●●○○○○", '
-                'p >= 50, "●●●●●○○○○○", '
-                'p >= 40, "●●●●○○○○○○", '
-                'p >= 30, "●●●○○○○○○○", '
-                'p >= 20, "●●○○○○○○○○", '
-                'p >= 10, "●○○○○○○○○○", '
-                '"○○○○○○○○○○") + " " + format(p) + "%")'
             ),
         },
         "mindmap": {
