@@ -148,6 +148,40 @@ def test_ffmpeg_probe_normalize_and_prepare_short_audio(tmp_path: Path) -> None:
     assert prepared.chunks[0].size_bytes < 50 * 1024 * 1024
 
 
+def test_prepare_is_covered_without_runner_ffmpeg(tmp_path: Path) -> None:
+    """Keep the orchestration contract covered on minimal GitHub runners."""
+
+    class FakePreprocessor(AudioPreprocessor):
+        def normalize(self, source: Path, destination: Path) -> Path:
+            assert source.read_bytes() == b"source"
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(b"normalized")
+            return destination
+
+        def probe(self, path: Path) -> AudioProbe:
+            assert path.read_bytes() == b"normalized"
+            return AudioProbe(3700, path.stat().st_size, "mp3", "mp3")
+
+        def silence_ends(self, path: Path) -> tuple[float, ...]:
+            assert path.exists()
+            return (1700, 3400)
+
+        def extract(self, source: Path, destination: Path, segment: object) -> Path:
+            assert source.exists()
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(b"chunk")
+            return destination
+
+    source = tmp_path / "source.audio"
+    source.write_bytes(b"source")
+    prepared = FakePreprocessor().prepare(source, tmp_path / "prepared")
+
+    assert prepared.probe.duration_seconds == 3700
+    assert len(prepared.chunks) == 3
+    assert [chunk.start_ms for chunk in prepared.chunks] == [0, 1_697_000, 3_397_000]
+    assert all(chunk.path.is_file() for chunk in prepared.chunks)
+
+
 def test_episode_pipeline_removes_temporary_audio_after_return() -> None:
     observed_paths: list[Path] = []
 
