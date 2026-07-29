@@ -540,7 +540,7 @@ def test_chart_configuration_uses_dates_hours_and_compact_presentation() -> None
         month,
         {
             "Start Date": "start",
-            "Exact Listening Hours": "hours",
+            "收听小时": "hours",
         },
     )
     assert configuration == {
@@ -561,12 +561,12 @@ def test_chart_configuration_uses_dates_hours_and_compact_presentation() -> None
         "height": "small",
         "legend_position": "off",
         "show_data_labels": True,
-        "axis_labels": "both",
+        "axis_labels": "none",
         "grid_lines": "horizontal",
     }
 
     total = next(spec for spec in VIEW_SPECS if spec.key == "total_time_chart")
-    assert view_configuration(total, {"Exact Listening Hours": "hours"}) == {
+    assert view_configuration(total, {"收听小时": "hours"}) == {
         "type": "chart",
         "chart_type": "number",
         "color_theme": "teal",
