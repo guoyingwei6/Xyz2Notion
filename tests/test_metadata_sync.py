@@ -327,6 +327,41 @@ def test_user_fields_blocks_and_processed_asr_status_are_preserved() -> None:
     assert episode["children"] == [{"type": "paragraph", "text": "用户页面块"}]
 
 
+def test_metadata_sync_preserves_notion_hosted_file_properties() -> None:
+    fake = FakeRows()
+    synchronizer = MetadataSynchronizer(fake, resources())
+    snapshot = sample_snapshot()
+    synchronizer.sync(snapshot)
+
+    author = page_by_key(fake, "ds-author", "Author ID", "author-fixture-1")
+    podcast = page_by_key(fake, "ds-podcast", "PID", "podcast-fixture-1")
+    episode = page_by_key(fake, "ds-episode", "EID", "episode-fixture-1")
+    for page, property_name in (
+        (author, "Avatar"),
+        (podcast, "Cover"),
+        (episode, "Cover"),
+    ):
+        page["properties"][property_name] = {
+            "files": [
+                {
+                    "name": "Notion file",
+                    "type": "file",
+                    "file": {"url": "https://notion.example/internal"},
+                }
+            ]
+        }
+
+    fake.updates.clear()
+    report = synchronizer.sync(snapshot)
+
+    assert report.updated == 0
+    assert report.unchanged == 8
+    assert fake.updates == []
+    assert podcast["properties"]["Cover"]["files"][0]["type"] == "file"
+    assert episode["properties"]["Cover"]["files"][0]["type"] == "file"
+    assert author["properties"]["Avatar"]["files"][0]["type"] == "file"
+
+
 def test_removed_playlist_and_favorite_flags_are_cleared_without_deleting_page() -> None:
     fake = FakeRows()
     fake.pages["ds-episode"] = [

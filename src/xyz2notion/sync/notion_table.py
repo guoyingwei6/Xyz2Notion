@@ -169,6 +169,26 @@ class NotionTable:
             return None
         return _canonical_property(properties.get(property_name))
 
+    def property_has_internal_file(self, key: str, property_name: str) -> bool:
+        """Whether a files property already contains a Notion-hosted file."""
+        page = self._pages.get(key)
+        if page is None:
+            return False
+        properties = page.get("properties")
+        if not isinstance(properties, Mapping):
+            return False
+        value = properties.get(property_name)
+        if not isinstance(value, Mapping):
+            return False
+        files = value.get("files")
+        if not isinstance(files, list):
+            return False
+        return any(
+            isinstance(item, Mapping)
+            and (item.get("type") == "file" or isinstance(item.get("file"), Mapping))
+            for item in files
+        )
+
     def upsert(
         self,
         key: str,

@@ -169,9 +169,12 @@ class MetadataSynchronizer:
 
         author_pages: dict[str, str] = {}
         for author in snapshot.authors:
+            properties = self._author_properties(author)
+            if author_table.property_has_internal_file(author.author_id, "Avatar"):
+                properties.pop("Avatar", None)
             result = author_table.upsert(
                 author.author_id,
-                self._author_properties(author),
+                properties,
                 icon=_external(author.avatar_url),
             )
             author_pages[author.author_id] = result.page_id
@@ -194,7 +197,10 @@ class MetadataSynchronizer:
                 "Authors": _relation(author_relations),
             }
             cover_file = _file(podcast.image_url, "Podcast cover")
-            if cover_file:
+            if cover_file and not podcast_table.property_has_internal_file(
+                podcast.pid,
+                "Cover",
+            ):
                 properties["Cover"] = cover_file
             result = podcast_table.upsert(
                 podcast.pid,
@@ -240,6 +246,8 @@ class MetadataSynchronizer:
                 podcast_pages,
                 period_pages,
             )
+            if episode_table.property_has_internal_file(episode.eid, "Cover"):
+                properties.pop("Cover", None)
             result = episode_table.upsert(
                 episode.eid,
                 properties,
