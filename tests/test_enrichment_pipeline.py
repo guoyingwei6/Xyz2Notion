@@ -5,6 +5,7 @@ import pytest
 from xyz2notion.enrichment.pipeline import (
     SummaryPolicy,
     TranscriptEnricher,
+    normalize_payload,
     validate_payload,
 )
 from xyz2notion.enrichment.schema import EnrichmentPayload
@@ -51,7 +52,8 @@ class FakeClient:
         assert max_output_tokens == 8192
         self.calls.append(user)
         result = enrichment_payload(f"摘要-{len(self.calls)}")
-        assert validator(result)  # type: ignore[operator]
+        if validator is not None:
+            assert validator(result)  # type: ignore[operator]
         return result, CompletionUsage(100, 20)
 
 
@@ -131,6 +133,70 @@ def test_payload_timeline_and_mindmap_ids_are_validated() -> None:
         }
     )
     assert not validate_payload(duplicate, 1_000)
+
+
+def test_payload_semantic_mistakes_are_normalized_deterministically() -> None:
+    invalid = enrichment_payload().model_copy(
+        update={
+            "chapters": (
+                Chapter(start_ms=2_000, title="超出"),
+                Chapter(start_ms=10, title="较早"),
+            ),
+            "mindmap": MindmapNode(
+                node_id="same",
+                title="根",
+                children=(
+                    MindmapNode(node_id="same", title="子一"),
+                    MindmapNode(
+                        node_id="same",
+                        title="子二",
+                        children=(MindmapNode(node_id="same-2", title="孙"),),
+                    ),
+                ),
+            ),
+        }
+    )
+    normalized = normalize_payload(invalid, 1_000)
+    assert [chapter.start_ms for chapter in normalized.chapters] == [10, 1_000]
+    identifiers = [
+        normalized.mindmap.node_id,
+        normalized.mindmap.children[0].node_id,
+        normalized.mindmap.children[1].node_id,
+        normalized.mindmap.children[1].children[0].node_id,
+    ]
+    assert len(identifiers) == len(set(identifiers))
+    assert validate_payload(normalized, 1_000)
+
+
+def test_enricher_normalizes_model_payload_before_validation() -> None:
+    class InvalidSemanticClient(FakeClient):
+        def generate_structured(
+            self,
+            _model_type: object,
+            *,
+            system: str,
+            user: str,
+            max_output_tokens: int,
+            validator: object,
+        ) -> tuple[EnrichmentPayload, CompletionUsage]:
+            result = enrichment_payload().model_copy(
+                update={
+                    "chapters": (
+                        Chapter(start_ms=120_000, title="超出"),
+                        Chapter(start_ms=0, title="开始"),
+                    ),
+                    "mindmap": MindmapNode(
+                        node_id="duplicate",
+                        title="根",
+                        children=(MindmapNode(node_id="duplicate", title="子"),),
+                    ),
+                }
+            )
+            return result, CompletionUsage(1, 1)
+
+    result = TranscriptEnricher(InvalidSemanticClient()).summarize(short_transcript())
+    assert [chapter.start_ms for chapter in result.chapters] == [0, 60_000]
+    assert result.mindmap.node_id != result.mindmap.children[0].node_id
 
 
 def test_invalid_prompt_version_and_empty_transcript_fail_without_asr() -> None:

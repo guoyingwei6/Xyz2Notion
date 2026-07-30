@@ -53,6 +53,46 @@ def validate_payload(payload: EnrichmentPayload, duration_ms: int) -> bool:
     )
 
 
+def normalize_payload(payload: EnrichmentPayload, duration_ms: int) -> EnrichmentPayload:
+    """Deterministically repair harmless model ordering, range, and ID mistakes."""
+    chapters = tuple(
+        sorted(
+            (
+                chapter.model_copy(update={"start_ms": min(chapter.start_ms, duration_ms)})
+                for chapter in payload.chapters
+            ),
+            key=lambda chapter: (chapter.start_ms, chapter.title),
+        )
+    )
+    seen: set[str] = set()
+
+    def normalize_node(node: MindmapNode, path: tuple[int, ...]) -> MindmapNode:
+        identifier = node.node_id
+        if identifier in seen:
+            suffix = "-".join(str(index) for index in path) or "root"
+            identifier = f"{identifier}-{suffix}"
+            while identifier in seen:
+                identifier = f"{identifier}-next"
+        seen.add(identifier)
+        children = tuple(
+            normalize_node(child, (*path, index))
+            for index, child in enumerate(node.children, start=1)
+        )
+        return node.model_copy(
+            update={
+                "node_id": identifier,
+                "children": children,
+            }
+        )
+
+    return payload.model_copy(
+        update={
+            "chapters": chapters,
+            "mindmap": normalize_node(payload.mindmap, ()),
+        }
+    )
+
+
 def _provider_error(message: str) -> ProviderError:
     return ProviderError(
         ProviderFailure(
@@ -82,13 +122,23 @@ class TranscriptEnricher:
         user: str,
         duration_ms: int,
     ) -> tuple[EnrichmentPayload, CompletionUsage]:
-        return self.client.generate_structured(
+        payload, usage = self.client.generate_structured(
             EnrichmentPayload,
             system=SYSTEM_PROMPT,
             user=user,
             max_output_tokens=self.policy.max_output_tokens,
-            validator=lambda value: validate_payload(value, duration_ms),
+            validator=None,
         )
+        normalized = normalize_payload(payload, duration_ms)
+        if not validate_payload(normalized, duration_ms):
+            raise ProviderError(
+                ProviderFailure(
+                    provider="siliconflow_summary",
+                    category=ProviderErrorCategory.SCHEMA_CHANGED,
+                    message="Local enrichment normalization did not satisfy constraints",
+                )
+            )
+        return normalized, usage
 
     def summarize(self, transcript: TranscriptResult) -> SummaryResult:
         """Summarize once from persisted transcript data; this method has no ASR access."""
