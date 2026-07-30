@@ -1361,6 +1361,126 @@ def test_notion_backlog_audit_reports_only_aggregate_counts(
     assert "safe fixture failure" not in output
 
 
+def test_notion_backlog_property_helpers_cover_malformed_values() -> None:
+    assert cli_module._notion_property_text({}, "Missing") == ""  # type: ignore[attr-defined]
+    assert cli_module._notion_property_text({"Value": {}}, "Value") == ""  # type: ignore[attr-defined]
+    assert (  # type: ignore[attr-defined]
+        cli_module._notion_property_text(
+            {
+                "Value": {
+                    "rich_text": [
+                        None,
+                        {"text": {"content": "fallback"}},
+                        {"text": {}},
+                    ]
+                }
+            },
+            "Value",
+        )
+        == "fallback"
+    )
+    assert cli_module._notion_property_number({}, "Missing") == 0  # type: ignore[attr-defined]
+    assert cli_module._notion_property_number({"Value": {}}, "Value") == 0  # type: ignore[attr-defined]
+    assert cli_module._notion_property_checkbox({}, "Missing") is False  # type: ignore[attr-defined]
+    assert cli_module._cover_storage_kind({}) == "missing"  # type: ignore[attr-defined]
+    assert cli_module._cover_storage_kind({"Cover": {}}) == "missing"  # type: ignore[attr-defined]
+    assert cli_module._cover_storage_kind({"Cover": {"files": [None]}}) == "missing"  # type: ignore[attr-defined]
+
+
+def test_notion_backlog_audit_handles_unreadable_final_states(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "secret_fixture_token")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+
+    def final_page(eid_items: list[object]) -> dict[str, object]:
+        return {
+            "id": "final",
+            "properties": {
+                "EID": {"rich_text": eid_items},
+                "ASR Status": {"select": {"name": "最终失败"}},
+                "Played Seconds": {"number": 300},
+            },
+        }
+
+    episodes = [
+        final_page([]),
+        final_page([{"plain_text": "load-error"}]),
+        final_page([{"plain_text": "no-failure"}]),
+        {"id": "invalid-properties", "properties": None},
+    ]
+
+    class FakeNotion(FakeContextClient):
+        def query_data_source(self, source: str) -> list[dict[str, object]]:
+            return episodes if source == "episodes" else [{"id": "invalid", "properties": None}]
+
+    class FakeInitializer:
+        def __init__(self, _api: object, _page_id: str) -> None:
+            pass
+
+        def discover_existing_resources(self) -> dict[str, object]:
+            return {
+                "episode": SimpleNamespace(data_source_id="episodes"),
+                "podcast": SimpleNamespace(data_source_id="podcasts"),
+            }
+
+    class FakeStore:
+        def __init__(self, _api: object) -> None:
+            pass
+
+        def __enter__(self) -> "FakeStore":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            pass
+
+        def load(self, _page: object, eid: str) -> object:
+            if eid == "load-error":
+                raise cli_module.NotionAPIError("safe fixture error")  # type: ignore[attr-defined]
+            return SimpleNamespace(record=SimpleNamespace(failure=None))
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionEpisodeStateStore", FakeStore)  # type: ignore[attr-defined]
+
+    assert main(["audit-notion-backlog"]) == 0
+    output = capsys.readouterr().out  # type: ignore[attr-defined]
+    assert "state_unreadable=2" in output
+    assert "state_missing_failure=1" in output
+    assert "safe fixture error" not in output
+
+
+def test_notion_backlog_audit_reports_missing_resources(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "secret_fixture_token")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+
+    class FakeInitializer:
+        def __init__(self, _api: object, _page_id: str) -> None:
+            pass
+
+        def discover_existing_resources(self) -> dict[str, object]:
+            return {}
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeContextClient)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+    assert main(["audit-notion-backlog"]) == 4
+    assert "Required Xyz2Notion databases were not found" in capsys.readouterr().err  # type: ignore[attr-defined]
+
+
+def test_notion_backlog_audit_reports_missing_credentials(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.delenv("NOTION_TOKEN", raising=False)  # type: ignore[attr-defined]
+    monkeypatch.delenv("NOTION_PAGE_ID", raising=False)  # type: ignore[attr-defined]
+    assert main(["audit-notion-backlog"]) == 2
+    assert "Configuration error" in capsys.readouterr().err  # type: ignore[attr-defined]
+
+
 def test_migration_dry_run_reports_only_counts(
     capsys: object,
     monkeypatch: object,
