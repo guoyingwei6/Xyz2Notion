@@ -26,6 +26,7 @@ from xyz2notion.migration.schema import (
     detect_workspace_schema_version,
     migration_plan,
 )
+from xyz2notion.models import ProviderFailure
 from xyz2notion.notion.client import JsonObject, NotionAPIError, NotionClient
 from xyz2notion.notion.cover_localizer import NotionCoverLocalizer
 from xyz2notion.notion.initializer import DATA_PAGE_TITLE, HOME_MARKER_URL, NotionInitializer
@@ -463,6 +464,15 @@ def _cover_storage_kind(properties: Mapping[str, object]) -> str:
     return "external" if files[0].get("type") == "external" else "notion"
 
 
+def _safe_failure_reason_code(failure: ProviderFailure) -> str:
+    """Reduce known static failures to non-identifying aggregate reason codes."""
+    if failure.message == "SiliconFlow JSON repair did not satisfy the summary schema":
+        return "summary_schema"
+    if failure.message == "SiliconFlow JSON repair did not satisfy timeline constraints":
+        return "timeline_constraints"
+    return failure.category.value
+
+
 def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
     """Read aggregate cleanup and AI status without exposing Episode identity."""
     try:
@@ -500,7 +510,8 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
                     if failure is None:
                         failure_categories["state_missing_failure"] += 1
                     else:
-                        failure_categories[f"{failure.provider}:{failure.category.value}"] += 1
+                        reason = _safe_failure_reason_code(failure)
+                        failure_categories[f"{failure.provider}:{reason}"] += 1
 
             zero_play_total = protected_zero_play = legacy_zero_play = 0
             for page in episodes:

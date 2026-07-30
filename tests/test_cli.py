@@ -1385,6 +1385,16 @@ def test_notion_backlog_property_helpers_cover_malformed_values() -> None:
     assert cli_module._cover_storage_kind({}) == "missing"  # type: ignore[attr-defined]
     assert cli_module._cover_storage_kind({"Cover": {}}) == "missing"  # type: ignore[attr-defined]
     assert cli_module._cover_storage_kind({"Cover": {"files": [None]}}) == "missing"  # type: ignore[attr-defined]
+    schema_failure = ProviderFailure(
+        provider="siliconflow_summary",
+        category=ProviderErrorCategory.SCHEMA_CHANGED,
+        message="SiliconFlow JSON repair did not satisfy the summary schema",
+    )
+    timeline_failure = schema_failure.model_copy(
+        update={"message": "SiliconFlow JSON repair did not satisfy timeline constraints"}
+    )
+    assert cli_module._safe_failure_reason_code(schema_failure) == "summary_schema"  # type: ignore[attr-defined]
+    assert cli_module._safe_failure_reason_code(timeline_failure) == "timeline_constraints"  # type: ignore[attr-defined]
 
 
 def test_notion_backlog_audit_handles_unreadable_final_states(
