@@ -30,7 +30,7 @@ _IMAGE_EXTENSIONS = {
 
 
 class CoverRepairAPI(Protocol):
-    def query_data_source_page(
+    def query_data_source(
         self,
         data_source_id: str,
         payload: Mapping[str, Any] | None = None,
@@ -161,7 +161,7 @@ class NotionCoverLocalizer:
                         "direction": "descending",
                     }
                 ]
-            pages = self.api.query_data_source_page(
+            pages = self.api.query_data_source(
                 data_source_id,
                 payload,
             )

@@ -15,7 +15,7 @@ class FakeCoverAPI:
         self.updates: list[tuple[str, dict[str, Any]]] = []
         self.query_payloads: list[Mapping[str, Any] | None] = []
 
-    def query_data_source_page(
+    def query_data_source(
         self,
         _data_source_id: str,
         _payload: Mapping[str, Any] | None = None,
