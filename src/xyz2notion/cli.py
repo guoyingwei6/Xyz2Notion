@@ -39,6 +39,7 @@ from xyz2notion.orchestration.processor import (
 from xyz2notion.orchestration.recovery import reset_episode_ai
 from xyz2notion.orchestration.state_store import NotionEpisodeStateStore
 from xyz2notion.security import CredentialKind, allowed_hosts
+from xyz2notion.state import PipelineRecord, PipelineState
 from xyz2notion.sync.metadata import MetadataSynchronizer
 from xyz2notion.sync.pipeline import collect_metadata
 from xyz2notion.xiaoyuzhou.client import XiaoyuzhouAPIError, XiaoyuzhouClient
@@ -181,6 +182,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="report aggregate AI, cover, and zero-play backlog counts without changes",
     )
     audit_backlog.add_argument("--page-id")
+    reopen_timeline = subparsers.add_parser(
+        "reopen-timeline-failures",
+        help="resume bounded timeline-only summary failures from persisted transcripts",
+    )
+    reopen_timeline.add_argument("--limit", type=int, default=4)
+    reopen_timeline.add_argument("--confirm", required=True)
+    reopen_timeline.add_argument("--page-id")
     migrate = subparsers.add_parser(
         "migrate",
         help="adopt and map a legacy Podcast2Notion template in place",
@@ -560,6 +568,79 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
         f"legacy_zero_play={legacy_zero_play}; "
         f"podcasts={len(podcasts)}; external_covers={cover_kinds['external']}; "
         f"notion_covers={cover_kinds['notion']}; missing_covers={cover_kinds['missing']})"
+    )
+    return 0
+
+
+def _run_reopen_timeline_failures(args: argparse.Namespace) -> int:
+    expected = f"REOPEN_{args.limit}_TIMELINE_FAILURES"
+    if not 1 <= args.limit <= 10 or args.confirm != expected:
+        print(
+            f"Confirmation error: use --limit 1..10 and --confirm {expected}",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        token, page_id = _notion_runtime(args)
+        with NotionClient(token) as notion:
+            resources = NotionInitializer(notion, page_id).discover_existing_resources()
+            episode_resource = resources.get("episode")
+            if episode_resource is None:
+                raise NotionAPIError("Required Episode database was not found")
+            pages = notion.query_data_source(
+                episode_resource.data_source_id,
+                {
+                    "page_size": 100,
+                    "filter": {
+                        "property": "ASR Status",
+                        "select": {"equals": "最终失败"},
+                    },
+                },
+            )
+            reopened = skipped = 0
+            with NotionEpisodeStateStore(notion) as state_store:
+                for page in pages:
+                    if reopened >= args.limit:
+                        break
+                    properties = page.get("properties")
+                    if not isinstance(properties, Mapping) or not page.get("id"):
+                        skipped += 1
+                        continue
+                    eid = _notion_property_text(properties, "EID")
+                    if not eid:
+                        skipped += 1
+                        continue
+                    state = state_store.load(page, eid)
+                    failure = state.record.failure
+                    if (
+                        state.record.state is not PipelineState.FAILED_FINAL
+                        or failure is None
+                        or failure.provider != "siliconflow_summary"
+                        or _safe_failure_reason_code(failure) != "timeline_constraints"
+                        or state.transcript is None
+                        or state.summary is not None
+                    ):
+                        skipped += 1
+                        continue
+                    record = PipelineRecord(
+                        eid=eid,
+                        state=PipelineState.TRANSCRIBED,
+                        attempts=state.record.attempts,
+                        history=state.record.history,
+                    )
+                    state_store.save(
+                        str(page["id"]),
+                        state.model_copy(update={"record": record}),
+                    )
+                    reopened += 1
+    except (ConfigurationError, MissingCredentialError) as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    except NotionAPIError as exc:
+        print(f"Notion error: {exc}", file=sys.stderr)
+        return 4
+    print(
+        f"Timeline failure recovery OK (limit={args.limit}; reopened={reopened}; skipped={skipped})"
     )
     return 0
 
@@ -1172,6 +1253,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_published_ai_reconciliation(args)
     if args.command == "audit-notion-backlog":
         return _run_notion_backlog_audit(args)
+    if args.command == "reopen-timeline-failures":
+        return _run_reopen_timeline_failures(args)
     if args.command == "migrate":
         return _run_migration(args)
     if args.command == "redo-episode":

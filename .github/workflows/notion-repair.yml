@@ -11,6 +11,7 @@ on:
           - audit-backlog
           - repair-covers
           - reconcile-published-ai
+          - reopen-timeline-failures
       limit:
         description: "Cover: 1-10; published AI: 1-2"
         required: true
@@ -65,6 +66,10 @@ jobs:
               ;;
             reconcile-published-ai)
               result="$(uv run xyz2notion reconcile-published-ai \
+                --limit "$LIMIT" --confirm "$CONFIRMATION")"
+              ;;
+            reopen-timeline-failures)
+              result="$(uv run xyz2notion reopen-timeline-failures \
                 --limit "$LIMIT" --confirm "$CONFIRMATION")"
               ;;
             *)

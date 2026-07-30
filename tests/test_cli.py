@@ -4,9 +4,15 @@ from typing import ClassVar
 import xyz2notion.cli as cli_module
 from xyz2notion import __version__
 from xyz2notion.cli import main
-from xyz2notion.models import ProviderErrorCategory, ProviderFailure
+from xyz2notion.models import (
+    ProviderErrorCategory,
+    ProviderFailure,
+    TranscriptResult,
+    TranscriptSegment,
+)
 from xyz2notion.orchestration.processor import ProcessingOutcome
-from xyz2notion.state import PipelineState
+from xyz2notion.orchestration.state_store import EpisodeAIState
+from xyz2notion.state import PipelineRecord, PipelineState
 
 
 def test_doctor_reports_installation(capsys: object) -> None:
@@ -1489,6 +1495,245 @@ def test_notion_backlog_audit_reports_missing_credentials(
     monkeypatch.delenv("NOTION_PAGE_ID", raising=False)  # type: ignore[attr-defined]
     assert main(["audit-notion-backlog"]) == 2
     assert "Configuration error" in capsys.readouterr().err  # type: ignore[attr-defined]
+
+
+def test_reopen_timeline_failures_requires_bound_confirmation(
+    capsys: object,
+) -> None:
+    assert (
+        main(
+            [
+                "reopen-timeline-failures",
+                "--limit",
+                "4",
+                "--confirm",
+                "wrong",
+            ]
+        )
+        == 2
+    )
+    assert "REOPEN_4_TIMELINE_FAILURES" in capsys.readouterr().err  # type: ignore[attr-defined]
+
+
+def test_reopen_timeline_failures_preserves_transcript_checkpoint(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "secret_fixture_token")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+    failure = ProviderFailure(
+        provider="siliconflow_summary",
+        category=ProviderErrorCategory.SCHEMA_CHANGED,
+        message="SiliconFlow JSON repair did not satisfy timeline constraints",
+    )
+    record = PipelineRecord(eid="timeline").transition(PipelineState.TRANSCRIBED)
+    record = record.transition(PipelineState.FAILED_FINAL, failure=failure)
+    transcript = TranscriptResult(
+        provider="local_whisper",
+        provider_task_id="task",
+        model="small",
+        duration_ms=1_000,
+        text="已有文字稿",
+        segments=(TranscriptSegment(start_ms=0, end_ms=1_000, text="已有文字稿"),),
+    )
+    state = EpisodeAIState(record=record, transcript=transcript)
+    pages = [
+        {
+            "id": "timeline-page",
+            "properties": {
+                "EID": {"rich_text": [{"plain_text": "timeline"}]},
+            },
+        }
+    ]
+
+    class FakeNotion(FakeContextClient):
+        def query_data_source(
+            self,
+            source: str,
+            payload: object,
+        ) -> list[dict[str, object]]:
+            assert source == "episodes"
+            assert payload == {
+                "page_size": 100,
+                "filter": {
+                    "property": "ASR Status",
+                    "select": {"equals": "最终失败"},
+                },
+            }
+            return pages
+
+    class FakeInitializer:
+        def __init__(self, _api: object, _page_id: str) -> None:
+            pass
+
+        def discover_existing_resources(self) -> dict[str, object]:
+            return {"episode": SimpleNamespace(data_source_id="episodes")}
+
+    class FakeStore:
+        saved: ClassVar[list[EpisodeAIState]] = []
+
+        def __init__(self, _api: object) -> None:
+            pass
+
+        def __enter__(self) -> "FakeStore":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            pass
+
+        def load(self, _page: object, eid: str) -> EpisodeAIState:
+            assert eid == "timeline"
+            return state
+
+        def save(self, page_id: str, updated: EpisodeAIState) -> EpisodeAIState:
+            assert page_id == "timeline-page"
+            self.saved.append(updated)
+            return updated
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionEpisodeStateStore", FakeStore)  # type: ignore[attr-defined]
+
+    assert (
+        main(
+            [
+                "reopen-timeline-failures",
+                "--limit",
+                "4",
+                "--confirm",
+                "REOPEN_4_TIMELINE_FAILURES",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out  # type: ignore[attr-defined]
+    assert "reopened=1" in output
+    reopened = FakeStore.saved[0]
+    assert reopened.record.state is PipelineState.TRANSCRIBED
+    assert reopened.record.failure is None
+    assert reopened.transcript == transcript
+    assert reopened.summary is None
+
+
+def test_reopen_timeline_failures_skips_unrelated_or_incomplete_states(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "secret_fixture_token")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+    unrelated_failure = ProviderFailure(
+        provider="local_whisper",
+        category=ProviderErrorCategory.UNSUPPORTED,
+        message="safe unrelated failure",
+    )
+    timeline_failure = ProviderFailure(
+        provider="siliconflow_summary",
+        category=ProviderErrorCategory.SCHEMA_CHANGED,
+        message="SiliconFlow JSON repair did not satisfy timeline constraints",
+    )
+    unrelated = EpisodeAIState(
+        record=PipelineRecord(eid="unrelated").transition(
+            PipelineState.FAILED_FINAL,
+            failure=unrelated_failure,
+        )
+    )
+    no_transcript = EpisodeAIState(
+        record=PipelineRecord(eid="no-transcript").transition(
+            PipelineState.FAILED_FINAL,
+            failure=timeline_failure,
+        )
+    )
+    pages = [
+        {"id": "invalid", "properties": None},
+        {"id": "missing-eid", "properties": {}},
+        {
+            "id": "unrelated",
+            "properties": {"EID": {"rich_text": [{"plain_text": "unrelated"}]}},
+        },
+        {
+            "id": "no-transcript",
+            "properties": {"EID": {"rich_text": [{"plain_text": "no-transcript"}]}},
+        },
+    ]
+
+    class FakeNotion(FakeContextClient):
+        def query_data_source(self, _source: str, _payload: object) -> list[dict[str, object]]:
+            return pages
+
+    class FakeInitializer:
+        def __init__(self, _api: object, _page_id: str) -> None:
+            pass
+
+        def discover_existing_resources(self) -> dict[str, object]:
+            return {"episode": SimpleNamespace(data_source_id="episodes")}
+
+    class FakeStore:
+        def __init__(self, _api: object) -> None:
+            pass
+
+        def __enter__(self) -> "FakeStore":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            pass
+
+        def load(self, _page: object, eid: str) -> EpisodeAIState:
+            return unrelated if eid == "unrelated" else no_transcript
+
+        def save(self, _page_id: str, _state: EpisodeAIState) -> EpisodeAIState:
+            raise AssertionError("unrelated failures must not be reopened")
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionEpisodeStateStore", FakeStore)  # type: ignore[attr-defined]
+
+    assert (
+        main(
+            [
+                "reopen-timeline-failures",
+                "--limit",
+                "4",
+                "--confirm",
+                "REOPEN_4_TIMELINE_FAILURES",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out  # type: ignore[attr-defined]
+    assert "reopened=0" in output
+    assert "skipped=4" in output
+    assert "safe unrelated failure" not in output
+
+
+def test_reopen_timeline_failures_requires_episode_database(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "secret_fixture_token")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+
+    class FakeInitializer:
+        def __init__(self, _api: object, _page_id: str) -> None:
+            pass
+
+        def discover_existing_resources(self) -> dict[str, object]:
+            return {}
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeContextClient)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+    assert (
+        main(
+            [
+                "reopen-timeline-failures",
+                "--limit",
+                "4",
+                "--confirm",
+                "REOPEN_4_TIMELINE_FAILURES",
+            ]
+        )
+        == 4
+    )
+    assert "Required Episode database was not found" in capsys.readouterr().err  # type: ignore[attr-defined]
 
 
 def test_migration_dry_run_reports_only_counts(
