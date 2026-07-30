@@ -82,12 +82,15 @@ def test_init_workflow_requires_exact_dashboard_rebuild_confirmation() -> None:
     assert '--expected-total "$EXPECTED_TOTAL"' in text
 
 
-def test_metadata_sync_is_manual_and_requires_exact_safety_confirmation() -> None:
+def test_metadata_sync_runs_daily_and_manual_runs_require_confirmation() -> None:
     text, workflow = _workflow("sync-metadata.yml")
-    assert "cron:" not in text
+    assert workflow[True]["schedule"] == [{"cron": "17 0 * * *"}]  # type: ignore[index]
     dispatch = workflow[True]["workflow_dispatch"]  # type: ignore[index,operator]
     assert dispatch["inputs"]["confirmation"]["required"] is True  # type: ignore[index]
     assert "RUN_SAFE_INCREMENTAL_SYNC" in text
+    assert 'EVENT_NAME" == "workflow_dispatch"' in text
+    assert 'EVENT_NAME" != "workflow_dispatch"' in text
+    assert 'EVENT_NAME" != "schedule"' in text
     assert "timeout-minutes: 15" in text
 
 

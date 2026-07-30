@@ -7,6 +7,9 @@ on:
         description: "Type RUN_SAFE_INCREMENTAL_SYNC"
         required: true
         type: string
+  schedule:
+    # 08:17 Asia/Taipei / Asia/Shanghai. Avoid the busy top of the hour.
+    - cron: "17 0 * * *"
 
 permissions:
   contents: read
@@ -22,11 +25,17 @@ jobs:
     steps:
       - name: Require explicit safety confirmation
         env:
+          EVENT_NAME: ${{ github.event_name }}
           CONFIRMATION: ${{ inputs.confirmation }}
         run: |
           set -euo pipefail
-          if [[ "$CONFIRMATION" != "RUN_SAFE_INCREMENTAL_SYNC" ]]; then
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && \
+                "$CONFIRMATION" != "RUN_SAFE_INCREMENTAL_SYNC" ]]; then
             printf 'Refusing to access Xiaoyuzhou without the exact confirmation.\n' >&2
+            exit 2
+          fi
+          if [[ "$EVENT_NAME" != "workflow_dispatch" && "$EVENT_NAME" != "schedule" ]]; then
+            printf 'Refusing unsupported metadata trigger.\n' >&2
             exit 2
           fi
 

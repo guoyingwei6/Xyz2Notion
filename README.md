@@ -42,10 +42,11 @@ Fork 本仓库，在 `Settings → Secrets and variables → Actions` 至少添�
 
 ### 3. 生成文字稿与 AI 内容
 
-手动运行 `Process Episode AI`。元数据和 AI 工作流都仅允许手动运行，避免未经
-确认连续访问账号或处理大量节目。听悟 Cookie 明确失效时自动降级到
-SiliconFlow；如果两条远程通道都不可用，最后才在 GitHub Actions CPU 上运行
-本地 `faster-whisper small`。工作流中断后从用户自己 Notion 里的私有检查点继续。
+手动运行一次 `Process Episode AI` 验收。验收完成后，元数据每天 UTC+8 08:17
+执行一次受限增量同步，AI 队列每两小时最多处理 2 期。听悟 Cookie 明确失效时
+自动降级到 SiliconFlow；如果两条远程通道都不可用，最后才在 GitHub Actions
+CPU 上运行本地 `faster-whisper small`。工作流中断后从用户自己 Notion 里的
+私有检查点继续。
 
 只有满足以下条件的单集才会进入 AI 队列：
 
@@ -61,9 +62,10 @@ SiliconFlow；如果两条远程通道都不可用，最后才在 GitHub Actions
 
 ## 项目状态
 
-当前安全版本默认暂停小宇宙定时任务和全量历史统计重建。元数据同步采用最新
-25 条的小批量增量，并有每次运行 20 请求、请求间隔 3 秒及 401/403/429
-立即熔断保护。历史统计保留在 Notion 中，待改为完全基于 Notion 数据增量计算。
+当前安全版本每天 UTC+8 08:17 执行一次小宇宙受限增量同步，并继续暂停全量历史
+统计重建。元数据同步采用最新 25 条的小批量增量，并有每次运行 20 请求、
+请求间隔 3 秒及 401/403/429 立即熔断保护。历史统计保留在 Notion 中，
+待改为完全基于 Notion 数据增量计算。
 
 封面外链失效或旧版已发布页面缺少独立脑图记录时，使用
 `Xyz2Notion Notion-only Repair`。该工作流只读取 `NOTION_TOKEN` 和
