@@ -4,6 +4,7 @@ from typing import ClassVar
 import xyz2notion.cli as cli_module
 from xyz2notion import __version__
 from xyz2notion.cli import main
+from xyz2notion.models import ProviderErrorCategory, ProviderFailure
 from xyz2notion.orchestration.processor import ProcessingOutcome
 from xyz2notion.state import PipelineState
 
@@ -1240,6 +1241,124 @@ def test_published_ai_reconciliation_runs_notion_only(
     output = capsys.readouterr().out  # type: ignore[attr-defined]
     assert "transcripts=1" in output
     assert "mindmaps_created=1" in output
+
+
+def test_notion_backlog_audit_reports_only_aggregate_counts(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "secret_fixture_token")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+
+    def episode(
+        eid: str,
+        *,
+        played: int = 0,
+        status: str = "待处理",
+        playlist: bool = False,
+    ) -> dict[str, object]:
+        return {
+            "id": f"page-{eid}",
+            "properties": {
+                "Name": {"title": [{"plain_text": f"private-{eid}"}]},
+                "EID": {"rich_text": [{"plain_text": eid}]},
+                "Audio URL": {"url": f"https://audio.example/{eid}.mp3"},
+                "Played Seconds": {"number": played},
+                "Favorited": {"checkbox": False},
+                "Liked": {"checkbox": False},
+                "In Playlist": {"checkbox": playlist},
+                "Skip AI": {"checkbox": False},
+                "ASR Status": {"select": {"name": status}},
+            },
+        }
+
+    episodes = [
+        episode("normal", played=300),
+        episode("protected-zero", playlist=True),
+        episode("legacy-zero"),
+        episode("final", played=300, status="最终失败"),
+        episode("retry", played=300, status="可重试失败"),
+    ]
+    podcasts = [
+        {
+            "id": "external",
+            "properties": {
+                "Cover": {
+                    "files": [
+                        {
+                            "type": "external",
+                            "external": {"url": "https://image.example/cover.jpg"},
+                        }
+                    ]
+                }
+            },
+        },
+        {
+            "id": "notion",
+            "properties": {
+                "Cover": {
+                    "files": [
+                        {
+                            "type": "file",
+                            "file": {"url": "https://notion.example/cover.jpg"},
+                        }
+                    ]
+                }
+            },
+        },
+        {"id": "missing", "properties": {"Cover": {"files": []}}},
+    ]
+
+    class FakeNotion(FakeContextClient):
+        def query_data_source(self, source: str) -> list[dict[str, object]]:
+            return episodes if source == "episodes" else podcasts
+
+    class FakeInitializer:
+        def __init__(self, _api: object, page_id: str) -> None:
+            assert page_id == "fixture-page"
+
+        def discover_existing_resources(self) -> dict[str, object]:
+            return {
+                "episode": SimpleNamespace(data_source_id="episodes"),
+                "podcast": SimpleNamespace(data_source_id="podcasts"),
+            }
+
+    class FakeStore:
+        def __init__(self, _api: object) -> None:
+            pass
+
+        def __enter__(self) -> "FakeStore":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            pass
+
+        def load(self, _page: object, eid: str) -> object:
+            assert eid == "final"
+            failure = ProviderFailure(
+                provider="local_whisper",
+                category=ProviderErrorCategory.UNSUPPORTED,
+                message="safe fixture failure",
+            )
+            return SimpleNamespace(record=SimpleNamespace(failure=failure))
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionEpisodeStateStore", FakeStore)  # type: ignore[attr-defined]
+
+    assert main(["audit-notion-backlog"]) == 0
+    output = capsys.readouterr().out  # type: ignore[attr-defined]
+    assert "normal_ai_candidates=1" in output
+    assert "retry_ai_candidates=1" in output
+    assert "local_whisper:unsupported=1" in output
+    assert "zero_play_total=2" in output
+    assert "zero_play_protected=1" in output
+    assert "legacy_zero_play=1" in output
+    assert "external_covers=1" in output
+    assert "notion_covers=1" in output
+    assert "missing_covers=1" in output
+    assert "private-" not in output
+    assert "safe fixture failure" not in output
 
 
 def test_migration_dry_run_reports_only_counts(

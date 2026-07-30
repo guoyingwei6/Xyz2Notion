@@ -175,6 +175,11 @@ def build_parser() -> argparse.ArgumentParser:
     reconcile_ai.add_argument("--limit", type=int, default=2)
     reconcile_ai.add_argument("--confirm", required=True)
     reconcile_ai.add_argument("--page-id")
+    audit_backlog = subparsers.add_parser(
+        "audit-notion-backlog",
+        help="report aggregate AI, cover, and zero-play backlog counts without changes",
+    )
+    audit_backlog.add_argument("--page-id")
     migrate = subparsers.add_parser(
         "migrate",
         help="adopt and map a legacy Podcast2Notion template in place",
@@ -410,6 +415,140 @@ def _run_published_ai_reconciliation(args: argparse.Namespace) -> int:
         f"mindmaps_updated={report.mindmaps_updated}; "
         f"mindmaps_unchanged={report.mindmaps_unchanged}; "
         f"incomplete={report.incomplete})"
+    )
+    return 0
+
+
+def _notion_property_text(properties: Mapping[str, object], name: str) -> str:
+    value = properties.get(name)
+    if not isinstance(value, Mapping):
+        return ""
+    items = value.get("rich_text") or value.get("title")
+    if not isinstance(items, list):
+        return ""
+    parts: list[str] = []
+    for item in items:
+        if not isinstance(item, Mapping):
+            continue
+        plain_text = item.get("plain_text")
+        if isinstance(plain_text, str):
+            parts.append(plain_text)
+            continue
+        text = item.get("text")
+        if isinstance(text, Mapping) and isinstance(text.get("content"), str):
+            parts.append(str(text["content"]))
+    return "".join(parts)
+
+
+def _notion_property_number(properties: Mapping[str, object], name: str) -> float:
+    value = properties.get(name)
+    if not isinstance(value, Mapping):
+        return 0
+    number = value.get("number")
+    return float(number) if isinstance(number, int | float) else 0
+
+
+def _notion_property_checkbox(properties: Mapping[str, object], name: str) -> bool:
+    value = properties.get(name)
+    return bool(value.get("checkbox")) if isinstance(value, Mapping) else False
+
+
+def _cover_storage_kind(properties: Mapping[str, object]) -> str:
+    value = properties.get("Cover")
+    if not isinstance(value, Mapping):
+        return "missing"
+    files = value.get("files")
+    if not isinstance(files, list) or not files or not isinstance(files[0], Mapping):
+        return "missing"
+    return "external" if files[0].get("type") == "external" else "notion"
+
+
+def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
+    """Read aggregate cleanup and AI status without exposing Episode identity."""
+    try:
+        token, page_id = _notion_runtime(args)
+        with NotionClient(token) as notion:
+            resources = NotionInitializer(notion, page_id).discover_existing_resources()
+            episode_resource = resources.get("episode")
+            podcast_resource = resources.get("podcast")
+            if episode_resource is None or podcast_resource is None:
+                raise NotionAPIError("Required Xyz2Notion databases were not found")
+            episodes = notion.query_data_source(episode_resource.data_source_id)
+            podcasts = notion.query_data_source(podcast_resource.data_source_id)
+
+            normal_candidates = episode_candidates(_eligible_ai_pages(episodes, retry_failed=False))
+            retry_candidates = episode_candidates(_eligible_ai_pages(episodes, retry_failed=True))
+            statuses = Counter(_episode_asr_status(page) or "未设置" for page in episodes)
+            final_pages = [page for page in episodes if _episode_asr_status(page) == "最终失败"]
+            failure_categories: Counter[str] = Counter()
+            with NotionEpisodeStateStore(notion) as state_store:
+                for page in final_pages:
+                    properties = page.get("properties")
+                    if not isinstance(properties, Mapping):
+                        failure_categories["state_unreadable"] += 1
+                        continue
+                    eid = _notion_property_text(properties, "EID")
+                    if not eid:
+                        failure_categories["state_unreadable"] += 1
+                        continue
+                    try:
+                        state = state_store.load(page, eid)
+                    except NotionAPIError:
+                        failure_categories["state_unreadable"] += 1
+                        continue
+                    failure = state.record.failure
+                    if failure is None:
+                        failure_categories["state_missing_failure"] += 1
+                    else:
+                        failure_categories[f"{failure.provider}:{failure.category.value}"] += 1
+
+            zero_play_total = protected_zero_play = legacy_zero_play = 0
+            for page in episodes:
+                properties = page.get("properties")
+                if not isinstance(properties, Mapping):
+                    continue
+                if _notion_property_number(properties, "Played Seconds") > 0:
+                    continue
+                zero_play_total += 1
+                status = _episode_asr_status(page)
+                protected = (
+                    _notion_property_checkbox(properties, "In Playlist")
+                    or _notion_property_checkbox(properties, "Favorited")
+                    or _notion_property_checkbox(properties, "Liked")
+                    or status not in {"", "待处理"}
+                )
+                if protected:
+                    protected_zero_play += 1
+                else:
+                    legacy_zero_play += 1
+
+            cover_kinds = Counter(
+                _cover_storage_kind(properties)
+                for page in podcasts
+                if isinstance((properties := page.get("properties")), Mapping)
+            )
+    except (ConfigurationError, MissingCredentialError) as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    except NotionAPIError as exc:
+        print(f"Notion error: {exc}", file=sys.stderr)
+        return 4
+
+    status_summary = ", ".join(f"{name}={statuses[name]}" for name in sorted(statuses)) or "none=0"
+    failure_summary = (
+        ", ".join(f"{name}={failure_categories[name]}" for name in sorted(failure_categories))
+        or "none=0"
+    )
+    print(
+        "Notion backlog audit OK "
+        f"(episodes={len(episodes)}; normal_ai_candidates={len(normal_candidates)}; "
+        f"retry_ai_candidates={len(retry_candidates)}; statuses: {status_summary}; "
+        f"final_failure_categories: {failure_summary}; "
+        f"zero_play_total={zero_play_total}; "
+        f"zero_play_protected={protected_zero_play}; "
+        f"legacy_zero_play={legacy_zero_play}; "
+        f"podcasts={len(podcasts)}; external_covers={cover_kinds['external']}; "
+        f"notion_covers={cover_kinds['notion']}; missing_covers={cover_kinds['missing']})"
     )
     return 0
 
@@ -1020,6 +1159,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_cover_repair(args)
     if args.command == "reconcile-published-ai":
         return _run_published_ai_reconciliation(args)
+    if args.command == "audit-notion-backlog":
+        return _run_notion_backlog_audit(args)
     if args.command == "migrate":
         return _run_migration(args)
     if args.command == "redo-episode":

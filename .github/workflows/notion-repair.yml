@@ -8,6 +8,7 @@ on:
         required: true
         type: choice
         options:
+          - audit-backlog
           - repair-covers
           - reconcile-published-ai
       limit:
@@ -55,6 +56,9 @@ jobs:
         run: |
           set -euo pipefail
           case "$OPERATION" in
+            audit-backlog)
+              result="$(uv run xyz2notion audit-notion-backlog)"
+              ;;
             repair-covers)
               result="$(uv run xyz2notion repair-notion-covers \
                 --limit "$LIMIT" --confirm "$CONFIRMATION")"

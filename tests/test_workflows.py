@@ -143,3 +143,12 @@ def test_all_notion_writers_share_one_concurrency_group() -> None:
     ):
         text, _workflow_data = _workflow(name)
         assert "group: xyz2notion-runtime" in text
+
+
+def test_notion_repair_supports_read_only_backlog_audit() -> None:
+    text, workflow = _workflow("notion-repair.yml")
+    dispatch = workflow[True]["workflow_dispatch"]  # type: ignore[index,operator]
+    options = dispatch["inputs"]["operation"]["options"]  # type: ignore[index]
+    assert "audit-backlog" in options
+    assert "uv run xyz2notion audit-notion-backlog" in text
+    assert "XIAOYUZHOU_REFRESH_TOKEN" not in text

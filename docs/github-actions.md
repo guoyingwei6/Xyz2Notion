@@ -64,6 +64,7 @@ ASR 和免费文本模型。项目只接受代码已核对的免费模型白名�
 | `Process Episode AI` | 每 2 小时 + 手动 | 每次最多推进 2 期 ASR、摘要和发布状态机 |
 | `Retry Failed Episode AI` | 每日 + 手动 | 每次最多恢复 2 个 `FAILED_RETRYABLE` 单集，累计重试 3 次后停止 |
 | `Xyz2Notion Maintenance` | 手动 | 迁移、单集重做、统计或热力图重建 |
+| `Xyz2Notion Notion-only Repair` | 手动 | 只读盘点 AI/封面/零播放存量，或分批修复封面与已发布脑图 |
 
 元数据工作流不含 `schedule`，输入 `RUN_SAFE_INCREMENTAL_SYNC` 才能启动；
 仓库所有会写入 Notion 的工作流共用
