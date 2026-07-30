@@ -254,6 +254,17 @@ def _eligible_ai_pages(
     return [page for page in pages if (_episode_asr_status(page) == "可重试失败") is retry_failed]
 
 
+def _ai_page_priority(page: Mapping[str, object]) -> int:
+    """Finish persisted checkpoints before starting new ASR work."""
+    return {
+        "已增强": 0,
+        "已转写": 1,
+        "转写中": 2,
+        "排队中": 3,
+        "待处理": 4,
+    }.get(_episode_asr_status(page), 5)
+
+
 def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
     try:
         config = load_config(args.config)
@@ -286,7 +297,10 @@ def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
                 initialization.resources["episode"].data_source_id,
                 {"page_size": 100},
             )
-            eligible_pages = _eligible_ai_pages(pages, retry_failed=retry_failed)
+            eligible_pages = sorted(
+                _eligible_ai_pages(pages, retry_failed=retry_failed),
+                key=_ai_page_priority,
+            )
             candidates = episode_candidates(eligible_pages)[: config.limits.episodes_per_run]
             tingwu, siliconflow, local_whisper, summary_client = build_provider_clients(
                 tingwu_cookie=tingwu_cookie,

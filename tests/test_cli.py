@@ -1024,6 +1024,22 @@ def test_ai_pages_are_filtered_before_the_per_run_limit() -> None:
     assert cli_module._eligible_ai_pages(pages, retry_failed=True)[:1] == [retryable]  # type: ignore[attr-defined]
 
 
+def test_ai_pages_prioritize_persisted_checkpoints() -> None:
+    pages = [
+        {"properties": {"ASR Status": {"select": {"name": "待处理"}}}},
+        {"properties": {"ASR Status": {"select": {"name": "排队中"}}}},
+        {"properties": {"ASR Status": {"select": {"name": "已转写"}}}},
+        {"properties": {"ASR Status": {"select": {"name": "已增强"}}}},
+    ]
+    ordered = sorted(pages, key=cli_module._ai_page_priority)  # type: ignore[attr-defined]
+    assert [cli_module._episode_asr_status(page) for page in ordered] == [  # type: ignore[attr-defined]
+        "已增强",
+        "已转写",
+        "排队中",
+        "待处理",
+    ]
+
+
 def test_notion_cover_repair_requires_limit_bound_confirmation(
     capsys: object,
 ) -> None:
