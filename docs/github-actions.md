@@ -44,9 +44,10 @@ OAuth 回调或作者生成的 Token。
 
 ### 通义听悟 Cookie
 
-登录 `https://tingwu.aliyun.com/` 后，从浏览器开发者工具中复制该站点请求使用的
-完整 `Cookie` 请求头值并填入 `TINGWU_COOKIE`。Cookie 会过期，而且网页内部接口
-可能变化；它只被发送到允许的阿里域名。详细边界见
+登录 `https://tingwu.aliyun.com/` 并进入“我的记录”后，从浏览器开发者工具中
+找到 `/api/directory/request?getDirList&c=web` 请求，复制其完整 `Cookie` 请求头值并
+填入 `TINGWU_COOKIE`。Cookie 会过期，而且网页内部接口可能变化；它只被发送到
+`tingwu.aliyun.com`。详细边界见
 [听悟 Cookie Provider](tingwu-cookie.md)。
 
 ### SiliconFlow

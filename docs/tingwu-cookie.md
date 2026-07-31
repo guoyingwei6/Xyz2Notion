@@ -12,15 +12,19 @@ Xyz2Notion 作者服务器，也不把 Cookie 保存到 Notion、仓库、缓存
 
 GitHub Secret 名为 `TINGWU_COOKIE`。运行时只允许把该 Cookie 发送到：
 
-- `qianwen.biz.aliyun.com`
-- `tw-efficiency.biz.aliyun.com`
+- `tingwu.aliyun.com`
 
-客户端会在附加请求头前再次校验 HTTPS 和精确主机名。Cookie 不会发往小宇宙、
-Notion、SiliconFlow、`malinkang.com`、`notionhub.app` 或任意重定向目标。异常只
-保留安全错误类别和 HTTP 状态码，不记录响应正文或请求头。
+客户端使用当前网页的同源 `/api` 接口，并在附加请求头前再次校验 HTTPS 和精确
+主机名。旧的 `qianwen.biz.aliyun.com` 与 `tw-efficiency.biz.aliyun.com`
+已从允许列表移除。Cookie 不会发往小宇宙、Notion、SiliconFlow、
+`malinkang.com`、`notionhub.app` 或任意重定向目标。异常只保留安全错误类别和
+HTTP 状态码，不记录响应正文或请求头。
 
-Cookie 的网页获取方式可能随通义页面变化。不要把 Cookie 粘贴到 Issue、Actions
-输入、配置文件或日志，只放进仓库的 GitHub Actions Secret。
+Cookie 的网页获取方式可能随通义页面变化。打开听悟“我的记录”，在浏览器开发者
+工具的 Network → Fetch/XHR 中搜索 `getDirList` 或 `directory`，从
+`https://tingwu.aliyun.com/api/directory/request?getDirList&c=web` 请求标头复制完整
+`Cookie` 值。不要包含 `Cookie:` 前缀，也不要把值粘贴到 Issue、Actions 输入、
+配置文件、日志或聊天，只放进仓库的 GitHub Actions Secret。
 
 ## 可恢复任务
 

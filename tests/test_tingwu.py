@@ -32,7 +32,7 @@ COOKIE = "fixture_session=secret-cookie-value"
 
 
 def ok(data: object) -> httpx.Response:
-    return httpx.Response(200, json={"success": True, "data": data})
+    return httpx.Response(200, json={"code": "0", "success": True, "data": data})
 
 
 def client_for(
@@ -59,30 +59,52 @@ def test_complete_submission_result_and_idempotency_contract() -> None:
         nonlocal directory_created, submitted
         seen_hosts.add(request.url.host)
         assert request.headers["Cookie"] == COOKIE
-        assert request.headers["X-Tw-From"] == "tongyi"
+        assert request.headers["Origin"] == "https://tingwu.aliyun.com"
+        assert request.headers["Referer"] == "https://tingwu.aliyun.com/"
         url = str(request.url)
         payload = json.loads(request.content) if request.content else {}
         if url == DIRECTORY_LIST_URL:
-            data = [{"dir": {"dirName": "播客", "idStr": "dir-1"}}] if directory_created else []
+            assert payload == {
+                "action": "getDirList",
+                "version": "1.0",
+                "returnDetails": True,
+            }
+            data = [{"dirName": "播客", "dirId": "dir-1"}] if directory_created else []
             return ok(data)
         if url == DIRECTORY_ADD_URL:
-            assert payload == {"dirName": "播客", "parentIdStr": -1}
+            assert payload == {
+                "action": "addDir",
+                "version": "1.0",
+                "dirName": "播客",
+                "parentDirId": -1,
+                "returnNewList": 1,
+            }
             directory_created = True
-            return ok({"focusDir": {"idStr": "dir-1"}})
+            return ok(
+                {
+                    "dirList": [{"dirName": "播客", "dirId": "dir-1"}],
+                    "focusDir": {"dirName": "播客", "dirId": "dir-1"},
+                }
+            )
         if url == RECORD_LIST_URL:
             records = (
-                [{"showName": "单集", "genRecordId": "record-1", "status": 30}] if submitted else []
+                [{"tag": {"showName": "单集"}, "transId": "record-1", "status": 0}]
+                if submitted
+                else []
             )
-            return ok({"batchRecord": [{"recordList": records}]})
+            assert payload["action"] == "getTransList"
+            assert payload["filter"]["showName"] == "单集"
+            return ok(records)
         if url == PARSE_SOURCE_URL:
             assert payload["url"] == "https://cdn.example/episode.mp3"
             return ok({"taskId": "source-1"})
         if url == QUERY_SOURCE_URL:
             return ok({"status": 0, "urls": [{"fileId": "file-1", "size": 123}]})
         if url == RECORD_START_URL:
+            assert payload["action"] == "putNetSourceUrl"
             assert payload["files"][0]["tag"]["showName"] == "单集"
             submitted = True
-            return ok({"genRecordIdList": ["record-1"]})
+            return ok({"transIds": ["record-1"]})
         if url == TRANSCRIPT_URL:
             return ok(
                 {
@@ -196,7 +218,7 @@ def test_complete_submission_result_and_idempotency_contract() -> None:
     assert enrichment.questions == ("问题?\n回答。",)
     assert enrichment.mindmap == {"content": "主题", "children": []}
     assert client.get_note(existing.provider_task_id).content == [["span", {}, "笔记"]]
-    assert seen_hosts == {"qianwen.biz.aliyun.com", "tw-efficiency.biz.aliyun.com"}
+    assert seen_hosts == {"tingwu.aliyun.com"}
 
 
 def test_source_parse_checkpoint_resumes_without_duplicate_parse() -> None:
@@ -256,7 +278,7 @@ def test_parse_poll_can_wait_then_submit() -> None:
     assert sleeps == [1]
 
 
-@pytest.mark.parametrize("status", [40, 41])
+@pytest.mark.parametrize("status", [2, 11, 20, 21, 22, 40, 41])
 def test_record_terminal_failure_is_returned_without_resubmission(status: int) -> None:
     def handle(request: httpx.Request) -> httpx.Response:
         if str(request.url) == DIRECTORY_LIST_URL:
@@ -272,6 +294,15 @@ def test_record_terminal_failure_is_returned_without_resubmission(status: int) -
     task = client_for(handle).submit_episode("p", "e", "https://cdn.example/audio")
     assert task.state is TingwuTaskState.FAILED
     assert task.record_status == status
+
+
+def test_record_without_matching_title_is_not_reused() -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == RECORD_LIST_URL:
+            return ok([{"transId": "other-record", "status": 1}])
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    assert client_for(handle).find_record("dir-1", "target-title") is None
 
 
 def test_retry_after_and_transient_exhaustion_are_safe() -> None:
@@ -308,6 +339,13 @@ def test_retry_after_and_transient_exhaustion_are_safe() -> None:
             httpx.Response(
                 200,
                 json={"success": False, "errorMsg": "please login", "errorCode": "AUTH"},
+            ),
+            ProviderErrorCategory.AUTHENTICATION,
+        ),
+        (
+            httpx.Response(
+                200,
+                json={"success": False, "message": "Not login.", "code": "CMN.NotLogin"},
             ),
             ProviderErrorCategory.AUTHENTICATION,
         ),
@@ -452,8 +490,16 @@ def test_source_rejected_and_submission_shape() -> None:
     assert state is TingwuTaskState.FAILED
     assert files == []
 
-    with pytest.raises(ProviderError):
-        client_for(lambda _request: ok({"genRecordIdList": []})).start_record("d", "e", [])
+    submitted = client_for(
+        lambda _request: httpx.Response(200, json={"code": "0", "success": True})
+    ).start_record(
+        "d",
+        "e",
+        [],
+        source_task_id="source",
+    )
+    assert submitted.provider_task_id == "source"
+    assert submitted.source_task_id == "source"
 
     sequence = iter(
         [

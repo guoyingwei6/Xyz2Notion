@@ -28,17 +28,17 @@ from xyz2notion.models import (
 )
 from xyz2notion.security import CredentialKind, validate_credential_destination
 
-QIANWEN_BASE = "https://qianwen.biz.aliyun.com"
-TINGWU_BASE = "https://tw-efficiency.biz.aliyun.com"
-DIRECTORY_LIST_URL = f"{QIANWEN_BASE}/assistant/api/record/dir/list/get?c=tongyi-web"
-DIRECTORY_ADD_URL = f"{QIANWEN_BASE}/assistant/api/record/dir/add?c=tongyi-web"
-RECORD_LIST_URL = f"{QIANWEN_BASE}/assistant/api/record/list?c=tongyi-web"
-RECORD_START_URL = f"{QIANWEN_BASE}/assistant/api/record/blog/start?c=tongyi-web"
-PARSE_SOURCE_URL = f"{TINGWU_BASE}/api/trans/parseNetSourceUrl?c=tongyi-web"
-QUERY_SOURCE_URL = f"{TINGWU_BASE}/api/trans/queryNetSourceParse?c=tongyi-web"
-TRANSCRIPT_URL = f"{TINGWU_BASE}/api/trans/getTransResult?c=tongyi-web"
-LAB_URL = f"{TINGWU_BASE}/api/lab/getAllLabInfo?c=tongyi-web"
-NOTE_URL = f"{TINGWU_BASE}/api/doc/getTransDocEdit?c=tongyi-web"
+TINGWU_ORIGIN = "https://tingwu.aliyun.com"
+TINGWU_API = f"{TINGWU_ORIGIN}/api"
+DIRECTORY_LIST_URL = f"{TINGWU_API}/directory/request?getDirList&c=web"
+DIRECTORY_ADD_URL = f"{TINGWU_API}/directory/request?addDir&c=web"
+RECORD_LIST_URL = f"{TINGWU_API}/trans/request?getTransList&c=web"
+RECORD_START_URL = f"{TINGWU_API}/trans/request?c=web"
+PARSE_SOURCE_URL = f"{TINGWU_API}/trans/parseNetSourceUrl?c=web"
+QUERY_SOURCE_URL = f"{TINGWU_API}/trans/queryNetSourceParse?c=web"
+TRANSCRIPT_URL = f"{TINGWU_API}/trans/getTransResult?c=web"
+LAB_URL = f"{TINGWU_API}/lab/getAllLabInfo?c=web"
+NOTE_URL = f"{TINGWU_API}/doc/getTransDocEdit?c=web"
 
 
 class TingwuTaskState(StrEnum):
@@ -169,10 +169,9 @@ class TingwuClient:
             "Accept": "application/json, text/plain, */*",
             "Content-Type": "application/json",
             "Cookie": secret,
-            "Origin": "https://tongyi.aliyun.com",
-            "Referer": "https://tongyi.aliyun.com/",
-            "User-Agent": "Mozilla/5.0 Xyz2Notion/0.1",
-            "X-Tw-From": "tongyi",
+            "Origin": TINGWU_ORIGIN,
+            "Referer": f"{TINGWU_ORIGIN}/",
+            "User-Agent": "Mozilla/5.0 Xyz2Notion/0.2",
         }
         self._owns_client = client is None
         self._client = client or httpx.Client(timeout=timeout_seconds)
@@ -280,15 +279,40 @@ class TingwuClient:
                     )
                 ) from exc
             result = _mapping(decoded, "response root")
-            if result.get("success") is False:
-                code = str(result.get("errorCode") or result.get("code") or "rejected")
-                hint = str(result.get("errorMsg") or result.get("message") or "").lower()
-                if any(word in hint for word in ("login", "cookie", "expired", "登录", "过期")):
+            raw_code = result.get("errorCode") or result.get("code")
+            code = str(raw_code) if raw_code is not None else ""
+            explicit_success = result.get("success")
+            accepted = explicit_success is True or code == "0"
+            rejected = explicit_success is False or (bool(code) and code != "0")
+            if rejected and not accepted:
+                hint = " ".join(
+                    str(value)
+                    for value in (
+                        code,
+                        result.get("errorMsg"),
+                        result.get("message"),
+                        result.get("msg"),
+                    )
+                    if value is not None
+                ).lower()
+                if any(
+                    word in hint
+                    for word in (
+                        "login",
+                        "cookie",
+                        "expired",
+                        "notlogin",
+                        "not.login",
+                        "登录",
+                        "未登录",
+                        "过期",
+                    )
+                ):
                     raise self._open_circuit(
                         _failure(
                             ProviderErrorCategory.AUTHENTICATION,
                             "Tingwu Cookie expired; refresh TINGWU_COOKIE",
-                            code=code,
+                            code=code or "rejected",
                         )
                     )
                 if any(
@@ -298,13 +322,13 @@ class TingwuClient:
                         _failure(
                             ProviderErrorCategory.RISK_CONTROL,
                             "Tingwu web access was blocked by account risk control",
-                            code=code,
+                            code=code or "rejected",
                         )
                     )
                 raise _failure(
                     ProviderErrorCategory.UNKNOWN,
                     "Tingwu rejected the request",
-                    code=code,
+                    code=code or "rejected",
                 )
             return result
         raise AssertionError("unreachable retry loop")
@@ -324,13 +348,17 @@ class TingwuClient:
         return True
 
     def list_directories(self) -> dict[str, str]:
-        response = self._post(DIRECTORY_LIST_URL)
+        response = self._post(
+            DIRECTORY_LIST_URL,
+            {"action": "getDirList", "version": "1.0", "returnDetails": True},
+        )
         entries = _sequence(self._data(response, "directories"), "directories")
         directories: dict[str, str] = {}
         for entry in entries:
-            directory = _mapping(_mapping(entry, "directory entry").get("dir"), "directory")
+            wrapper = _mapping(entry, "directory entry")
+            directory = _mapping(wrapper.get("dir"), "directory") if "dir" in wrapper else wrapper
             name = directory.get("dirName")
-            identifier = directory.get("idStr") or directory.get("id")
+            identifier = directory.get("dirId") or directory.get("idStr") or directory.get("id")
             if isinstance(name, str) and name and identifier is not None:
                 directories[name] = str(identifier)
         return directories
@@ -340,11 +368,17 @@ class TingwuClient:
             raise ValueError("Tingwu directory name cannot be empty")
         response = self._post(
             DIRECTORY_ADD_URL,
-            {"dirName": name.strip(), "parentIdStr": -1},
+            {
+                "action": "addDir",
+                "version": "1.0",
+                "dirName": name.strip(),
+                "parentDirId": -1,
+                "returnNewList": 1,
+            },
         )
         data = _mapping(self._data(response, "created directory"), "created directory")
         focus = _mapping(data.get("focusDir"), "created directory focus")
-        identifier = focus.get("idStr") or focus.get("id")
+        identifier = focus.get("dirId") or focus.get("idStr") or focus.get("id")
         if identifier is None:
             raise self._open_circuit(
                 _failure(
@@ -361,25 +395,40 @@ class TingwuClient:
         response = self._post(
             RECORD_LIST_URL,
             {
-                "dirIdStr": directory_id,
+                "action": "getTransList",
+                "version": "1.0",
+                "userId": "",
+                "filter": {
+                    "status": [0, 1, 2, 3, 4, 11],
+                    "showName": title,
+                    "dirId": directory_id,
+                },
+                "preview": 0,
                 "pageNo": 1,
                 "pageSize": 12,
-                "status": [20, 30, 40, 41],
-                "showName": title,
             },
         )
-        data = _mapping(self._data(response, "record list"), "record list")
-        batches = _sequence(data.get("batchRecord", []), "record batches")
-        for batch in batches:
-            records = _sequence(
-                _mapping(batch, "record batch").get("recordList", []),
-                "records",
-            )
-            for record in records:
-                item = _mapping(record, "record")
-                show_name = item.get("showName") or item.get("title")
-                if show_name in {None, title}:
-                    return item
+        raw_data = self._data(response, "record list")
+        if isinstance(raw_data, list):
+            records: Sequence[Any] = raw_data
+        else:
+            data = _mapping(raw_data, "record list")
+            batches = _sequence(data.get("batchRecord", []), "record batches")
+            flattened: list[Any] = []
+            for batch in batches:
+                flattened.extend(
+                    _sequence(
+                        _mapping(batch, "record batch").get("recordList", []),
+                        "records",
+                    )
+                )
+            records = flattened
+        for record in records:
+            item = _mapping(record, "record")
+            tag = _mapping(item.get("tag", {}), "record tag")
+            show_name = item.get("showName") or item.get("title") or tag.get("showName")
+            if show_name == title:
+                return item
         return None
 
     def task_from_record(
@@ -389,7 +438,12 @@ class TingwuClient:
         directory_id: str,
         title: str,
     ) -> TingwuTask:
-        identifier = record.get("genRecordId") or record.get("transId") or record.get("id")
+        identifier = (
+            record.get("genRecordId")
+            or record.get("transId")
+            or record.get("taskId")
+            or record.get("id")
+        )
         if identifier is None:
             raise self._open_circuit(
                 _failure(
@@ -401,13 +455,16 @@ class TingwuClient:
         try:
             status = int(str(raw_status))
         except (TypeError, ValueError):
-            status = 20
-        state = {
-            20: TingwuTaskState.PROCESSING,
-            30: TingwuTaskState.SUCCEEDED,
-            40: TingwuTaskState.FAILED,
-            41: TingwuTaskState.FAILED,
-        }.get(status, TingwuTaskState.PROCESSING)
+            status = None
+        state = (
+            TingwuTaskState.SUCCEEDED
+            if status in {0, 30}
+            else (
+                TingwuTaskState.FAILED
+                if status in {2, 11, 20, 21, 22, 40, 41}
+                else TingwuTaskState.PROCESSING
+            )
+        )
         return TingwuTask(
             provider_task_id=str(identifier),
             state=state,
@@ -504,31 +561,40 @@ class TingwuClient:
         directory_id: str,
         title: str,
         files: Sequence[Mapping[str, object]],
+        *,
+        source_task_id: str,
     ) -> TingwuTask:
         response = self._post(
             RECORD_START_URL,
             {
-                "dirIdStr": directory_id,
+                "action": "putNetSourceUrl",
+                "version": "1.0",
                 "files": list(files),
-                "taskType": "net_source",
-                "bizTerminal": "web",
             },
         )
-        data = _mapping(self._data(response, "record submission"), "record submission")
-        identifiers = _sequence(data.get("genRecordIdList"), "submitted record IDs")
-        if len(identifiers) != 1 or identifiers[0] is None:
-            raise self._open_circuit(
-                _failure(
-                    ProviderErrorCategory.SCHEMA_CHANGED,
-                    "Tingwu record submission returned an unexpected task list",
-                )
-            )
+        # The current web client only checks the top-level ``success`` flag for
+        # this endpoint; successful responses do not guarantee a ``data`` key.
+        data = response.get("data")
+        identifiers: list[object] = []
+        if isinstance(data, Mapping):
+            for key in ("genRecordIdList", "transIds", "transIdList", "taskIds"):
+                value = data.get(key)
+                if isinstance(value, list):
+                    identifiers.extend(value)
+            for key in ("genRecordId", "transId", "taskId", "id"):
+                value = data.get(key)
+                if value is not None:
+                    identifiers.append(value)
+        elif isinstance(data, list):
+            identifiers.extend(data)
+        identifier = next((value for value in identifiers if value is not None), source_task_id)
         return TingwuTask(
-            provider_task_id=str(identifiers[0]),
+            provider_task_id=str(identifier),
             state=TingwuTaskState.SUBMITTED,
             directory_id=directory_id,
             title=title,
             record_status=20,
+            source_task_id=source_task_id,
         )
 
     def submit_episode(
@@ -555,8 +621,12 @@ class TingwuClient:
                 title=title,
             )
             if state is TingwuTaskState.SUBMITTED:
-                task = self.start_record(directory_id, title, files)
-                return task.model_copy(update={"source_task_id": parser_id})
+                return self.start_record(
+                    directory_id,
+                    title,
+                    files,
+                    source_task_id=parser_id,
+                )
             if state is TingwuTaskState.FAILED:
                 raise _failure(
                     ProviderErrorCategory.INVALID_INPUT,

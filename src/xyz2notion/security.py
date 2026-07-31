@@ -26,12 +26,7 @@ _ALLOWED_HOSTS: Mapping[CredentialKind, frozenset[str]] = MappingProxyType(
     {
         CredentialKind.XIAOYUZHOU: frozenset({"api.xiaoyuzhoufm.com"}),
         CredentialKind.NOTION: frozenset({"api.notion.com"}),
-        CredentialKind.TINGWU_COOKIE: frozenset(
-            {
-                "qianwen.biz.aliyun.com",
-                "tw-efficiency.biz.aliyun.com",
-            }
-        ),
+        CredentialKind.TINGWU_COOKIE: frozenset({"tingwu.aliyun.com"}),
         CredentialKind.SILICONFLOW: frozenset({"api.siliconflow.cn"}),
     }
 )

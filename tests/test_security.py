@@ -14,8 +14,7 @@ from xyz2notion.security import (
     [
         (CredentialKind.XIAOYUZHOU, "https://api.xiaoyuzhoufm.com/app/v1/test"),
         (CredentialKind.NOTION, "https://api.notion.com/v1/pages"),
-        (CredentialKind.TINGWU_COOKIE, "https://qianwen.biz.aliyun.com/api/test"),
-        (CredentialKind.TINGWU_COOKIE, "https://tw-efficiency.biz.aliyun.com/api/test"),
+        (CredentialKind.TINGWU_COOKIE, "https://tingwu.aliyun.com/api/test"),
         (CredentialKind.SILICONFLOW, "https://api.siliconflow.cn/v1/audio/transcriptions"),
         (CredentialKind.SILICONFLOW, "https://api.siliconflow.cn/v1/chat/completions"),
     ],
@@ -35,6 +34,8 @@ def test_allows_only_declared_service_hosts(kind: CredentialKind, url: str) -> N
         "https://malinkang.com/collect",
         "https://podcast.malinkang.com/collect",
         "https://api.notionhub.app/collect",
+        "https://qianwen.biz.aliyun.com/api/test",
+        "https://tw-efficiency.biz.aliyun.com/api/test",
     ],
 )
 def test_rejects_unsafe_xiaoyuzhou_credential_destinations(url: str) -> None:
