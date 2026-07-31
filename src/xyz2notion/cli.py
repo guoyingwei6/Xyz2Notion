@@ -591,6 +591,7 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
             statuses = Counter(_episode_asr_status(page) or "未设置" for page in episodes)
             asr_providers: Counter[str] = Counter()
             asr_models: Counter[str] = Counter()
+            tingwu_submission_checkpoints: Counter[str] = Counter()
             for page in episodes:
                 properties = page.get("properties")
                 if not isinstance(properties, Mapping):
@@ -601,6 +602,10 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
                     asr_providers[provider] += 1
                 if model:
                     asr_models[model] += 1
+                if provider == "tingwu_cookie":
+                    source_task_id = _notion_property_text(properties, "ASR Source Task ID")
+                    checkpoint_kind = "new_submission" if source_task_id else "existing_record"
+                    tingwu_submission_checkpoints[checkpoint_kind] += 1
             final_pages = [page for page in episodes if _episode_asr_status(page) == "最终失败"]
             failure_categories: Counter[str] = Counter()
             with NotionEpisodeStateStore(notion) as state_store:
@@ -668,6 +673,10 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
     model_summary = (
         ", ".join(f"{name}={asr_models[name]}" for name in sorted(asr_models)) or "none=0"
     )
+    tingwu_checkpoint_summary = ", ".join(
+        f"{name}={tingwu_submission_checkpoints[name]}"
+        for name in ("new_submission", "existing_record")
+    )
     print(
         "Notion backlog audit OK "
         f"(episodes={len(episodes)}; normal_ai_candidates={len(normal_candidates)}; "
@@ -675,6 +684,7 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
         f"statistics_total_seconds={total_seconds}; "
         f"statistics_baseline={'set' if baseline_version_set else 'unset'}; "
         f"asr_providers: {provider_summary}; asr_models: {model_summary}; "
+        f"tingwu_checkpoints: {tingwu_checkpoint_summary}; "
         f"final_failure_categories: {failure_summary}; "
         f"zero_play_total={zero_play_total}; "
         f"zero_play_protected={protected_zero_play}; "

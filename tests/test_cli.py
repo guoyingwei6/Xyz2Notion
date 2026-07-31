@@ -1509,6 +1509,7 @@ def test_notion_backlog_audit_reports_only_aggregate_counts(
     assert "statistics_baseline=unset" in output
     assert "asr_providers: siliconflow=1, tingwu_cookie=1" in output
     assert "asr_models: FunAudioLLM/SenseVoiceSmall=1, tingwu-web=1" in output
+    assert "tingwu_checkpoints: new_submission=0, existing_record=1" in output
     assert "local_whisper:unsupported=1" in output
     assert "zero_play_total=2" in output
     assert "zero_play_protected=1" in output
