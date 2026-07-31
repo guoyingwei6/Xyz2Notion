@@ -178,10 +178,16 @@ def build_parser() -> argparse.ArgumentParser:
             help="manually cap this run at one or two Episode candidates",
         )
         if name == "process-ai":
-            ai_command.add_argument(
+            checkpoint_group = ai_command.add_mutually_exclusive_group()
+            checkpoint_group.add_argument(
                 "--only-in-flight",
                 action="store_true",
                 help="advance only Episode rows already queued or transcribing",
+            )
+            checkpoint_group.add_argument(
+                "--only-transcribed",
+                action="store_true",
+                help="advance only Episode rows with a persisted transcript",
             )
     repair_covers = subparsers.add_parser(
         "repair-notion-covers",
@@ -209,6 +215,13 @@ def build_parser() -> argparse.ArgumentParser:
     reopen_timeline.add_argument("--limit", type=int, default=4)
     reopen_timeline.add_argument("--confirm", required=True)
     reopen_timeline.add_argument("--page-id")
+    reopen_summary = subparsers.add_parser(
+        "reopen-summary-failures",
+        help="resume bounded summary failures from persisted transcripts",
+    )
+    reopen_summary.add_argument("--limit", type=int, default=1)
+    reopen_summary.add_argument("--confirm", required=True)
+    reopen_summary.add_argument("--page-id")
     migrate = subparsers.add_parser(
         "migrate",
         help="adopt and map a legacy Podcast2Notion template in place",
@@ -291,6 +304,12 @@ def _in_flight_ai_pages[AIPage: Mapping[str, object]](
     return [page for page in pages if _episode_asr_status(page) in {"排队中", "转写中"}]
 
 
+def _transcribed_ai_pages[AIPage: Mapping[str, object]](
+    pages: Sequence[AIPage],
+) -> list[AIPage]:
+    return [page for page in pages if _episode_asr_status(page) == "已转写"]
+
+
 def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
     try:
         config = load_config(args.config)
@@ -329,6 +348,8 @@ def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
             )
             if getattr(args, "only_in_flight", False):
                 eligible_pages = _in_flight_ai_pages(eligible_pages)
+            if getattr(args, "only_transcribed", False):
+                eligible_pages = _transcribed_ai_pages(eligible_pages)
             run_limit = min(
                 args.limit or config.limits.episodes_per_run,
                 config.limits.episodes_per_run,
@@ -657,8 +678,13 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_reopen_timeline_failures(args: argparse.Namespace) -> int:
-    expected = f"REOPEN_{args.limit}_TIMELINE_FAILURES"
+def _run_reopen_summary_failures(
+    args: argparse.Namespace,
+    *,
+    allowed_reasons: frozenset[str],
+    confirmation_label: str,
+) -> int:
+    expected = f"REOPEN_{args.limit}_{confirmation_label}_FAILURES"
     if not 1 <= args.limit <= 10 or args.confirm != expected:
         print(
             f"Confirmation error: use --limit 1..10 and --confirm {expected}",
@@ -701,7 +727,7 @@ def _run_reopen_timeline_failures(args: argparse.Namespace) -> int:
                         state.record.state is not PipelineState.FAILED_FINAL
                         or failure is None
                         or failure.provider != "siliconflow_summary"
-                        or _safe_failure_reason_code(failure) != "timeline_constraints"
+                        or _safe_failure_reason_code(failure) not in allowed_reasons
                         or state.transcript is None
                         or state.summary is not None
                     ):
@@ -725,9 +751,25 @@ def _run_reopen_timeline_failures(args: argparse.Namespace) -> int:
         print(f"Notion error: {exc}", file=sys.stderr)
         return 4
     print(
-        f"Timeline failure recovery OK (limit={args.limit}; reopened={reopened}; skipped={skipped})"
+        f"Summary failure recovery OK (limit={args.limit}; reopened={reopened}; skipped={skipped})"
     )
     return 0
+
+
+def _run_reopen_timeline_failures(args: argparse.Namespace) -> int:
+    return _run_reopen_summary_failures(
+        args,
+        allowed_reasons=frozenset({"timeline_constraints"}),
+        confirmation_label="TIMELINE",
+    )
+
+
+def _run_reopen_all_summary_failures(args: argparse.Namespace) -> int:
+    return _run_reopen_summary_failures(
+        args,
+        allowed_reasons=frozenset({"summary_schema", "timeline_constraints"}),
+        confirmation_label="SUMMARY",
+    )
 
 
 def _run_migration(args: argparse.Namespace) -> int:
@@ -1417,6 +1459,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_notion_backlog_audit(args)
     if args.command == "reopen-timeline-failures":
         return _run_reopen_timeline_failures(args)
+    if args.command == "reopen-summary-failures":
+        return _run_reopen_all_summary_failures(args)
     if args.command == "migrate":
         return _run_migration(args)
     if args.command == "redo-episode":

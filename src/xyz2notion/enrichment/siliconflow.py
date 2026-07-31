@@ -307,39 +307,78 @@ class SiliconFlowSummaryClient:
         max_output_tokens: int,
         validator: Callable[[StructuredModel], bool] | None = None,
     ) -> tuple[StructuredModel, CompletionUsage]:
-        """Generate one object and repair only its JSON when validation fails."""
-        content, usage = self._complete_with_fallback(
-            system=system,
-            user=user,
-            max_output_tokens=max_output_tokens,
+        """Generate and repair with each free model before falling back."""
+        schema = json.dumps(
+            model_type.model_json_schema(),
+            ensure_ascii=False,
+            separators=(",", ":"),
         )
-        try:
-            value = self._decode(content, model_type)
-            if validator is not None and not validator(value):
-                raise ValueError("semantic JSON validation failed")
-            return value, usage
-        except (json.JSONDecodeError, ValidationError, ValueError):
-            schema = json.dumps(
-                model_type.model_json_schema(),
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
-            repaired, repair_usage = self._complete_with_fallback(
-                system=system,
-                user=REPAIR_PROMPT.format(schema=schema, invalid=content),
-                max_output_tokens=max_output_tokens,
-            )
-            total_usage = usage + repair_usage
+        total_usage = CompletionUsage()
+        last_service_error: ProviderError | None = None
+        last_validation_message: str | None = None
+        fallback_categories = {
+            ProviderErrorCategory.RATE_LIMITED,
+            ProviderErrorCategory.UNAVAILABLE,
+            ProviderErrorCategory.UNSUPPORTED,
+        }
+        for model in self._model_candidates():
             try:
-                value = self._decode(repaired, model_type)
-            except (json.JSONDecodeError, ValidationError) as exc:
-                raise _error(
-                    ProviderErrorCategory.SCHEMA_CHANGED,
-                    "SiliconFlow JSON repair did not satisfy the summary schema",
-                ) from exc
-            if validator is not None and not validator(value):
-                raise _error(
-                    ProviderErrorCategory.SCHEMA_CHANGED,
-                    "SiliconFlow JSON repair did not satisfy timeline constraints",
-                ) from None
+                content, usage = self._complete(
+                    model=model,
+                    system=system,
+                    user=user,
+                    max_output_tokens=max_output_tokens,
+                )
+            except ProviderError as exc:
+                if exc.failure.category not in fallback_categories:
+                    raise
+                last_service_error = exc
+                continue
+            total_usage += usage
+            try:
+                value = self._decode(content, model_type)
+                if validator is not None and not validator(value):
+                    raise ValueError("semantic JSON validation failed")
+            except (json.JSONDecodeError, ValidationError, ValueError):
+                try:
+                    repaired, repair_usage = self._complete(
+                        model=model,
+                        system=system,
+                        user=REPAIR_PROMPT.format(schema=schema, invalid=content),
+                        max_output_tokens=max_output_tokens,
+                    )
+                except ProviderError as exc:
+                    if exc.failure.category not in fallback_categories:
+                        raise
+                    last_service_error = exc
+                    continue
+                total_usage += repair_usage
+                try:
+                    value = self._decode(repaired, model_type)
+                except (json.JSONDecodeError, ValidationError):
+                    last_validation_message = (
+                        "SiliconFlow JSON repair did not satisfy the summary schema"
+                    )
+                    continue
+                if validator is not None and not validator(value):
+                    last_validation_message = (
+                        "SiliconFlow JSON repair did not satisfy timeline constraints"
+                    )
+                    continue
+            self.active_model = model
             return value, total_usage
+        if last_validation_message is not None:
+            raise _error(
+                ProviderErrorCategory.SCHEMA_CHANGED,
+                last_validation_message,
+            )
+        if last_service_error is not None:
+            raise _error(
+                ProviderErrorCategory.UNAVAILABLE,
+                "All configured SiliconFlow free summary models are unavailable",
+                code=last_service_error.failure.code,
+            ) from last_service_error
+        raise _error(
+            ProviderErrorCategory.UNAVAILABLE,
+            "No SiliconFlow free summary model is available",
+        )

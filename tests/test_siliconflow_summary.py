@@ -49,11 +49,16 @@ def completion(
 def client_for(
     handler: Callable[[httpx.Request], httpx.Response],
     *,
+    models: tuple[str, ...] = (
+        "Qwen/Qwen3-8B",
+        "Qwen/Qwen2.5-7B-Instruct",
+    ),
     max_retries: int = 0,
     sleeps: list[float] | None = None,
 ) -> SiliconFlowSummaryClient:
     return SiliconFlowSummaryClient(
         API_KEY,
+        models=models,
         client=httpx.Client(transport=httpx.MockTransport(handler)),
         max_retries=max_retries,
         sleep=(sleeps if sleeps is not None else []).append,
@@ -109,7 +114,10 @@ def test_semantic_failure_is_repaired_and_second_failure_is_final() -> None:
             completion(json.dumps(payload("second"), ensure_ascii=False)),
         ]
     )
-    client = client_for(lambda _request: next(responses))
+    client = client_for(
+        lambda _request: next(responses),
+        models=("Qwen/Qwen3-8B",),
+    )
     with pytest.raises(ProviderError) as caught:
         client.generate_structured(
             EnrichmentPayload,
@@ -122,7 +130,10 @@ def test_semantic_failure_is_repaired_and_second_failure_is_final() -> None:
 
     invalid_responses = iter([completion("{"), completion("still invalid")])
     with pytest.raises(ProviderError) as invalid:
-        client_for(lambda _request: next(invalid_responses)).generate_structured(
+        client_for(
+            lambda _request: next(invalid_responses),
+            models=("Qwen/Qwen3-8B",),
+        ).generate_structured(
             EnrichmentPayload,
             system="system",
             user="user",
@@ -253,6 +264,64 @@ def test_model_fallback_pins_the_first_working_free_model() -> None:
     assert value.summary == "摘要"
     assert client.active_model == "Qwen/Qwen2.5-7B-Instruct"
     assert requested == ["Qwen/Qwen3-8B", "Qwen/Qwen2.5-7B-Instruct"]
+
+
+def test_schema_failure_falls_back_to_the_next_free_model() -> None:
+    requested: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        requested.append(body["model"])
+        if body["model"] == "Qwen/Qwen3-8B":
+            return completion("not valid json", input_tokens=3, output_tokens=1)
+        return completion(
+            json.dumps(payload("备用模型成功"), ensure_ascii=False),
+            input_tokens=5,
+            output_tokens=2,
+        )
+
+    client = client_for(handle)
+    value, usage = client.generate_structured(
+        EnrichmentPayload,
+        system="system",
+        user="user",
+        max_output_tokens=1000,
+    )
+    assert value.summary == "备用模型成功"
+    assert usage == CompletionUsage(11, 4)
+    assert client.active_model == "Qwen/Qwen2.5-7B-Instruct"
+    assert requested == [
+        "Qwen/Qwen3-8B",
+        "Qwen/Qwen3-8B",
+        "Qwen/Qwen2.5-7B-Instruct",
+    ]
+
+
+def test_schema_failure_is_final_only_after_all_free_models_fail() -> None:
+    requested: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        requested.append(body["model"])
+        return completion("not valid json")
+
+    with pytest.raises(ProviderError) as caught:
+        client_for(handle).generate_structured(
+            EnrichmentPayload,
+            system="system",
+            user="user",
+            max_output_tokens=1000,
+        )
+    assert caught.value.failure.category is ProviderErrorCategory.SCHEMA_CHANGED
+    assert caught.value.failure.message == (
+        "SiliconFlow JSON repair did not satisfy the summary schema"
+    )
+    assert requested == [
+        "Qwen/Qwen3-8B",
+        "Qwen/Qwen3-8B",
+        "Qwen/Qwen2.5-7B-Instruct",
+        "Qwen/Qwen2.5-7B-Instruct",
+    ]
 
 
 @pytest.mark.parametrize(

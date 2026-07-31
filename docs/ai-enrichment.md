@@ -33,9 +33,10 @@ ASR 或摘要模型；发布器仍采用先完成新托管内容、再归档旧�
 - <https://siliconflow.cn/pricing>
 - <https://docs.siliconflow.cn/cn/userguide/rate-limits/rate-limit-and-upgradation>
 
-免费模型限流、暂时不可用或下线时按候选顺序切换；全部不可用时保存可重试失败，
-等待下一次 Action，不会切换到付费模型。每个 `SummaryResult` 仍记录实际模型、
-Prompt 版本和输入/输出 Token，估算费用固定为 0。
+免费模型限流、暂时不可用、下线，或“原始生成 + 一次 JSON 修复”后仍不符合
+Schema 时，按候选顺序切换到下一个免费模型。全部候选均失败后才保存失败状态，
+不会切换到付费模型。每个 `SummaryResult` 仍记录最终成功的实际模型、Prompt
+版本和所有尝试累计的输入/输出 Token，估算费用固定为 0。
 
 ## 长文字稿
 
@@ -73,7 +74,7 @@ Prompt 设计记录见 [`prompts/summary-v1.md`](../prompts/summary-v1.md)。结
 
 `https://api.siliconflow.cn/v1/chat/completions`
 
-并设置 `response_format={"type":"json_object"}`。首次结果若有 JSON 语法、
-字段类型、缺失字段、章节越界或脑图 ID 重复，只允许额外执行一次 JSON 修复；
-修复 Prompt 不会重新调用 ASR，也不访问音频。第二次仍不合格则保存
-`schema_changed` 失败，等待人工或后续重试。
+并设置 `response_format={"type":"json_object"}`。每个免费模型的首次结果若有
+JSON 语法、字段类型、缺失字段、章节越界或脑图 ID 重复，只允许额外执行一次
+JSON 修复；修复 Prompt 不会重新调用 ASR，也不访问音频。当前模型修复后仍不
+合格时切换下一个免费模型；所有免费模型都失败后才保存 `schema_changed`。

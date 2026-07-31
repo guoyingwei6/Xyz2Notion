@@ -12,6 +12,7 @@ on:
           - repair-covers
           - reconcile-published-ai
           - reopen-timeline-failures
+          - reopen-summary-failures
       limit:
         description: "Cover: 1-10; published AI: 1-2"
         required: true
@@ -70,6 +71,10 @@ jobs:
               ;;
             reopen-timeline-failures)
               result="$(uv run xyz2notion reopen-timeline-failures \
+                --limit "$LIMIT" --confirm "$CONFIRMATION")"
+              ;;
+            reopen-summary-failures)
+              result="$(uv run xyz2notion reopen-summary-failures \
                 --limit "$LIMIT" --confirm "$CONFIRMATION")"
               ;;
             *)

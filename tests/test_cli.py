@@ -1091,6 +1091,12 @@ def test_process_ai_manual_limit_is_restricted_to_validation_batch_sizes() -> No
     assert (
         parser.parse_args(["process-ai", "--limit", "1", "--only-in-flight"]).only_in_flight is True
     )
+    assert (
+        parser.parse_args(["process-ai", "--limit", "1", "--only-transcribed"]).only_transcribed
+        is True
+    )
+    with pytest.raises(SystemExit):
+        parser.parse_args(["process-ai", "--limit", "1", "--only-in-flight", "--only-transcribed"])
     with pytest.raises(SystemExit):
         parser.parse_args(["process-ai", "--limit", "4"])
 
@@ -1108,6 +1114,20 @@ def test_in_flight_ai_filter_never_selects_a_new_or_completed_episode() -> None:
     assert cli_module._in_flight_ai_pages(  # type: ignore[attr-defined]
         [page("待处理"), queued, running, page("已发布")]
     ) == [queued, running]
+
+
+def test_transcribed_ai_filter_never_selects_new_or_in_flight_episode() -> None:
+    def page(status: str) -> dict[str, object]:
+        return {
+            "properties": {
+                "ASR Status": {"select": {"name": status}},
+            }
+        }
+
+    transcribed = page("已转写")
+    assert cli_module._transcribed_ai_pages(  # type: ignore[attr-defined]
+        [page("待处理"), page("排队中"), transcribed, page("已发布")]
+    ) == [transcribed]
 
 
 def test_ai_pages_are_filtered_before_the_per_run_limit() -> None:
@@ -1646,9 +1666,22 @@ def test_reopen_timeline_failures_requires_bound_confirmation(
         == 2
     )
     assert "REOPEN_4_TIMELINE_FAILURES" in capsys.readouterr().err  # type: ignore[attr-defined]
+    assert (
+        main(
+            [
+                "reopen-summary-failures",
+                "--limit",
+                "1",
+                "--confirm",
+                "wrong",
+            ]
+        )
+        == 2
+    )
+    assert "REOPEN_1_SUMMARY_FAILURES" in capsys.readouterr().err  # type: ignore[attr-defined]
 
 
-def test_reopen_timeline_failures_preserves_transcript_checkpoint(
+def test_reopen_summary_schema_failure_preserves_transcript_checkpoint(
     capsys: object,
     monkeypatch: object,
 ) -> None:
@@ -1657,7 +1690,7 @@ def test_reopen_timeline_failures_preserves_transcript_checkpoint(
     failure = ProviderFailure(
         provider="siliconflow_summary",
         category=ProviderErrorCategory.SCHEMA_CHANGED,
-        message="SiliconFlow JSON repair did not satisfy timeline constraints",
+        message="SiliconFlow JSON repair did not satisfy the summary schema",
     )
     record = PipelineRecord(eid="timeline").transition(PipelineState.TRANSCRIBED)
     record = record.transition(PipelineState.FAILED_FINAL, failure=failure)
@@ -1730,11 +1763,11 @@ def test_reopen_timeline_failures_preserves_transcript_checkpoint(
     assert (
         main(
             [
-                "reopen-timeline-failures",
+                "reopen-summary-failures",
                 "--limit",
-                "4",
+                "1",
                 "--confirm",
-                "REOPEN_4_TIMELINE_FAILURES",
+                "REOPEN_1_SUMMARY_FAILURES",
             ]
         )
         == 0

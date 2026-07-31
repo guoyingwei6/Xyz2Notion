@@ -16,6 +16,11 @@ on:
         required: true
         default: false
         type: boolean
+      only_transcribed:
+        description: "Advance only an Episode with a persisted transcript"
+        required: true
+        default: false
+        type: boolean
   schedule:
     - cron: "23 */2 * * *"
 
@@ -52,6 +57,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           MANUAL_LIMIT: ${{ inputs.limit }}
           ONLY_IN_FLIGHT: ${{ inputs.only_in_flight }}
+          ONLY_TRANSCRIBED: ${{ inputs.only_transcribed }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
           TINGWU_COOKIE: ${{ secrets.TINGWU_COOKIE }}
@@ -65,6 +71,9 @@ jobs:
             args+=(--limit "${MANUAL_LIMIT:-1}")
             if [[ "$ONLY_IN_FLIGHT" == "true" ]]; then
               args+=(--only-in-flight)
+            fi
+            if [[ "$ONLY_TRANSCRIBED" == "true" ]]; then
+              args+=(--only-transcribed)
             fi
           fi
           result="$(uv run xyz2notion "${args[@]}")"

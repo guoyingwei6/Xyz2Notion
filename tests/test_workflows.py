@@ -170,4 +170,6 @@ def test_notion_repair_supports_read_only_backlog_audit() -> None:
     assert "uv run xyz2notion audit-notion-backlog" in text
     assert "reopen-timeline-failures" in options
     assert "uv run xyz2notion reopen-timeline-failures" in text
+    assert "reopen-summary-failures" in options
+    assert "uv run xyz2notion reopen-summary-failures" in text
     assert "XIAOYUZHOU_REFRESH_TOKEN" not in text
