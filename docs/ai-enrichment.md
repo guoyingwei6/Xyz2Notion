@@ -78,3 +78,5 @@ Prompt 设计记录见 [`prompts/summary-v1.md`](../prompts/summary-v1.md)。结
 JSON 语法、字段类型、缺失字段、章节越界或脑图 ID 重复，只允许额外执行一次
 JSON 修复；修复 Prompt 不会重新调用 ASR，也不访问音频。当前模型修复后仍不
 合格时切换下一个免费模型；所有免费模型都失败后才保存 `schema_changed`。
+`enable_thinking=false` 仅对官方明确支持该参数的 Qwen3 模型发送；切换到
+Qwen2.5 时会省略该字段，避免 fallback 请求因模型不支持的参数被 HTTP 400 拒绝。

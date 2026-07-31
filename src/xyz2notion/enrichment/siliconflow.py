@@ -26,6 +26,7 @@ DEFAULT_SUMMARY_MODELS = (
     "Qwen/Qwen2.5-7B-Instruct",
 )
 FREE_SUMMARY_MODELS = frozenset(DEFAULT_SUMMARY_MODELS)
+THINKING_CONTROL_MODELS = frozenset({"Qwen/Qwen3-8B"})
 StructuredModel = TypeVar("StructuredModel", bound=BaseModel)
 
 
@@ -157,10 +158,11 @@ class SiliconFlowSummaryClient:
                 {"role": "user", "content": user},
             ],
             "response_format": {"type": "json_object"},
-            "enable_thinking": False,
             "temperature": 0.1,
             "max_tokens": max_output_tokens,
         }
+        if model in THINKING_CONTROL_MODELS:
+            payload["enable_thinking"] = False
         for attempt in range(self.max_retries + 1):
             response: httpx.Response | None = None
             try:

@@ -273,7 +273,9 @@ def test_schema_failure_falls_back_to_the_next_free_model() -> None:
         body = json.loads(request.content)
         requested.append(body["model"])
         if body["model"] == "Qwen/Qwen3-8B":
+            assert body["enable_thinking"] is False
             return completion("not valid json", input_tokens=3, output_tokens=1)
+        assert "enable_thinking" not in body
         return completion(
             json.dumps(payload("备用模型成功"), ensure_ascii=False),
             input_tokens=5,
