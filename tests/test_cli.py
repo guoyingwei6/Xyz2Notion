@@ -1650,6 +1650,26 @@ def test_notion_backlog_audit_reports_missing_credentials(
     assert "Configuration error" in capsys.readouterr().err  # type: ignore[attr-defined]
 
 
+def test_safe_failure_reason_distinguishes_summary_invalid_input() -> None:
+    empty = ProviderFailure(
+        provider="siliconflow_summary",
+        category=ProviderErrorCategory.INVALID_INPUT,
+        message="Transcript contains no readable content",
+    )
+    rejected = ProviderFailure(
+        provider="siliconflow_summary",
+        category=ProviderErrorCategory.INVALID_INPUT,
+        message="SiliconFlow rejected the summary request (HTTP 400)",
+        code="context_length_exceeded",
+    )
+    unsafe_code = rejected.model_copy(update={"code": "private code with spaces"})
+    assert cli_module._safe_failure_reason_code(empty) == "empty_transcript"  # type: ignore[attr-defined]
+    assert (  # type: ignore[attr-defined]
+        cli_module._safe_failure_reason_code(rejected) == "request_http_400_context_length_exceeded"
+    )
+    assert cli_module._safe_failure_reason_code(unsafe_code) == "request_http_400"  # type: ignore[attr-defined]
+
+
 def test_reopen_timeline_failures_requires_bound_confirmation(
     capsys: object,
 ) -> None:

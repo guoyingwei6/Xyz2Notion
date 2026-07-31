@@ -545,6 +545,13 @@ def _safe_failure_reason_code(failure: ProviderFailure) -> str:
         return "summary_schema"
     if failure.message == "SiliconFlow JSON repair did not satisfy timeline constraints":
         return "timeline_constraints"
+    if failure.message == "Transcript contains no readable content":
+        return "empty_transcript"
+    if failure.message == "SiliconFlow rejected the summary request (HTTP 400)":
+        code = failure.code or "unknown"
+        if len(code) <= 64 and all(character.isalnum() or character in "._-" for character in code):
+            return f"request_http_400_{code}"
+        return "request_http_400"
     return failure.category.value
 
 
