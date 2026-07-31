@@ -42,8 +42,10 @@ Fork 本仓库，在 `Settings → Secrets and variables → Actions` 至少添�
 
 ### 3. 生成文字稿与 AI 内容
 
-手动运行一次 `Process Episode AI` 验收。验收完成后，元数据每天 UTC+8 05:17
-执行一次受限增量同步，AI 队列每两小时最多处理 2 期。听悟 Cookie 明确失效时
+分别手动运行一次 `Transcribe Episode Queue` 和
+`Enrich Transcribed Episodes` 验收。验收完成后，元数据每天 UTC+8 05:17
+执行一次受限增量同步；首次存量转写与增强每两小时最多处理 2 期，清空后切换为
+每天 05:47 转写新增、06:37 增强新增。听悟 Cookie 明确失效时
 自动降级到 SiliconFlow；如果两条远程通道都不可用，最后才在 GitHub Actions
 CPU 上运行本地 `faster-whisper small`。工作流中断后从用户自己 Notion 里的
 私有检查点继续。

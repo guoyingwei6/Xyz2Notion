@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
@@ -47,6 +48,8 @@ from xyz2notion.statistics.notion_sync import HeatmapPublisher
 from xyz2notion.sync.metadata import MetadataSynchronizer
 from xyz2notion.sync.pipeline import collect_metadata
 from xyz2notion.xiaoyuzhou.client import XiaoyuzhouAPIError, XiaoyuzhouClient
+
+ASR_INTER_EPISODE_SECONDS = 60
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -189,6 +192,28 @@ def build_parser() -> argparse.ArgumentParser:
                 action="store_true",
                 help="advance only Episode rows with a persisted transcript",
             )
+    process_asr = subparsers.add_parser(
+        "process-asr",
+        help="advance only ASR checkpoints and stop at a persisted transcript",
+    )
+    process_asr.add_argument("--config", default="config.yaml", help="path to config.yaml")
+    process_asr.add_argument(
+        "--page-id",
+        help="target root page ID; defaults to NOTION_PAGE_ID",
+    )
+    process_asr.add_argument(
+        "--limit",
+        type=int,
+        choices=(1, 2),
+        default=1,
+        help="cap this rate-limited run at one or two Episode candidates",
+    )
+    process_asr.add_argument(
+        "--mode",
+        choices=("backlog", "incremental"),
+        default="incremental",
+        help="label this run as one-time backlog drain or normal daily increment",
+    )
     repair_covers = subparsers.add_parser(
         "repair-notion-covers",
         help="upload a bounded number of existing external covers into Notion",
@@ -310,6 +335,14 @@ def _transcribed_ai_pages[AIPage: Mapping[str, object]](
     return [page for page in pages if _episode_asr_status(page) == "已转写"]
 
 
+def _asr_queue_pages[AIPage: Mapping[str, object]](
+    pages: Sequence[AIPage],
+) -> list[AIPage]:
+    """Select only rows that may advance toward, but never beyond, TRANSCRIBED."""
+    allowed = {"待处理", "排队中", "转写中"}
+    return [page for page in pages if _episode_asr_status(page) in allowed]
+
+
 def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
     try:
         config = load_config(args.config)
@@ -402,6 +435,100 @@ def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
     state_summary = ", ".join(f"{name}={states[name]}" for name in sorted(states)) or "none=0"
     print(
         f"Episode AI processing OK (selected={len(candidates)}; "
+        f"actions: {action_summary}; states: {state_summary})"
+    )
+    return 0
+
+
+def _run_asr_queue(args: argparse.Namespace) -> int:
+    """Advance a tightly bounded ASR-only queue without summary or publishing."""
+    try:
+        config = load_config(args.config)
+        credentials = load_runtime_credentials()
+        credentials.require("notion_token")
+        page_id = args.page_id or credentials.notion_page_id
+        if not page_id:
+            raise MissingCredentialError(
+                "Missing target page: set NOTION_PAGE_ID or pass --page-id"
+            )
+        if credentials.notion_token is None:
+            raise AssertionError("credential requirement did not narrow notion_token")
+
+        selected_providers = set(config.asr.provider_order)
+        tingwu_cookie = (
+            credentials.tingwu_cookie if AsrProvider.TINGWU_COOKIE in selected_providers else None
+        )
+        siliconflow_asr_api_key = (
+            credentials.siliconflow_api_key
+            if AsrProvider.SILICONFLOW in selected_providers
+            else None
+        )
+        local_whisper_model = (
+            config.asr.local_whisper_model
+            if AsrProvider.LOCAL_WHISPER in selected_providers
+            else None
+        )
+
+        with ExitStack() as stack:
+            notion = stack.enter_context(NotionClient(credentials.notion_token))
+            initialization = NotionInitializer(notion, page_id).initialize()
+            pages = notion.query_data_source(
+                initialization.resources["episode"].data_source_id,
+                {"page_size": 100},
+            )
+            eligible_pages = sorted(_asr_queue_pages(pages), key=_ai_page_priority)
+            all_candidates = episode_candidates(eligible_pages)
+            candidates = all_candidates[: args.limit]
+            tingwu, siliconflow, local_whisper, _summary_client = build_provider_clients(
+                tingwu_cookie=tingwu_cookie,
+                siliconflow_asr_api_key=siliconflow_asr_api_key,
+                siliconflow_summary_api_key=None,
+                siliconflow_asr_models=config.asr.siliconflow_models,
+                siliconflow_summary_models=(),
+                local_whisper_model=local_whisper_model,
+                local_qwen_summary=False,
+            )
+            for client in (tingwu, siliconflow, local_whisper):
+                if client is not None:
+                    stack.enter_context(client)
+            state_store = stack.enter_context(NotionEpisodeStateStore(notion))
+            processor = EpisodeAIProcessor(
+                notion,
+                state_store,
+                tingwu=tingwu,
+                siliconflow=siliconflow,
+                local_whisper=local_whisper,
+                summary_enabled=False,
+            )
+            page_by_id = {str(page.get("id")): page for page in pages}
+            outcomes = []
+            for index, candidate in enumerate(candidates):
+                if index:
+                    time.sleep(ASR_INTER_EPISODE_SECONDS)
+                outcomes.append(
+                    processor.process_asr_only(
+                        candidate,
+                        page_by_id[candidate.page_id],
+                    )
+                )
+    except (ConfigurationError, MissingCredentialError) as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    except NotionAPIError as exc:
+        print(f"Notion error: {exc}", file=sys.stderr)
+        return 4
+
+    actions = Counter(outcome.action for outcome in outcomes)
+    states = Counter(outcome.state.value for outcome in outcomes)
+    action_summary = ", ".join(f"{name}={actions[name]}" for name in sorted(actions)) or "none=0"
+    state_summary = ", ".join(f"{name}={states[name]}" for name in sorted(states)) or "none=0"
+    remaining = max(0, len(all_candidates) - len(candidates)) + sum(
+        outcome.state in {PipelineState.ASR_SUBMITTED, PipelineState.ASR_RUNNING}
+        for outcome in outcomes
+    )
+    print(
+        f"Episode ASR queue OK (mode={args.mode}; selected={len(candidates)}; "
+        f"remaining={remaining}; interval_seconds={ASR_INTER_EPISODE_SECONDS}; "
         f"actions: {action_summary}; states: {state_summary})"
     )
     return 0
@@ -785,7 +912,13 @@ def _run_reopen_timeline_failures(args: argparse.Namespace) -> int:
 def _run_reopen_all_summary_failures(args: argparse.Namespace) -> int:
     return _run_reopen_summary_failures(
         args,
-        allowed_reasons=frozenset({"summary_schema", "timeline_constraints"}),
+        allowed_reasons=frozenset(
+            {
+                "summary_schema",
+                "timeline_constraints",
+                "request_http_400_20015",
+            }
+        ),
         confirmation_label="SUMMARY",
     )
 
@@ -1469,6 +1602,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command in {"process-ai", "retry-failed"}:
         return _run_ai(args, retry_failed=args.command == "retry-failed")
+    if args.command == "process-asr":
+        return _run_asr_queue(args)
     if args.command == "repair-notion-covers":
         return _run_cover_repair(args)
     if args.command == "reconcile-published-ai":

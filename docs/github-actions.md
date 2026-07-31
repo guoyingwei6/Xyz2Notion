@@ -24,6 +24,10 @@ Xyz2Notion 的任务只运行在用户自己 Fork 的 GitHub 仓库中。所有�
 | 名称 | 用途 |
 | --- | --- |
 | `XIAOYUZHOU_DEVICE_ID` | 固定小宇宙设备 UUID；省略时按仓库身份稳定派生 |
+| `ASR_QUEUE_ENABLED` | 设为 `true` 后允许“只转写”定时队列运行 |
+| `ASR_BACKFILL_ACTIVE` | 首次存量排空期间设为 `true`；确认 `remaining=0` 后改为 `false` |
+| `XYZ2NOTION_ENRICHMENT_QUEUE_ENABLED` | 设为 `true` 后允许“只增强”定时队列运行 |
+| `XYZ2NOTION_ENRICHMENT_BACKLOG` | 首次存量增强期间设为 `true`；确认 `remaining=0` 后改为 `false` |
 
 不要把任何 Secret 写入 `config.yaml`、Issue、Actions 输入或运行日志。
 
@@ -62,7 +66,9 @@ ASR 和免费文本模型。项目只接受代码已核对的免费模型白名�
 | --- | --- | --- |
 | `Initialize Notion` | 手动 | `bootstrap` 首次建首页；`initialize` 日常只修复数据库和视图 |
 | `Sync Podcast Metadata` | 每天 05:17（UTC+8）+ 手动确认 | 安全增量同步最近播放历史、待听、收藏和进度 |
-| `Process Episode AI` | 每 2 小时 + 手动 | 每次最多推进 4 期 ASR、摘要和发布状态机 |
+| `Transcribe Episode Queue` | 存量每 2 小时；日常 05:47（UTC+8） | 只推进到“已转写”；每次最多 2 期且两期相隔 60 秒 |
+| `Enrich Transcribed Episodes` | 存量每 2 小时；日常 06:37（UTC+8） | 只消费既有文字稿；生成摘要、章节、思维导图并发布 |
+| `Process Episode AI` | 手动验收 | 兼容入口；正式拆队后保持手动禁用 |
 | `Retry Failed Episode AI` | 每日 + 手动 | 每次最多恢复 2 个 `FAILED_RETRYABLE` 单集，累计重试 3 次后停止 |
 | `Xyz2Notion Maintenance` | 手动 | 迁移、单集重做、统计或热力图重建 |
 | `Xyz2Notion Notion-only Repair` | 手动 | 只读盘点 AI/封面/零播放存量，或分批修复封面与已发布脑图 |
@@ -75,16 +81,22 @@ ASR 和免费文本模型。项目只接受代码已核对的免费模型白名�
 10 张的积压会由后续每日任务继续处理；
 仓库所有会写入 Notion 的工作流共用
 `xyz2notion-runtime` concurrency group，避免迁移、初始化、元数据和 AI 同时改页。
-AI 定时任务不包含 `XIAOYUZHOU_REFRESH_TOKEN`，只处理已经保存到 Notion 的
-音频地址与状态文件。正常队列每两小时最多 4 期；可重试失败每日最多 2 期，
-同一期累计重试 3 次后转为最终失败，避免无限循环。
+AI 定时任务不包含 `XIAOYUZHOU_REFRESH_TOKEN`。转写队列只读取 Notion 已保存的
+音频地址并停在“已转写”；增强队列不接收听悟、小宇宙或任何 ASR 凭证，只消费
+Notion 已保存文字稿。存量模式两条队列均每两小时最多 2 期；转写队列两期之间
+固定等待 60 秒。存量清空后将两个 backlog Variable 改为 `false`，之后转写每天
+05:47、增强每天 06:37 仅处理新增检查点。可重试失败每日最多 2 期，同一期累计
+重试 3 次后转为最终失败。
 
 首次使用顺序：
 
 1. 在 `Actions` 手动运行 `Initialize Notion`，首次选择 `bootstrap`；
 2. 手动运行 `Sync Podcast Metadata`；
-3. 手动运行 `Process Episode AI`；
-4. 查看工作流摘要中的聚合计数，以及 Notion Episode 的 `ASR Status`。
+3. 各手动运行一次 `Transcribe Episode Queue` 和
+   `Enrich Transcribed Episodes`，每次只选 1 期；
+4. 验收成功后启用两条 Queue Variable；首次将两个 backlog Variable 设为
+   `true`，存量清空后改为 `false`；
+5. 查看工作流摘要中的聚合计数，以及 Notion Episode 的 `ASR Status`。
 
 如果 Fork 中存在公开的 `config.yaml`，AI 工作流使用它；否则使用
 `config.example.yaml`。配置文件只能包含模型顺序、运行上限等非秘密设置。
@@ -110,6 +122,10 @@ AI 定时任务不包含 `XIAOYUZHOU_REFRESH_TOKEN`，只处理已经保存到 N
 听悟的解析 ID、Task ID、文字稿和摘要检查点作为 JSON 文件保存在用户自己的
 Notion Episode 中。每个外部 AI 阶段完成后都会先保存检查点。因此
 Actions 被取消或超时后，下次运行继续查询或发布，不重复提交已完成的 ASR。
+
+听悟在途检查点只能查询已有记录，禁止再次解析或提交。若列表暂时看不到刚提交的
+记录，则保持排队等待；若发现多条同名记录且无法通过已保存的真实记录 ID 唯一匹配，
+以 `ambiguous_record` 安全暂停，绝不猜测、重复提交或提前降级。
 
 临时网络、限流或服务不可用会进入 `FAILED_RETRYABLE`。修复凭证或等待服务恢复后，
 手动运行 `Retry Failed Episode AI`。认证失效、风控或听悟网页 Schema 变化属于

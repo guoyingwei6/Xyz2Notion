@@ -1,0 +1,112 @@
+name: Transcribe Episode Queue
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "One-time backlog drain or normal daily increment"
+        required: true
+        default: "backlog"
+        type: choice
+        options:
+          - backlog
+          - incremental
+      limit:
+        description: "Maximum Episode transcripts in this rate-limited run"
+        required: true
+        default: "2"
+        type: choice
+        options:
+          - "1"
+          - "2"
+  schedule:
+    # Backfill lane: at most two sequential candidates every two hours,
+    # with a fixed 60-second gap between Episode candidates.
+    - cron: "13 */2 * * *"
+    # Normal lane: once daily at 05:47 UTC+8, after the 05:17 metadata sync.
+    - cron: "47 21 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xyz2notion-runtime
+  cancel-in-progress: false
+
+jobs:
+  transcribe:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        vars.ASR_QUEUE_ENABLED == 'true' &&
+        (
+          (github.event.schedule == '13 */2 * * *' &&
+           vars.ASR_BACKFILL_ACTIVE == 'true') ||
+          (github.event.schedule == '47 21 * * *' &&
+           vars.ASR_BACKFILL_ACTIVE != 'true')
+        )
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Cache ASR dependencies and local fallback model
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cache/uv
+            ~/.cache/huggingface
+          key: asr-${{ runner.os }}-py312-faster-whisper-small-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            asr-${{ runner.os }}-py312-faster-whisper-small-
+
+      - name: Install FFmpeg and locked application
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+          python -m pip install uv==0.9.28
+          uv sync --locked
+
+      - name: Advance ASR-only queue
+        id: queue
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
+          MANUAL_MODE: ${{ inputs.mode }}
+          MANUAL_LIMIT: ${{ inputs.limit }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
+          TINGWU_COOKIE: ${{ secrets.TINGWU_COOKIE }}
+          SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
+        run: |
+          set -euo pipefail
+          config_path="config.yaml"
+          if [[ ! -f "$config_path" ]]; then config_path="config.example.yaml"; fi
+          mode="incremental"
+          limit="2"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            mode="${MANUAL_MODE:-backlog}"
+            limit="${MANUAL_LIMIT:-2}"
+          elif [[ "$EVENT_SCHEDULE" == "13 */2 * * *" ]]; then
+            mode="backlog"
+          fi
+          result="$(uv run xyz2notion process-asr \
+            --config "$config_path" --mode "$mode" --limit "$limit")"
+          printf '%s\n' "$result"
+          printf 'mode=%s\n' "$mode" >> "$GITHUB_OUTPUT"
+          if [[ "$result" == *"remaining=0;"* ]]; then
+            printf 'drained=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'drained=false\n' >> "$GITHUB_OUTPUT"
+          fi
+          {
+            printf '## Xyz2Notion ASR-only queue\n\n'
+            printf '```text\n%s\n```\n' "$result"
+          } >> "$GITHUB_STEP_SUMMARY"

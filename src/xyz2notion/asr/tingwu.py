@@ -391,7 +391,8 @@ class TingwuClient:
     def ensure_directory(self, name: str) -> str:
         return self.list_directories().get(name) or self.create_directory(name)
 
-    def find_record(self, directory_id: str, title: str) -> Mapping[str, Any] | None:
+    def find_records(self, directory_id: str, title: str) -> tuple[Mapping[str, Any], ...]:
+        """Return all exact-title matches so callers never guess between duplicates."""
         response = self._post(
             RECORD_LIST_URL,
             {
@@ -423,13 +424,25 @@ class TingwuClient:
                     )
                 )
             records = flattened
+        matches: list[Mapping[str, Any]] = []
         for record in records:
             item = _mapping(record, "record")
             tag = _mapping(item.get("tag", {}), "record tag")
             show_name = item.get("showName") or item.get("title") or tag.get("showName")
             if show_name == title:
-                return item
-        return None
+                matches.append(item)
+        return tuple(matches)
+
+    def find_record(self, directory_id: str, title: str) -> Mapping[str, Any] | None:
+        """Return one unique exact-title match, or stop safely when ambiguous."""
+        matches = self.find_records(directory_id, title)
+        if len(matches) > 1:
+            raise _failure(
+                ProviderErrorCategory.UNAVAILABLE,
+                "Tingwu returned multiple matching records; manual review is required",
+                code="ambiguous_record",
+            )
+        return matches[0] if matches else None
 
     def task_from_record(
         self,
@@ -478,6 +491,47 @@ class TingwuClient:
         if record is None:
             return None
         return self.task_from_record(record, directory_id=directory_id, title=title)
+
+    def resume_episode(
+        self,
+        directory_id: str,
+        title: str,
+        *,
+        provider_task_id: str,
+        source_task_id: str | None,
+    ) -> TingwuTask:
+        """Poll a persisted submission without ever creating another record."""
+        matches = self.find_records(directory_id, title)
+        if len(matches) > 1:
+            exact = [
+                record
+                for record in matches
+                if str(
+                    record.get("genRecordId")
+                    or record.get("transId")
+                    or record.get("taskId")
+                    or record.get("id")
+                    or ""
+                )
+                == provider_task_id
+            ]
+            if len(exact) == 1:
+                matches = tuple(exact)
+            else:
+                raise _failure(
+                    ProviderErrorCategory.UNAVAILABLE,
+                    "Tingwu returned multiple matching records; manual review is required",
+                    code="ambiguous_record",
+                )
+        if len(matches) == 1:
+            return self.task_from_record(matches[0], directory_id=directory_id, title=title)
+        return TingwuTask(
+            provider_task_id=provider_task_id,
+            source_task_id=source_task_id,
+            state=TingwuTaskState.SUBMITTED,
+            directory_id=directory_id,
+            title=title,
+        )
 
     def parse_source(self, audio_url: str) -> str:
         response = self._post(

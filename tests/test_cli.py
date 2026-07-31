@@ -1702,16 +1702,35 @@ def test_reopen_timeline_failures_requires_bound_confirmation(
     assert "REOPEN_1_SUMMARY_FAILURES" in capsys.readouterr().err  # type: ignore[attr-defined]
 
 
-def test_reopen_summary_schema_failure_preserves_transcript_checkpoint(
+@pytest.mark.parametrize(
+    ("category", "message", "code"),
+    [
+        (
+            ProviderErrorCategory.SCHEMA_CHANGED,
+            "SiliconFlow JSON repair did not satisfy the summary schema",
+            None,
+        ),
+        (
+            ProviderErrorCategory.INVALID_INPUT,
+            "SiliconFlow rejected the summary request (HTTP 400)",
+            "20015",
+        ),
+    ],
+)
+def test_reopen_summary_failure_preserves_transcript_checkpoint(
     capsys: object,
     monkeypatch: object,
+    category: ProviderErrorCategory,
+    message: str,
+    code: str | None,
 ) -> None:
     monkeypatch.setenv("NOTION_TOKEN", "secret_fixture_token")  # type: ignore[attr-defined]
     monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
     failure = ProviderFailure(
         provider="siliconflow_summary",
-        category=ProviderErrorCategory.SCHEMA_CHANGED,
-        message="SiliconFlow JSON repair did not satisfy the summary schema",
+        category=category,
+        message=message,
+        code=code,
     )
     record = PipelineRecord(eid="timeline").transition(PipelineState.TRANSCRIBED)
     record = record.transition(PipelineState.FAILED_FINAL, failure=failure)
@@ -1780,6 +1799,7 @@ def test_reopen_summary_schema_failure_preserves_transcript_checkpoint(
     monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
     monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
     monkeypatch.setattr(cli_module, "NotionEpisodeStateStore", FakeStore)  # type: ignore[attr-defined]
+    FakeStore.saved = []
 
     assert (
         main(

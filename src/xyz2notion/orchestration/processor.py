@@ -241,6 +241,25 @@ class EpisodeAIProcessor:
                 ProviderErrorCategory.UNSUPPORTED,
                 "Tingwu Cookie provider is not configured",
             )
+        if state.record.state in {
+            PipelineState.ASR_SUBMITTED,
+            PipelineState.ASR_RUNNING,
+        }:
+            if (
+                not state.tingwu_directory_id
+                or not state.tingwu_title
+                or not state.provider_task_id
+            ):
+                raise _failure(
+                    ProviderErrorCategory.SCHEMA_CHANGED,
+                    "Persisted Tingwu submission checkpoint is incomplete",
+                )
+            return self.tingwu.resume_episode(
+                state.tingwu_directory_id,
+                state.tingwu_title,
+                provider_task_id=state.provider_task_id,
+                source_task_id=state.source_task_id,
+            )
         return self.tingwu.submit_episode(
             self.tingwu_directory,
             candidate.title,
@@ -269,11 +288,15 @@ class EpisodeAIProcessor:
         """Return updated state and whether the task is still asynchronous."""
         use_tingwu = state.provider in {None, "tingwu_cookie"} and self.tingwu is not None
         if use_tingwu:
+            was_in_flight = state.record.state in {
+                PipelineState.ASR_SUBMITTED,
+                PipelineState.ASR_RUNNING,
+            }
             try:
                 task = self._tingwu_task(candidate, state)
             except ProviderError as exc:
                 if (
-                    self.siliconflow is None and self.local_whisper is None
+                    was_in_flight or (self.siliconflow is None and self.local_whisper is None)
                 ) or not tingwu_fallback_allowed(exc):
                     raise
             else:
@@ -437,6 +460,32 @@ class EpisodeAIProcessor:
                 state = self._save(candidate.page_id, state)
                 return ProcessingOutcome(candidate.eid, published.action, state.record.state)
             return ProcessingOutcome(candidate.eid, "pending", state.record.state)
+        except ProviderError as exc:
+            return self._fail(candidate, state, exc)
+
+    def process_asr_only(
+        self,
+        candidate: EpisodeCandidate,
+        page: Mapping[str, Any],
+    ) -> ProcessingOutcome:
+        """Advance only ASR checkpoints and stop permanently at TRANSCRIBED."""
+        state = self.state_store.load(page, candidate.eid)
+        if state.record.state not in {
+            PipelineState.DISCOVERED,
+            PipelineState.ASR_SUBMITTED,
+            PipelineState.ASR_RUNNING,
+        }:
+            return ProcessingOutcome(candidate.eid, "skipped", state.record.state)
+        if self.tingwu is None and self.siliconflow is None and self.local_whisper is None:
+            return ProcessingOutcome(candidate.eid, "paused", state.record.state)
+        try:
+            state, pending = self._advance_asr(candidate, state)
+            state = self._save(candidate.page_id, state)
+            return ProcessingOutcome(
+                candidate.eid,
+                "pending" if pending else "transcribed",
+                state.record.state,
+            )
         except ProviderError as exc:
             return self._fail(candidate, state, exc)
 
