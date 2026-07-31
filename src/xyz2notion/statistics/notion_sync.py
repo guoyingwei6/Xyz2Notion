@@ -355,22 +355,26 @@ class HeatmapPublisher:
         marker = f"{marker_prefix}{content_hash}"
         managed_block: JsonObject | None = None
         managed_marker: JsonObject | None = None
+        record_column_images: list[JsonObject] = []
         target_parent = self.root_page_id
         visited: set[str] = set()
 
         def walk(parent_id: str) -> None:
-            nonlocal managed_block, managed_marker, target_parent
+            nonlocal managed_block, managed_marker, target_parent, record_column_images
             if parent_id in visited:
                 return
             visited.add(parent_id)
             blocks = self.api.list_block_children(parent_id)
-            if any(
+            is_record_column = any(
                 block.get("type") == "heading_2" and _block_visible_text(block) == "播客记录"
                 for block in blocks
-            ):
+            )
+            if is_record_column:
                 target_parent = parent_id
             for index, block in enumerate(blocks):
                 caption = _caption_text(block)
+                if is_record_column and block.get("type") == "image":
+                    record_column_images.append(block)
                 if (
                     managed_block is None
                     and block.get("type") == "image"
@@ -392,6 +396,12 @@ class HeatmapPublisher:
                     walk(str(child_id))
 
         walk(self.root_page_id)
+        if managed_block is None and record_column_images:
+            managed_block = record_column_images[-1]
+        self._archive_duplicate_images(
+            keep_block_id=str(managed_block.get("id") or "") if managed_block else "",
+            candidates=record_column_images,
+        )
         marker_hash = (
             _heatmap_hash_from_url(_block_marker_url(managed_marker), year)
             if managed_marker is not None
@@ -464,3 +474,22 @@ class HeatmapPublisher:
             content_hash=content_hash,
             block_id=block_id or None,
         )
+
+    def _archive_duplicate_images(
+        self,
+        *,
+        keep_block_id: str,
+        candidates: Sequence[Mapping[str, Any]],
+    ) -> None:
+        if not keep_block_id or len(candidates) <= 1:
+            return
+        delete_block = getattr(self.api, "delete_block", None)
+        if not callable(delete_block):
+            return
+        seen: set[str] = set()
+        for block in candidates:
+            block_id = str(block.get("id") or "")
+            if not block_id or block_id == keep_block_id or block_id in seen:
+                continue
+            seen.add(block_id)
+            delete_block(block_id)

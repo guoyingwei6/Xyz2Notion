@@ -197,6 +197,7 @@ class FakeStatisticsNotion:
         self.blocks: dict[str, list[JsonObject]] = {"root": []}
         self.created_pages = 0
         self.uploads = 0
+        self.deleted: list[str] = []
 
     def query_data_source(
         self,
@@ -261,6 +262,14 @@ class FakeStatisticsNotion:
         )
         block.update(payload)
         return block
+
+    def delete_block(self, block_id: str) -> JsonObject:
+        self.deleted.append(block_id)
+        for blocks in self.blocks.values():
+            for index, block in enumerate(blocks):
+                if block["id"] == block_id:
+                    return blocks.pop(index)
+        raise KeyError(block_id)
 
     def upload_file(
         self,
@@ -457,6 +466,47 @@ def test_legacy_heatmap_caption_migrates_once_then_stays_idempotent() -> None:
     assert fake.uploads == 1
     assert len(fake.blocks["root"]) == 1
     assert fake.blocks["root"][0]["image"]["caption"][0]["text"]["content"] == "\u200b"
+
+
+def test_heatmap_publisher_archives_duplicate_unmarked_record_images() -> None:
+    fake = FakeStatisticsNotion()
+    fake.blocks["root"] = [
+        {
+            "id": "columns",
+            "type": "column_list",
+            "has_children": True,
+            "column_list": {},
+        }
+    ]
+    fake.blocks["columns"] = [{"id": "right", "type": "column", "has_children": True, "column": {}}]
+    image = {
+        "type": "file_upload",
+        "file_upload": {"id": "old-upload"},
+        "caption": [],
+    }
+    fake.blocks["right"] = [
+        {
+            "id": "record-heading",
+            "type": "heading_2",
+            "heading_2": {"rich_text": [{"type": "text", "text": {"content": "播客记录"}}]},
+        },
+        {"id": "heatmap-old-1", "type": "image", "image": dict(image)},
+        {"id": "heatmap-old-2", "type": "image", "image": dict(image)},
+        {"id": "heatmap-keep", "type": "image", "image": dict(image)},
+    ]
+    daily = calculate_statistics(statistics_snapshot(), today=date(2026, 2, 15)).daily
+
+    result = HeatmapPublisher(fake, "root").publish(2026, daily)
+
+    assert result.action == "updated"
+    assert result.block_id == "heatmap-keep"
+    assert fake.deleted == ["heatmap-old-1", "heatmap-old-2"]
+    assert [block["id"] for block in fake.blocks["right"] if block["type"] == "image"] == [
+        "heatmap-keep"
+    ]
+    assert "https://xyz2notion.local/heatmap/2026/" in str(
+        fake.blocks["right"][-1]["image"]["caption"]
+    )
 
 
 def _rich(value: str) -> JsonObject:
