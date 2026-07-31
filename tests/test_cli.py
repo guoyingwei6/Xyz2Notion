@@ -1278,6 +1278,8 @@ def test_notion_backlog_audit_reports_only_aggregate_counts(
         played: int = 0,
         status: str = "待处理",
         playlist: bool = False,
+        provider: str = "",
+        model: str = "",
     ) -> dict[str, object]:
         return {
             "id": f"page-{eid}",
@@ -1291,14 +1293,27 @@ def test_notion_backlog_audit_reports_only_aggregate_counts(
                 "In Playlist": {"checkbox": playlist},
                 "Skip AI": {"checkbox": False},
                 "ASR Status": {"select": {"name": status}},
+                "ASR Provider": {"rich_text": [{"plain_text": provider}]} if provider else {},
+                "ASR Model": {"rich_text": [{"plain_text": model}]} if model else {},
             },
         }
 
     episodes = [
-        episode("normal", played=300),
+        episode(
+            "normal",
+            played=300,
+            provider="tingwu_cookie",
+            model="tingwu-web",
+        ),
         episode("protected-zero", playlist=True),
         episode("legacy-zero"),
-        episode("final", played=300, status="最终失败"),
+        episode(
+            "final",
+            played=300,
+            status="最终失败",
+            provider="siliconflow",
+            model="FunAudioLLM/SenseVoiceSmall",
+        ),
         episode("retry", played=300, status="可重试失败"),
     ]
     podcasts = [
@@ -1372,6 +1387,8 @@ def test_notion_backlog_audit_reports_only_aggregate_counts(
     output = capsys.readouterr().out  # type: ignore[attr-defined]
     assert "normal_ai_candidates=1" in output
     assert "retry_ai_candidates=1" in output
+    assert "asr_providers: siliconflow=1, tingwu_cookie=1" in output
+    assert "asr_models: FunAudioLLM/SenseVoiceSmall=1, tingwu-web=1" in output
     assert "local_whisper:unsupported=1" in output
     assert "zero_play_total=2" in output
     assert "zero_play_protected=1" in output

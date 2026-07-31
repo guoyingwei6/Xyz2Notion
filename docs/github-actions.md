@@ -61,7 +61,7 @@ ASR 和免费文本模型。项目只接受代码已核对的免费模型白名�
 | --- | --- | --- |
 | `Initialize Notion` | 手动 | `bootstrap` 首次建首页；`initialize` 日常只修复数据库和视图 |
 | `Sync Podcast Metadata` | 每天 05:17（UTC+8）+ 手动确认 | 安全增量同步最近播放历史、待听、收藏和进度 |
-| `Process Episode AI` | 每 2 小时 + 手动 | 每次最多推进 2 期 ASR、摘要和发布状态机 |
+| `Process Episode AI` | 每 2 小时 + 手动 | 每次最多推进 4 期 ASR、摘要和发布状态机 |
 | `Retry Failed Episode AI` | 每日 + 手动 | 每次最多恢复 2 个 `FAILED_RETRYABLE` 单集，累计重试 3 次后停止 |
 | `Xyz2Notion Maintenance` | 手动 | 迁移、单集重做、统计或热力图重建 |
 | `Xyz2Notion Notion-only Repair` | 手动 | 只读盘点 AI/封面/零播放存量，或分批修复封面与已发布脑图 |
@@ -74,7 +74,7 @@ ASR 和免费文本模型。项目只接受代码已核对的免费模型白名�
 仓库所有会写入 Notion 的工作流共用
 `xyz2notion-runtime` concurrency group，避免迁移、初始化、元数据和 AI 同时改页。
 AI 定时任务不包含 `XIAOYUZHOU_REFRESH_TOKEN`，只处理已经保存到 Notion 的
-音频地址与状态文件。正常队列每两小时最多 2 期；可重试失败每日最多 2 期，
+音频地址与状态文件。正常队列每两小时最多 4 期；可重试失败每日最多 2 期，
 同一期累计重试 3 次后转为最终失败，避免无限循环。
 
 首次使用顺序：

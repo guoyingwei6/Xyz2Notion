@@ -86,7 +86,7 @@ class AsrConfig(StrictConfigModel):
 class LimitConfig(StrictConfigModel):
     """Per-run and time-window safety limits."""
 
-    episodes_per_run: int = Field(default=2, ge=1)
+    episodes_per_run: int = Field(default=4, ge=1)
     asr_minutes_per_day: int = Field(default=240, ge=1)
     asr_minutes_per_month: int = Field(default=3000, ge=1)
     provider_poll_attempts: int = Field(default=60, ge=1)

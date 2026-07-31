@@ -511,6 +511,18 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
             normal_candidates = episode_candidates(_eligible_ai_pages(episodes, retry_failed=False))
             retry_candidates = episode_candidates(_eligible_ai_pages(episodes, retry_failed=True))
             statuses = Counter(_episode_asr_status(page) or "未设置" for page in episodes)
+            asr_providers: Counter[str] = Counter()
+            asr_models: Counter[str] = Counter()
+            for page in episodes:
+                properties = page.get("properties")
+                if not isinstance(properties, Mapping):
+                    continue
+                provider = _notion_property_text(properties, "ASR Provider")
+                model = _notion_property_text(properties, "ASR Model")
+                if provider:
+                    asr_providers[provider] += 1
+                if model:
+                    asr_models[model] += 1
             final_pages = [page for page in episodes if _episode_asr_status(page) == "最终失败"]
             failure_categories: Counter[str] = Counter()
             with NotionEpisodeStateStore(notion) as state_store:
@@ -572,10 +584,17 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
         ", ".join(f"{name}={failure_categories[name]}" for name in sorted(failure_categories))
         or "none=0"
     )
+    provider_summary = (
+        ", ".join(f"{name}={asr_providers[name]}" for name in sorted(asr_providers)) or "none=0"
+    )
+    model_summary = (
+        ", ".join(f"{name}={asr_models[name]}" for name in sorted(asr_models)) or "none=0"
+    )
     print(
         "Notion backlog audit OK "
         f"(episodes={len(episodes)}; normal_ai_candidates={len(normal_candidates)}; "
         f"retry_ai_candidates={len(retry_candidates)}; statuses: {status_summary}; "
+        f"asr_providers: {provider_summary}; asr_models: {model_summary}; "
         f"final_failure_categories: {failure_summary}; "
         f"zero_play_total={zero_play_total}; "
         f"zero_play_protected={protected_zero_play}; "

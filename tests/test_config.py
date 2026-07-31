@@ -34,7 +34,7 @@ def test_example_config_is_valid_and_secret_free() -> None:
         "Qwen/Qwen2.5-7B-Instruct",
     )
     assert config.summary.prompt_version == "summary-v1"
-    assert config.limits.episodes_per_run == 2
+    assert config.limits.episodes_per_run == 4
     raw = Path("config.example.yaml").read_text(encoding="utf-8")
     assert "TOKEN" not in raw
     assert "COOKIE" not in raw

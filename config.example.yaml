@@ -21,7 +21,7 @@ summary:
   max_output_tokens: 8192
 
 limits:
-  episodes_per_run: 2
+  episodes_per_run: 4
   asr_minutes_per_day: 240
   asr_minutes_per_month: 3000
   provider_poll_attempts: 60
