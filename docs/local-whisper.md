@@ -2,12 +2,12 @@
 
 Xyz2Notion 当前默认 ASR 顺序是：
 
-1. SiliconFlow 免费 ASR API；
-2. GitHub Actions CPU 上的本地 `faster-whisper small`。
+1. 阿里云百炼 `paraformer-v1`；
+2. SiliconFlow 免费 ASR API；
+3. GitHub Actions CPU 上的本地 `faster-whisper small`。
 
-通义听悟 Cookie 保留为手动验证通道；只有确认网页端能真实创建可见转写记录后，
-才建议重新加入自动优先级。本地模型是最终兜底，不会抢在 SiliconFlow 前运行。
-它不需要新的 API Key；只有远程 ASR 不可用时，才从公开模型仓库下载模型并在当前临时 Runner 中推理。
+本地模型是最终兜底，不会抢在百炼或 SiliconFlow 前运行。它不需要新的 API Key；
+只有远程 ASR 不可用时，才从公开模型仓库下载模型并在当前临时 Runner 中推理。
 Runner 结束后，下载的音频、模型运行目录和文字稿临时文件都会随虚拟机销毁。
 
 ## 为什么选择 small
@@ -19,6 +19,7 @@ Runner 结束后，下载的音频、模型运行目录和文字稿临时文件�
 ```yaml
 asr:
   provider_order:
+    - dashscope
     - siliconflow
     - local_whisper
   local_whisper_model: small

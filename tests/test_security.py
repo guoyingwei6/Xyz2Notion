@@ -15,6 +15,7 @@ from xyz2notion.security import (
         (CredentialKind.XIAOYUZHOU, "https://api.xiaoyuzhoufm.com/app/v1/test"),
         (CredentialKind.NOTION, "https://api.notion.com/v1/pages"),
         (CredentialKind.TINGWU_COOKIE, "https://tingwu.aliyun.com/api/test"),
+        (CredentialKind.DASHSCOPE, "https://dashscope.aliyuncs.com/api/v1/tasks/task-1"),
         (CredentialKind.SILICONFLOW, "https://api.siliconflow.cn/v1/audio/transcriptions"),
         (CredentialKind.SILICONFLOW, "https://api.siliconflow.cn/v1/chat/completions"),
     ],

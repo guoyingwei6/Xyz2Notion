@@ -16,7 +16,7 @@ Xyz2Notion 的任务只运行在用户自己 Fork 的 GitHub 仓库中。所有�
 | `NOTION_TOKEN` | 是 | 用户自己的 Notion Integration Token |
 | `NOTION_PAGE_ID` | 是 | 已授权给 Integration 的空白根页面 ID |
 | `NOTION_MIGRATION_PAGE_ID` | 否 | 旧模板副本页面；仅维护工作流迁移操作使用 |
-| `TINGWU_COOKIE` | 否 | 优先使用用户已有的听悟网页额度 |
+| `DASHSCOPE_API_KEY` | 建议 | 百炼 `paraformer-v1` 免费额度优先 ASR |
 | `SILICONFLOW_API_KEY` | 建议 | 免费 ASR 降级与免费结构化摘要 |
 
 在 **Repository variables** 可选添加：
@@ -46,19 +46,17 @@ Xyz2Notion 的任务只运行在用户自己 Fork 的 GitHub 仓库中。所有�
 填入 `NOTION_TOKEN`，页面 URL 中的页面 ID 填入 `NOTION_PAGE_ID`。无需使用作者
 OAuth 回调或作者生成的 Token。
 
-### 通义听悟 Cookie
+### 阿里云百炼 Paraformer
 
-登录 `https://tingwu.aliyun.com/` 并进入“我的记录”后，从浏览器开发者工具中
-找到 `/api/directory/request?getDirList&c=web` 请求，复制其完整 `Cookie` 请求头值并
-填入 `TINGWU_COOKIE`。Cookie 会过期，而且网页内部接口可能变化；它只被发送到
-`tingwu.aliyun.com`。详细边界见
-[听悟 Cookie Provider](tingwu-cookie.md)。
+`DASHSCOPE_API_KEY` 来自用户自己的阿里云百炼账号，用于优先调用
+`paraformer-v1` 录音文件识别免费额度。项目只把该 Key 发送到
+`dashscope.aliyuncs.com`，并且只允许 `paraformer-v1` 作为自动 ASR 模型。
 
 ### SiliconFlow
 
 `SILICONFLOW_API_KEY` 来自用户自己的 SiliconFlow 账户，用于调用配置中的免费
-ASR 和免费文本模型。项目只接受代码已核对的免费模型白名单，不使用 DashScope，
-也不实现付费 ASR。免费模型清单可能调整，升级项目版本前应重新核对价格页。
+ASR 降级模型和免费文本摘要模型。项目只接受代码已核对的免费模型白名单，
+不实现付费 ASR。免费模型清单可能调整，升级项目版本前应重新核对价格页。
 
 ## 工作流
 
@@ -82,9 +80,9 @@ ASR 和免费文本模型。项目只接受代码已核对的免费模型白名�
 仓库所有会写入 Notion 的工作流共用
 `xyz2notion-runtime` concurrency group，避免迁移、初始化、元数据和 AI 同时改页。
 AI 定时任务不包含 `XIAOYUZHOU_REFRESH_TOKEN`。转写队列只读取 Notion 已保存的
-音频地址并停在“已转写”。当前默认 ASR 队列不使用听悟；听悟只作为手动
-`visible-smoke` 验证入口，确认网页可见记录前不进入自动队列。增强队列不接收
-听悟、小宇宙或任何 ASR 凭证，只消费 Notion 已保存文字稿。存量模式两条队列均每两小时最多 2 期；转写队列两期之间
+音频地址并停在“已转写”。当前默认 ASR 队列按
+`DashScope paraformer-v1 -> SiliconFlow -> 本地 Whisper` 降级；增强队列不接收
+小宇宙或任何 ASR 凭证，只消费 Notion 已保存文字稿。存量模式两条队列均每两小时最多 2 期；转写队列两期之间
 固定等待 60 秒。存量清空后将两个 backlog Variable 改为 `false`，之后转写每天
 05:47、增强每天 06:37 仅处理新增检查点。可重试失败每日最多 2 期，同一期累计
 重试 3 次后转为最终失败。

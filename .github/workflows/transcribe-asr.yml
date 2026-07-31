@@ -83,7 +83,7 @@ jobs:
           MANUAL_LIMIT: ${{ inputs.limit }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
-          TINGWU_COOKIE: ${{ secrets.TINGWU_COOKIE }}
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
         run: |
           set -euo pipefail

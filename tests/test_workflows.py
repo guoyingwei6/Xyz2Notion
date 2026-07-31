@@ -125,6 +125,7 @@ def test_ai_workflows_receive_only_expected_provider_secrets() -> None:
         for secret in (
             "NOTION_TOKEN",
             "NOTION_PAGE_ID",
+            "DASHSCOPE_API_KEY",
             "TINGWU_COOKIE",
             "SILICONFLOW_API_KEY",
         ):

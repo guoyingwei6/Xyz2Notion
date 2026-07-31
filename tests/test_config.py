@@ -25,9 +25,11 @@ def test_example_config_is_valid_and_secret_free() -> None:
     config = load_config("config.example.yaml")
     assert config.schema_version == 1
     assert config.asr.provider_order == (
+        AsrProvider.DASHSCOPE,
         AsrProvider.SILICONFLOW,
         AsrProvider.LOCAL_WHISPER,
     )
+    assert config.asr.dashscope_model == "paraformer-v1"
     assert config.summary.siliconflow_models == ("Qwen/Qwen3-8B",)
     assert config.summary.local_qwen_fallback is True
     assert config.summary.prompt_version == "summary-v1"
@@ -176,6 +178,7 @@ def test_secret_values_are_not_serialized_or_represented() -> None:
             "NOTION_TOKEN": "notion-example",
             "NOTION_PAGE_ID": "page-example",
             "TINGWU_COOKIE": "cookie-example",
+            "DASHSCOPE_API_KEY": "dashscope-example",
             "SILICONFLOW_API_KEY": "silicon-example",
         },
         fallback_identity="test",
@@ -185,6 +188,7 @@ def test_secret_values_are_not_serialized_or_represented() -> None:
         "refresh-example",
         "notion-example",
         "cookie-example",
+        "dashscope-example",
         "silicon-example",
     ):
         assert secret not in rendered

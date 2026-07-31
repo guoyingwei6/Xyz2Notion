@@ -417,7 +417,13 @@ def test_process_asr_cli_runs_two_sequential_candidates_with_safe_aggregate_outp
                 PipelineState.TRANSCRIBED,
             )
 
-    providers = (_ContextProvider(), _ContextProvider(), _ContextProvider(), None)
+    providers = (
+        _ContextProvider(),
+        _ContextProvider(),
+        _ContextProvider(),
+        _ContextProvider(),
+        None,
+    )
     monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
     monkeypatch.setattr(cli_module, "NotionInitializer", _CLIFakeInitializer)  # type: ignore[attr-defined]
     monkeypatch.setattr(cli_module, "NotionEpisodeStateStore", _CLIFakeStore)  # type: ignore[attr-defined]

@@ -22,7 +22,7 @@ def test_doctor_reports_installation(capsys: object) -> None:
     assert main(["doctor"]) == 0
     output = capsys.readouterr().out  # type: ignore[attr-defined]
     assert f"Xyz2Notion {__version__}: OK" in output
-    assert "4 credential types" in output
+    assert "5 credential types" in output
 
 
 def test_help_is_default(capsys: object) -> None:
@@ -35,7 +35,7 @@ def test_config_check_accepts_example(capsys: object) -> None:
     assert main(["config-check", "--config", "config.example.yaml"]) == 0
     output = capsys.readouterr().out  # type: ignore[attr-defined]
     assert "Configuration OK" in output
-    assert "ASR: siliconflow, local_whisper" in output
+    assert "ASR: dashscope, siliconflow, local_whisper" in output
 
 
 def test_config_check_reports_missing_file(capsys: object) -> None:
@@ -1132,7 +1132,7 @@ def test_process_ai_reports_only_aggregate_counts(
     monkeypatch.setattr(  # type: ignore[attr-defined]
         cli_module,
         "build_provider_clients",
-        lambda **_kwargs: (None, None, None, None),
+        lambda **_kwargs: (None, None, None, None, None),
     )
 
     assert main(["process-ai", "--config", "config.example.yaml"]) == 0

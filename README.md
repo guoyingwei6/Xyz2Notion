@@ -17,7 +17,7 @@ Fork 本仓库，在 `Settings → Secrets and variables → Actions` 至少添�
 - `NOTION_TOKEN`
 - `NOTION_PAGE_ID`
 
-转写和免费摘要建议再添加 `TINGWU_COOKIE` 和 `SILICONFLOW_API_KEY`。获取方法见
+转写和免费摘要建议再添加 `DASHSCOPE_API_KEY` 和 `SILICONFLOW_API_KEY`。获取方法见
 [GitHub Actions 与 Secrets](docs/github-actions.md)。
 
 ### 2. 初始化并同步
@@ -122,18 +122,17 @@ uv run xyz2notion xiaoyuzhou-check
 认证方式、Device ID 和只读接口说明见
 [`docs/xiaoyuzhou-auth.md`](docs/xiaoyuzhou-auth.md)。
 
-默认 ASR 顺序为 SiliconFlow → GitHub Actions 本地 Whisper。通义听悟 Cookie
-仍保留为手动验证通道；只有确认网页端能真实创建可见转写记录后，才建议把
-`tingwu_cookie` 放回自动 ASR 优先级。不实现任何付费 Provider。本地模型无需
-额外 Secret，只在远程 ASR 不可用后加载。
+默认 ASR 顺序为阿里云百炼 `paraformer-v1` → SiliconFlow → GitHub Actions 本地
+Whisper。不再使用通义听悟网页 Cookie 作为自动转写通道。不实现任何付费 Provider。
+本地模型无需额外 Secret，只在远程 ASR 不可用后加载。
+百炼 Paraformer 的接口、配额和时间轴说明见
+[`docs/dashscope-asr.md`](docs/dashscope-asr.md)。
 SiliconFlow 音频切片、免费模型降级和时间轴精度说明见
 [`docs/siliconflow-asr.md`](docs/siliconflow-asr.md)。
 本地最终兜底的资源、隐私和运行限制见
 [`docs/local-whisper.md`](docs/local-whisper.md)。
 
-听悟 Cookie 的域名隔离、断点续查和降级规则见
-[`docs/tingwu-cookie.md`](docs/tingwu-cookie.md)。文字稿的 SiliconFlow
-免费结构化摘要、长文本分段和 Token 记录见
+文字稿的 SiliconFlow 免费结构化摘要、长文本分段和 Token 记录见
 [`docs/ai-enrichment.md`](docs/ai-enrichment.md)。
 单集页面的托管区边界、播放器、原生脑图、SVG 脑图和用户笔记保护机制见
 [`docs/episode-page.md`](docs/episode-page.md)。

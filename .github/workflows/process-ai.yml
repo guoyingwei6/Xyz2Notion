@@ -85,6 +85,7 @@ jobs:
           ONLY_TRANSCRIBED: ${{ inputs.only_transcribed }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           TINGWU_COOKIE: ${{ secrets.TINGWU_COOKIE }}
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
         run: |

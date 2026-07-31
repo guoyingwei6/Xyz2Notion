@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import SecretStr
 
+from xyz2notion.asr.dashscope import DashScopeParaformerClient
 from xyz2notion.asr.local_whisper import LocalWhisperClient
 from xyz2notion.asr.pipeline import transcribe_siliconflow_episode
 from xyz2notion.asr.router import tingwu_fallback_allowed
@@ -150,6 +151,7 @@ class EpisodeAIProcessor:
         notion: Any,
         state_store: NotionEpisodeStateStore,
         *,
+        dashscope: DashScopeParaformerClient | None = None,
         tingwu: TingwuClient | None = None,
         siliconflow: SiliconFlowClient | None = None,
         local_whisper: LocalWhisperClient | None = None,
@@ -161,6 +163,7 @@ class EpisodeAIProcessor:
     ) -> None:
         self.notion = notion
         self.state_store = state_store
+        self.dashscope = dashscope
         self.tingwu = tingwu
         self.siliconflow = siliconflow
         self.local_whisper = local_whisper
@@ -180,6 +183,14 @@ class EpisodeAIProcessor:
                 "No usable ASR provider is configured",
             )
         return transcribe_siliconflow_episode(candidate.audio_url, self.siliconflow)
+
+    def _dashscope(self, candidate: EpisodeCandidate) -> TranscriptResult:
+        if self.dashscope is None:
+            raise _failure(
+                ProviderErrorCategory.UNSUPPORTED,
+                "DashScope Paraformer provider is not configured",
+            )
+        return self.dashscope.transcribe_url(candidate.audio_url)
 
     def _local_whisper(self, candidate: EpisodeCandidate) -> TranscriptResult:
         if self.local_whisper is None:
@@ -286,6 +297,27 @@ class EpisodeAIProcessor:
         state: EpisodeAIState,
     ) -> tuple[EpisodeAIState, bool]:
         """Return updated state and whether the task is still asynchronous."""
+        if state.provider in {None, "dashscope"} and self.dashscope is not None:
+            try:
+                transcript = self._dashscope(candidate)
+            except ProviderError:
+                if self.siliconflow is None and self.local_whisper is None:
+                    raise
+            else:
+                record = state.record.transition(PipelineState.TRANSCRIBED)
+                return (
+                    state.model_copy(
+                        update={
+                            "record": record,
+                            "provider": transcript.provider,
+                            "provider_task_id": transcript.provider_task_id,
+                            "transcript": transcript,
+                            "summary": None,
+                        }
+                    ),
+                    False,
+                )
+
         use_tingwu = state.provider in {None, "tingwu_cookie"} and self.tingwu is not None
         if use_tingwu:
             was_in_flight = state.record.state in {
@@ -476,7 +508,12 @@ class EpisodeAIProcessor:
             PipelineState.ASR_RUNNING,
         }:
             return ProcessingOutcome(candidate.eid, "skipped", state.record.state)
-        if self.tingwu is None and self.siliconflow is None and self.local_whisper is None:
+        if (
+            self.dashscope is None
+            and self.tingwu is None
+            and self.siliconflow is None
+            and self.local_whisper is None
+        ):
             return ProcessingOutcome(candidate.eid, "paused", state.record.state)
         try:
             state, pending = self._advance_asr(candidate, state)
@@ -492,6 +529,8 @@ class EpisodeAIProcessor:
 
 def build_provider_clients(
     *,
+    dashscope_api_key: SecretStr | None = None,
+    dashscope_model: str = "paraformer-v1",
     tingwu_cookie: SecretStr | None,
     siliconflow_asr_api_key: SecretStr | None,
     siliconflow_summary_api_key: SecretStr | None,
@@ -500,6 +539,7 @@ def build_provider_clients(
     local_whisper_model: str | None = None,
     local_qwen_summary: bool = True,
 ) -> tuple[
+    DashScopeParaformerClient | None,
     TingwuClient | None,
     SiliconFlowClient | None,
     LocalWhisperClient | None,
@@ -523,6 +563,9 @@ def build_provider_clients(
     else:
         summary_client = remote_summary
     return (
+        DashScopeParaformerClient(dashscope_api_key, model=dashscope_model)
+        if dashscope_api_key is not None
+        else None,
         TingwuClient(tingwu_cookie) if tingwu_cookie is not None else None,
         SiliconFlowClient(siliconflow_asr_api_key, models=siliconflow_asr_models)
         if siliconflow_asr_api_key is not None

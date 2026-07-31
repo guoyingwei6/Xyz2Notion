@@ -183,6 +183,25 @@ class LocalFallbackProcessor(SiliconProcessor):
         return transcript("local_whisper")
 
 
+class DashScopeProcessor(SiliconProcessor):
+    def __init__(self, *args: object, dashscope_failures: int = 0, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.dashscope_failures = dashscope_failures
+        self.dashscope_calls = 0
+
+    def _dashscope(self, _candidate: EpisodeCandidate) -> TranscriptResult:
+        self.dashscope_calls += 1
+        if self.dashscope_calls <= self.dashscope_failures:
+            raise ProviderError(
+                ProviderFailure(
+                    provider="dashscope",
+                    category=ProviderErrorCategory.QUOTA_EXHAUSTED,
+                    message="quota",
+                )
+            )
+        return transcript("dashscope")
+
+
 class FakeTingwu:
     def __init__(self, task: TingwuTask, *, fail_auth: bool = False) -> None:
         self.task = task
@@ -336,6 +355,39 @@ def test_siliconflow_failure_falls_back_to_local_whisper() -> None:
     assert processor.asr_calls == 1
     assert processor.local_calls == 1
     assert store.state.provider == "local_whisper"
+
+
+def test_dashscope_is_first_asr_provider() -> None:
+    store = FakeStateStore()
+    processor = DashScopeProcessor(
+        FakeNotion(),
+        store,
+        dashscope=object(),  # type: ignore[arg-type]
+        siliconflow=object(),
+        summary_client=FakeSummaryClient(),
+    )
+    outcome = processor.process(CANDIDATE, {})
+    assert outcome.state is PipelineState.PUBLISHED
+    assert processor.dashscope_calls == 1
+    assert processor.asr_calls == 0
+    assert store.state.provider == "dashscope"
+
+
+def test_dashscope_failure_falls_back_to_siliconflow() -> None:
+    store = FakeStateStore()
+    processor = DashScopeProcessor(
+        FakeNotion(),
+        store,
+        dashscope=object(),  # type: ignore[arg-type]
+        siliconflow=object(),
+        summary_client=FakeSummaryClient(),
+        dashscope_failures=1,
+    )
+    outcome = processor.process(CANDIDATE, {})
+    assert outcome.state is PipelineState.PUBLISHED
+    assert processor.dashscope_calls == 1
+    assert processor.asr_calls == 1
+    assert store.state.provider == "siliconflow"
 
 
 def test_local_whisper_can_run_without_remote_asr_provider() -> None:
@@ -529,7 +581,7 @@ def test_published_and_final_failed_rows_are_skipped() -> None:
 
 
 def test_build_provider_clients_supports_local_summary_only() -> None:
-    tingwu, siliconflow, local_whisper, summary = build_provider_clients(
+    dashscope, tingwu, siliconflow, local_whisper, summary = build_provider_clients(
         tingwu_cookie=None,
         siliconflow_asr_api_key=None,
         siliconflow_summary_api_key=None,
@@ -538,6 +590,7 @@ def test_build_provider_clients_supports_local_summary_only() -> None:
         local_whisper_model=None,
         local_qwen_summary=True,
     )
+    assert dashscope is None
     assert tingwu is None
     assert siliconflow is None
     assert local_whisper is None
@@ -556,4 +609,4 @@ def test_build_provider_clients_can_disable_all_summary_clients() -> None:
         local_whisper_model=None,
         local_qwen_summary=False,
     )
-    assert providers == (None, None, None, None)
+    assert providers == (None, None, None, None, None)

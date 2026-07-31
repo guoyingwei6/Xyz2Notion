@@ -384,6 +384,9 @@ def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
             raise AssertionError("credential requirement did not narrow notion_token")
 
         selected = set(config.asr.provider_order)
+        dashscope_api_key = (
+            credentials.dashscope_api_key if AsrProvider.DASHSCOPE in selected else None
+        )
         tingwu_cookie = credentials.tingwu_cookie if AsrProvider.TINGWU_COOKIE in selected else None
         siliconflow_asr_api_key = (
             credentials.siliconflow_api_key if AsrProvider.SILICONFLOW in selected else None
@@ -415,7 +418,9 @@ def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
                 config.limits.episodes_per_run,
             )
             candidates = episode_candidates(eligible_pages)[:run_limit]
-            tingwu, siliconflow, local_whisper, summary_client = build_provider_clients(
+            dashscope, tingwu, siliconflow, local_whisper, summary_client = build_provider_clients(
+                dashscope_api_key=dashscope_api_key,
+                dashscope_model=config.asr.dashscope_model,
                 tingwu_cookie=tingwu_cookie,
                 siliconflow_asr_api_key=siliconflow_asr_api_key,
                 siliconflow_summary_api_key=siliconflow_summary_api_key,
@@ -424,13 +429,14 @@ def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
                 local_whisper_model=local_whisper_model,
                 local_qwen_summary=config.summary.enabled and config.summary.local_qwen_fallback,
             )
-            for client in (tingwu, siliconflow, local_whisper, summary_client):
+            for client in (dashscope, tingwu, siliconflow, local_whisper, summary_client):
                 if client is not None:
                     stack.enter_context(client)
             state_store = stack.enter_context(NotionEpisodeStateStore(notion))
             processor = EpisodeAIProcessor(
                 notion,
                 state_store,
+                dashscope=dashscope,
                 tingwu=tingwu,
                 siliconflow=siliconflow,
                 local_whisper=local_whisper,
@@ -482,6 +488,9 @@ def _run_asr_queue(args: argparse.Namespace) -> int:
             raise AssertionError("credential requirement did not narrow notion_token")
 
         selected_providers = set(config.asr.provider_order)
+        dashscope_api_key = (
+            credentials.dashscope_api_key if AsrProvider.DASHSCOPE in selected_providers else None
+        )
         tingwu_cookie = (
             credentials.tingwu_cookie if AsrProvider.TINGWU_COOKIE in selected_providers else None
         )
@@ -506,7 +515,9 @@ def _run_asr_queue(args: argparse.Namespace) -> int:
             eligible_pages = sorted(_asr_queue_pages(pages), key=_ai_page_priority)
             all_candidates = episode_candidates(eligible_pages)
             candidates = all_candidates[: args.limit]
-            tingwu, siliconflow, local_whisper, _summary_client = build_provider_clients(
+            dashscope, tingwu, siliconflow, local_whisper, _summary_client = build_provider_clients(
+                dashscope_api_key=dashscope_api_key,
+                dashscope_model=config.asr.dashscope_model,
                 tingwu_cookie=tingwu_cookie,
                 siliconflow_asr_api_key=siliconflow_asr_api_key,
                 siliconflow_summary_api_key=None,
@@ -515,13 +526,14 @@ def _run_asr_queue(args: argparse.Namespace) -> int:
                 local_whisper_model=local_whisper_model,
                 local_qwen_summary=False,
             )
-            for client in (tingwu, siliconflow, local_whisper):
+            for client in (dashscope, tingwu, siliconflow, local_whisper):
                 if client is not None:
                     stack.enter_context(client)
             state_store = stack.enter_context(NotionEpisodeStateStore(notion))
             processor = EpisodeAIProcessor(
                 notion,
                 state_store,
+                dashscope=dashscope,
                 tingwu=tingwu,
                 siliconflow=siliconflow,
                 local_whisper=local_whisper,

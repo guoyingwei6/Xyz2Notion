@@ -27,6 +27,7 @@ class AsrProvider(StrEnum):
     """Supported ASR providers in fallback order."""
 
     TINGWU_COOKIE = "tingwu_cookie"
+    DASHSCOPE = "dashscope"
     SILICONFLOW = "siliconflow"
     LOCAL_WHISPER = "local_whisper"
 
@@ -54,9 +55,11 @@ class AsrConfig(StrictConfigModel):
     """Free speech recognition provider policy."""
 
     provider_order: tuple[AsrProvider, ...] = (
+        AsrProvider.DASHSCOPE,
         AsrProvider.SILICONFLOW,
         AsrProvider.LOCAL_WHISPER,
     )
+    dashscope_model: Literal["paraformer-v1"] = "paraformer-v1"
     siliconflow_models: tuple[str, ...] = (
         "FunAudioLLM/SenseVoiceSmall",
         "TeleAI/TeleSpeechASR",
@@ -143,6 +146,7 @@ class RuntimeCredentials(BaseModel):
     notion_token: SecretStr | None = None
     notion_page_id: str | None = None
     tingwu_cookie: SecretStr | None = None
+    dashscope_api_key: SecretStr | None = None
     siliconflow_api_key: SecretStr | None = None
 
     def require(self, *names: str) -> Self:
@@ -235,5 +239,6 @@ def load_runtime_credentials(
         notion_token=secret("NOTION_TOKEN"),
         notion_page_id=env.get("NOTION_PAGE_ID", "").strip() or None,
         tingwu_cookie=secret("TINGWU_COOKIE"),
+        dashscope_api_key=secret("DASHSCOPE_API_KEY"),
         siliconflow_api_key=secret("SILICONFLOW_API_KEY"),
     )
