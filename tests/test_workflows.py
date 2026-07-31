@@ -91,6 +91,8 @@ def test_metadata_sync_runs_daily_and_manual_runs_require_confirmation() -> None
     assert 'EVENT_NAME" == "workflow_dispatch"' in text
     assert 'EVENT_NAME" != "workflow_dispatch"' in text
     assert 'EVENT_NAME" != "schedule"' in text
+    assert "uv run xyz2notion repair-notion-covers" in text
+    assert "--limit 10 --confirm REPAIR_10_NOTION_COVERS" in text
     assert "timeout-minutes: 15" in text
 
 

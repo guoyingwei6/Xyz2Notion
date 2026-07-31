@@ -66,3 +66,17 @@ jobs:
             printf '## Xyz2Notion metadata sync\n\n'
             printf '```text\n%s\n```\n' "$result"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Localize new podcast covers
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
+        run: |
+          set -euo pipefail
+          result="$(uv run xyz2notion repair-notion-covers \
+            --limit 10 --confirm REPAIR_10_NOTION_COVERS)"
+          printf '%s\n' "$result"
+          {
+            printf '\n## Xyz2Notion automatic cover localization\n\n'
+            printf '```text\n%s\n```\n' "$result"
+          } >> "$GITHUB_STEP_SUMMARY"
