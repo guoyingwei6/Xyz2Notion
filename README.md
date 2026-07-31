@@ -42,7 +42,7 @@ Fork 本仓库，在 `Settings → Secrets and variables → Actions` 至少添�
 
 ### 3. 生成文字稿与 AI 内容
 
-手动运行一次 `Process Episode AI` 验收。验收完成后，元数据每天 UTC+8 08:17
+手动运行一次 `Process Episode AI` 验收。验收完成后，元数据每天 UTC+8 05:17
 执行一次受限增量同步，AI 队列每两小时最多处理 2 期。听悟 Cookie 明确失效时
 自动降级到 SiliconFlow；如果两条远程通道都不可用，最后才在 GitHub Actions
 CPU 上运行本地 `faster-whisper small`。工作流中断后从用户自己 Notion 里的
@@ -62,7 +62,7 @@ CPU 上运行本地 `faster-whisper small`。工作流中断后从用户自己 N
 
 ## 项目状态
 
-当前安全版本每天 UTC+8 08:17 执行一次小宇宙受限增量同步，并继续暂停全量历史
+当前安全版本每天 UTC+8 05:17 执行一次小宇宙受限增量同步，并继续暂停全量历史
 统计重建。元数据同步采用最新 25 条的小批量增量，并有每次运行 20 请求、
 请求间隔 3 秒及 401/403/429 立即熔断保护。历史统计保留在 Notion 中，
 待改为完全基于 Notion 数据增量计算。同步完成后自动本地化最多 10 张新 Podcast

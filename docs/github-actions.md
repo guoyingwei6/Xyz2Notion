@@ -60,13 +60,13 @@ ASR 和免费文本模型。项目只接受代码已核对的免费模型白名�
 | 工作流 | 触发 | 作用 |
 | --- | --- | --- |
 | `Initialize Notion` | 手动 | `bootstrap` 首次建首页；`initialize` 日常只修复数据库和视图 |
-| `Sync Podcast Metadata` | 每天 08:17（UTC+8）+ 手动确认 | 安全增量同步最近播放历史、待听、收藏和进度 |
+| `Sync Podcast Metadata` | 每天 05:17（UTC+8）+ 手动确认 | 安全增量同步最近播放历史、待听、收藏和进度 |
 | `Process Episode AI` | 每 2 小时 + 手动 | 每次最多推进 2 期 ASR、摘要和发布状态机 |
 | `Retry Failed Episode AI` | 每日 + 手动 | 每次最多恢复 2 个 `FAILED_RETRYABLE` 单集，累计重试 3 次后停止 |
 | `Xyz2Notion Maintenance` | 手动 | 迁移、单集重做、统计或热力图重建 |
 | `Xyz2Notion Notion-only Repair` | 手动 | 只读盘点 AI/封面/零播放存量，或分批修复封面与已发布脑图 |
 
-元数据工作流每天 UTC 00:17（UTC+8 08:17）自动运行一次；手动运行仍必须输入
+元数据工作流每天 UTC 21:17（UTC+8 次日 05:17）自动运行一次；手动运行仍必须输入
 `RUN_SAFE_INCREMENTAL_SYNC`。自动与手动运行都受 20 请求、3 秒间隔、单页
 25 条及 401/403/429 立即熔断保护。每次元数据同步完成后会自动本地化最多
 10 张新出现的 Podcast 外链封面；已有 Notion 内部封面不会被外链覆盖，超过

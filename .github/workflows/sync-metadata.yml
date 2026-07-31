@@ -8,8 +8,8 @@ on:
         required: true
         type: string
   schedule:
-    # 08:17 Asia/Taipei / Asia/Shanghai. Avoid the busy top of the hour.
-    - cron: "17 0 * * *"
+    # 05:17 Asia/Taipei / Asia/Shanghai. Avoid the busy top of the hour.
+    - cron: "17 21 * * *"
 
 permissions:
   contents: read
