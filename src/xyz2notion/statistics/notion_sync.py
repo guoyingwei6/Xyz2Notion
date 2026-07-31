@@ -448,7 +448,9 @@ class HeatmapPublisher:
         }
         if managed_block is not None and managed_block.get("id"):
             block_id = str(managed_block["id"])
-            self.api.update_block(block_id, {"image": image})
+            image_update = dict(image)
+            image_update.pop("type", None)
+            self.api.update_block(block_id, {"image": image_update})
             return HeatmapPublishResult(
                 action="updated",
                 content_hash=content_hash,

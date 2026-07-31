@@ -504,6 +504,8 @@ def test_heatmap_publisher_archives_duplicate_unmarked_record_images() -> None:
     assert [block["id"] for block in fake.blocks["right"] if block["type"] == "image"] == [
         "heatmap-keep"
     ]
+    assert "type" not in fake.blocks["right"][-1]["image"]
+    assert fake.blocks["right"][-1]["image"]["file_upload"]["id"] == "upload-1"
     assert "https://xyz2notion.local/heatmap/2026/" in str(
         fake.blocks["right"][-1]["image"]["caption"]
     )
