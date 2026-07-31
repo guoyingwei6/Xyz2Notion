@@ -2,6 +2,15 @@ name: Process Episode AI
 
 on:
   workflow_dispatch:
+    inputs:
+      limit:
+        description: "Maximum Episode candidates for this manual validation run"
+        required: true
+        default: "1"
+        type: choice
+        options:
+          - "1"
+          - "2"
   schedule:
     - cron: "23 */2 * * *"
 
@@ -35,6 +44,8 @@ jobs:
 
       - name: Advance Episode AI state
         env:
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_LIMIT: ${{ inputs.limit }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
           TINGWU_COOKIE: ${{ secrets.TINGWU_COOKIE }}
@@ -43,7 +54,11 @@ jobs:
           set -euo pipefail
           config_path="config.yaml"
           if [[ ! -f "$config_path" ]]; then config_path="config.example.yaml"; fi
-          result="$(uv run xyz2notion process-ai --config "$config_path")"
+          args=(process-ai --config "$config_path")
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            args+=(--limit "${MANUAL_LIMIT:-1}")
+          fi
+          result="$(uv run xyz2notion "${args[@]}")"
           printf '%s\n' "$result"
           {
             printf '## Xyz2Notion Episode AI\n\n'

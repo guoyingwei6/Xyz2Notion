@@ -171,6 +171,12 @@ def build_parser() -> argparse.ArgumentParser:
             "--page-id",
             help="target root page ID; defaults to NOTION_PAGE_ID",
         )
+        ai_command.add_argument(
+            "--limit",
+            type=int,
+            choices=(1, 2),
+            help="manually cap this run at one or two Episode candidates",
+        )
     repair_covers = subparsers.add_parser(
         "repair-notion-covers",
         help="upload a bounded number of existing external covers into Notion",
@@ -309,7 +315,11 @@ def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
                 _eligible_ai_pages(pages, retry_failed=retry_failed),
                 key=_ai_page_priority,
             )
-            candidates = episode_candidates(eligible_pages)[: config.limits.episodes_per_run]
+            run_limit = min(
+                args.limit or config.limits.episodes_per_run,
+                config.limits.episodes_per_run,
+            )
+            candidates = episode_candidates(eligible_pages)[:run_limit]
             tingwu, siliconflow, local_whisper, summary_client = build_provider_clients(
                 tingwu_cookie=tingwu_cookie,
                 siliconflow_asr_api_key=siliconflow_asr_api_key,

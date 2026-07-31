@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 from typing import ClassVar
 
+import pytest
+
 import xyz2notion.cli as cli_module
 from xyz2notion import __version__
 from xyz2notion.cli import main
@@ -1080,6 +1082,14 @@ def test_episode_asr_status_distinguishes_retryable_rows() -> None:
         == "可重试失败"
     )
     assert cli_module._episode_asr_status({"properties": {}}) == ""  # type: ignore[attr-defined]
+
+
+def test_process_ai_manual_limit_is_restricted_to_validation_batch_sizes() -> None:
+    parser = cli_module.build_parser()  # type: ignore[attr-defined]
+    assert parser.parse_args(["process-ai", "--limit", "1"]).limit == 1
+    assert parser.parse_args(["process-ai", "--limit", "2"]).limit == 2
+    with pytest.raises(SystemExit):
+        parser.parse_args(["process-ai", "--limit", "4"])
 
 
 def test_ai_pages_are_filtered_before_the_per_run_limit() -> None:
