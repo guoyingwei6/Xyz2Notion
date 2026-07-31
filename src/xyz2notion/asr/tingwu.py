@@ -525,6 +525,12 @@ class TingwuClient:
                 )
         if len(matches) == 1:
             return self.task_from_record(matches[0], directory_id=directory_id, title=title)
+        if provider_task_id == source_task_id:
+            raise _failure(
+                ProviderErrorCategory.UNAVAILABLE,
+                "Tingwu submission record is not visible in the directory",
+                code="record_not_visible",
+            )
         return TingwuTask(
             provider_task_id=provider_task_id,
             source_task_id=source_task_id,
@@ -626,8 +632,8 @@ class TingwuClient:
                 "files": list(files),
             },
         )
-        # The current web client only checks the top-level ``success`` flag for
-        # this endpoint; successful responses do not guarantee a ``data`` key.
+        # A top-level success flag is not enough for automation: without a real
+        # record identifier the web UI may never show a new transcription.
         data = response.get("data")
         identifiers: list[object] = []
         if isinstance(data, Mapping):
@@ -641,7 +647,13 @@ class TingwuClient:
                     identifiers.append(value)
         elif isinstance(data, list):
             identifiers.extend(data)
-        identifier = next((value for value in identifiers if value is not None), source_task_id)
+        identifier = next((value for value in identifiers if value is not None), None)
+        if identifier is None:
+            raise _failure(
+                ProviderErrorCategory.SCHEMA_CHANGED,
+                "Tingwu did not return a confirmed transcription record ID",
+                code="unconfirmed_record",
+            )
         return TingwuTask(
             provider_task_id=str(identifier),
             state=TingwuTaskState.SUBMITTED,

@@ -490,15 +490,29 @@ def test_source_rejected_and_submission_shape() -> None:
     assert state is TingwuTaskState.FAILED
     assert files == []
 
+    with pytest.raises(ProviderError) as unconfirmed:
+        client_for(
+            lambda _request: httpx.Response(200, json={"code": "0", "success": True})
+        ).start_record(
+            "d",
+            "e",
+            [],
+            source_task_id="source",
+        )
+    assert unconfirmed.value.failure.code == "unconfirmed_record"
+
     submitted = client_for(
-        lambda _request: httpx.Response(200, json={"code": "0", "success": True})
+        lambda _request: httpx.Response(
+            200,
+            json={"code": "0", "success": True, "data": {"genRecordId": "record-1"}},
+        )
     ).start_record(
         "d",
         "e",
         [],
         source_task_id="source",
     )
-    assert submitted.provider_task_id == "source"
+    assert submitted.provider_task_id == "record-1"
     assert submitted.source_task_id == "source"
 
     sequence = iter(

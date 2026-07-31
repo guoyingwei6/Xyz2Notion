@@ -2,6 +2,19 @@ name: Check Tingwu Authentication
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "read-only auth check or one visible test record"
+        required: true
+        default: "auth"
+        type: choice
+        options:
+          - auth
+          - visible-smoke
+      confirmation:
+        description: "Required only for visible-smoke: CREATE_TINGWU_VISIBLE_SMOKE"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -24,7 +37,18 @@ jobs:
           python -m pip install uv==0.9.28
           uv sync --locked
 
-      - name: Check Tingwu Cookie without submitting audio
+      - name: Check Tingwu Cookie or visible record creation
         env:
+          MODE: ${{ inputs.mode }}
+          CONFIRMATION: ${{ inputs.confirmation }}
           TINGWU_COOKIE: ${{ secrets.TINGWU_COOKIE }}
-        run: uv run xyz2notion tingwu-check
+        run: |
+          set -euo pipefail
+          if [[ "$MODE" == "visible-smoke" ]]; then
+            uv run xyz2notion tingwu-visible-smoke \
+              --confirm "$CONFIRMATION" \
+              --poll-attempts 3 \
+              --visible-attempts 3
+          else
+            uv run xyz2notion tingwu-check
+          fi

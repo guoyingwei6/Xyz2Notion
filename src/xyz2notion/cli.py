@@ -8,7 +8,7 @@ import time
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
-from datetime import date
+from datetime import UTC, date, datetime
 
 from pydantic import SecretStr
 
@@ -50,6 +50,12 @@ from xyz2notion.sync.pipeline import collect_metadata
 from xyz2notion.xiaoyuzhou.client import XiaoyuzhouAPIError, XiaoyuzhouClient
 
 ASR_INTER_EPISODE_SECONDS = 60
+TINGWU_SMOKE_AUDIO_URL = (
+    "https://raw.githubusercontent.com/Jakobovski/"
+    "free-spoken-digit-dataset/master/recordings/0_jackson_0.wav"
+)
+TINGWU_SMOKE_DIRECTORY = "Xyz2Notion smoke test"
+TINGWU_SMOKE_CONFIRMATION = "CREATE_TINGWU_VISIBLE_SMOKE"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -155,6 +161,27 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(
         "tingwu-check",
         help="verify the Tingwu Cookie with one read-only directory request",
+    )
+    tingwu_smoke = subparsers.add_parser(
+        "tingwu-visible-smoke",
+        help="create one public-audio Tingwu record and verify it is visible",
+    )
+    tingwu_smoke.add_argument(
+        "--confirm",
+        required=True,
+        help=f"required external-write confirmation: {TINGWU_SMOKE_CONFIRMATION}",
+    )
+    tingwu_smoke.add_argument(
+        "--poll-attempts",
+        type=int,
+        default=3,
+        help="source-parser polling attempts before giving up",
+    )
+    tingwu_smoke.add_argument(
+        "--visible-attempts",
+        type=int,
+        default=3,
+        help="directory visibility checks after submission",
     )
     sync_metadata = subparsers.add_parser(
         "sync-metadata",
@@ -1533,6 +1560,61 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 5
         print("Tingwu authentication OK")
+        return 0
+    if args.command == "tingwu-visible-smoke":
+        if args.confirm != TINGWU_SMOKE_CONFIRMATION:
+            print(
+                f"Confirmation error: use --confirm {TINGWU_SMOKE_CONFIRMATION}",
+                file=sys.stderr,
+            )
+            return 2
+        if args.poll_attempts < 1 or args.visible_attempts < 1:
+            print("Confirmation error: attempts must be positive", file=sys.stderr)
+            return 2
+        try:
+            credentials = load_runtime_credentials()
+            credentials.require("tingwu_cookie")
+            if credentials.tingwu_cookie is None:
+                raise AssertionError("credential requirement did not narrow tingwu_cookie")
+            title = f"Xyz2Notion smoke {datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
+            with TingwuClient(credentials.tingwu_cookie, max_retries=0) as tingwu:
+                task = tingwu.submit_episode(
+                    TINGWU_SMOKE_DIRECTORY,
+                    title,
+                    TINGWU_SMOKE_AUDIO_URL,
+                    parse_poll_attempts=args.poll_attempts,
+                )
+                visible = 0
+                state = task.state.value
+                for attempt in range(args.visible_attempts):
+                    records = tingwu.find_records(task.directory_id, title)
+                    visible = len(records)
+                    if visible:
+                        state = tingwu.task_from_record(
+                            records[0],
+                            directory_id=task.directory_id,
+                            title=title,
+                        ).state.value
+                        break
+                    if attempt + 1 < args.visible_attempts:
+                        time.sleep(2)
+        except (ConfigurationError, MissingCredentialError) as exc:
+            print(f"Configuration error: {exc}", file=sys.stderr)
+            return 2
+        except ProviderError as exc:
+            code = f"; code={exc.failure.code}" if exc.failure.code else ""
+            print(
+                f"Tingwu visible smoke failed (category={exc.failure.category.value}{code})",
+                file=sys.stderr,
+            )
+            return 5
+        if visible < 1:
+            print(
+                "Tingwu visible smoke failed (category=unavailable; code=record_not_visible)",
+                file=sys.stderr,
+            )
+            return 5
+        print(f"Tingwu visible smoke OK (submitted=1; visible_records={visible}; state={state})")
         return 0
     if args.command == "sync-metadata":
         try:

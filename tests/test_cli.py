@@ -179,6 +179,80 @@ def test_tingwu_check_reports_only_safe_failure_category(
     assert "secret fixture detail" not in error
 
 
+def test_tingwu_visible_smoke_requires_explicit_confirmation(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("TINGWU_COOKIE", "secret_fixture_cookie")  # type: ignore[attr-defined]
+    assert main(["tingwu-visible-smoke", "--confirm", "WRONG"]) == 2
+    error = capsys.readouterr().err  # type: ignore[attr-defined]
+    assert "CREATE_TINGWU_VISIBLE_SMOKE" in error
+
+
+def test_tingwu_visible_smoke_reports_only_aggregate_status(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("TINGWU_COOKIE", "secret_fixture_cookie")  # type: ignore[attr-defined]
+
+    class FakeTask:
+        provider_task_id = "private-task"
+        directory_id = "private-directory"
+        title = "private-title"
+        state = SimpleNamespace(value="submitted")
+
+    class FakeVisibleTingwu:
+        smoke_title = ""
+
+        def __init__(self, _cookie: object, *, max_retries: int) -> None:
+            assert max_retries == 0
+
+        def __enter__(self) -> "FakeVisibleTingwu":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            pass
+
+        def submit_episode(
+            self,
+            directory_name: str,
+            title: str,
+            audio_url: str,
+            *,
+            parse_poll_attempts: int,
+        ) -> FakeTask:
+            assert directory_name
+            assert title.startswith("Xyz2Notion smoke ")
+            assert audio_url.startswith("https://")
+            assert parse_poll_attempts == 3
+            self.smoke_title = title
+            return FakeTask()
+
+        def find_records(self, _directory_id: str, _title: str) -> tuple[dict[str, object]]:
+            return ({"genRecordId": "private-task", "status": 1, "showName": "private-title"},)
+
+        def task_from_record(
+            self,
+            _record: object,
+            *,
+            directory_id: str,
+            title: str,
+        ) -> object:
+            assert directory_id == "private-directory"
+            assert title == self.smoke_title
+            return SimpleNamespace(state=SimpleNamespace(value="processing"))
+
+    monkeypatch.setattr(cli_module, "TingwuClient", FakeVisibleTingwu)  # type: ignore[attr-defined]
+    assert main(["tingwu-visible-smoke", "--confirm", "CREATE_TINGWU_VISIBLE_SMOKE"]) == 0
+    output = capsys.readouterr().out  # type: ignore[attr-defined]
+    assert "submitted=1" in output
+    assert "visible_records=1" in output
+    assert "state=processing" in output
+    assert "private-title" not in output
+    assert "private-task" not in output
+    assert "secret_fixture_cookie" not in output
+
+
 def test_sync_metadata_success_reports_only_counts(
     capsys: object,
     monkeypatch: object,

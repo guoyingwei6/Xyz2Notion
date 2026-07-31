@@ -234,6 +234,21 @@ def test_unique_persisted_record_id_resolves_duplicate_titles_safely() -> None:
     assert caught.value.failure.code == "ambiguous_record"
 
 
+def test_unconfirmed_source_task_id_without_record_is_not_treated_as_submitted() -> None:
+    client = _tingwu_client(lambda _request: _ok([]))
+
+    with pytest.raises(ProviderError) as caught:
+        client.resume_episode(
+            "directory",
+            "标题",
+            provider_task_id="source-id",
+            source_task_id="source-id",
+        )
+
+    assert caught.value.failure.category is ProviderErrorCategory.UNAVAILABLE
+    assert caught.value.failure.code == "record_not_visible"
+
+
 def test_in_flight_processor_uses_read_only_resume_path() -> None:
     record = PipelineRecord(eid="episode").transition(PipelineState.ASR_SUBMITTED)
     store = _StateStore(
