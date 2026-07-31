@@ -3,20 +3,26 @@
 Xyz2Notion 会把统计结果与数据来源一起写入 Notion，避免把不同精度的数据混为
 一谈。
 
-## 口径
+## Notion 基线与增量口径
 
-- `全部`总时长与 Podcast 排行来自小宇宙 `mileage` 原始秒数；
-- 已结束历史月使用 `monthly-wrapped` 的 `playedSeconds` 和 `playedDays`；
-- 当前月不使用可能尚未结算的月记，按 Episode 播放进度实时推导；
-- 年统计由校正后的月统计汇总；
-- ISO 周、日和当前月来自 Episode 的播放进度及最近播放时间；
-- Podcast 数、Episode 数和日数按稳定 ID 去重；
-- 每条周期记录写入 `Statistics Source`，值为 `mileage`、`monthly_wrapped`、
-  `episodes` 或 `mixed`。
+首次启用时，Xyz2Notion 只在 Notion 内建立统计基线：
 
-小宇宙当前只读接口没有提供每一天的精确增量。日/周热力图因此会把一个
-Episode 当前累计进度归到它的最近播放日。这是透明标注的 Episode 推导值，
-不是伪装成官方日统计。
+- 现有 `全部`、年、月、周、日和 Podcast 总时长原样保留；
+- 每个已有 Episode 的当前 `Played Seconds` 记为基线，不再次计入总时长；
+- 基线版本最后写入“全部”记录。中途失败时不会提前启用半成品基线。
+
+以后每天同步完成后，统计器只读取 Notion 已保存的 Episode：
+
+- `新增秒数 = Played Seconds - Episode 基线 - 已记账增量`；
+- 新增秒数按 `Last Played At` 写入 Episode 自己的日期账本；
+- 总时长、年/月/周/日、Podcast 排行和热力图都由“原基线 + 日期账本”确定性重算；
+- 重试不会重复累加，同一播放进度重复同步时新增秒数为 0；
+- 播放进度倒退时不扣减历史，也不会在重新超过已记账高水位前重复计数；
+- 技术属性只用于恢复与计算，不加入主页展示视图。
+
+这一阶段不会为了统计调用小宇宙历史、月记或里程接口。小宇宙当前只读接口也没有
+提供逐日播放事件，因此一次同步中新发现的增量统一归到该 Episode 最新的
+`Last Played At` 日期。
 
 ## 热力图
 
@@ -29,3 +35,6 @@ Episode 当前累计进度归到它的最近播放日。这是透明标注的 Ep
   服务器；
 - 图片 caption 保存年度和内容哈希。同年数据未变化时不重复上传；变化时只
   更新该年度的受管图片块，用户其他块不受影响。
+
+`rebuild-statistics` 和 `rebuild-heatmap` 同样只读取 Notion，不加载
+`XIAOYUZHOU_REFRESH_TOKEN`。

@@ -311,6 +311,26 @@ def test_progress_change_updates_only_changed_managed_field() -> None:
     assert set(fake.updates[0][1]["properties"]) == {"Played Seconds", "Progress Ring"}
 
 
+def test_metadata_sync_never_overwrites_notion_managed_statistics_totals() -> None:
+    fake = FakeRows()
+    synchronizer = MetadataSynchronizer(fake, resources())
+    synchronizer.sync(sample_snapshot())
+    podcast = page_by_key(fake, "ds-podcast", "PID", "podcast-fixture-1")
+    podcast["properties"]["Total Listening Seconds"] = {"number": 999}
+    podcast["properties"]["Statistics Baseline Seconds"] = {"number": 900}
+    fake.updates.clear()
+
+    synchronizer.sync(sample_snapshot())
+
+    assert podcast["properties"]["Total Listening Seconds"] == {"number": 999}
+    assert podcast["properties"]["Statistics Baseline Seconds"] == {"number": 900}
+    assert all(
+        "Total Listening Seconds" not in update.get("properties", {})
+        and "Statistics Baseline Seconds" not in update.get("properties", {})
+        for _, update in fake.updates
+    )
+
+
 def test_user_fields_blocks_and_processed_asr_status_are_preserved() -> None:
     fake = FakeRows()
     synchronizer = MetadataSynchronizer(fake, resources())

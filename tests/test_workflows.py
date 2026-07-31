@@ -145,6 +145,8 @@ def test_maintenance_workflow_has_safe_dispatch_guards() -> None:
     assert "confirm_changes" in text
     assert 'CONFIRM_CHANGES" != "true' in text
     assert "NOTION_MIGRATION_PAGE_ID" in text
+    assert "XIAOYUZHOU_REFRESH_TOKEN" not in text
+    assert "XIAOYUZHOU_DEVICE_ID" not in text
 
 
 def test_all_notion_writers_share_one_concurrency_group() -> None:

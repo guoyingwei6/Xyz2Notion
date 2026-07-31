@@ -341,6 +341,11 @@ def test_initializer_creates_complete_clean_room_template() -> None:
     }
     assert podcast_properties["收听分钟"]["id"] in ranking_property_ids
     assert podcast_properties["Total Listening Seconds"]["id"] not in ranking_property_ids
+    assert "Statistics Baseline Seconds" in podcast_properties
+    assert "Statistics Baseline Seconds" in episode_properties
+    assert "Statistics Baseline Date" in episode_properties
+    assert "Statistics Ledger" in episode_properties
+    assert "Statistics Baseline Version" in year_properties
 
     linked_database_ids = {view["parent"]["database_id"] for view in fake.views.values()}
     assert len(linked_database_ids) == 4

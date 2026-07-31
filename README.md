@@ -169,8 +169,9 @@ uv run xyz2notion sync-metadata
 ```
 
 命令有 20 请求硬预算和 3 秒最小请求间隔，再按 Author ID、PID、EID 执行最小
-差异 upsert；不会覆盖未知属性、用户笔记或单集页面块。为避免有限快照覆盖历史，
-当前不会自动重算统计、排行或热力图。统计口径见
+差异 upsert；不会覆盖未知属性、用户笔记或单集页面块。元数据写入后，统计只从
+Notion Episode 的基线与日期增量账本更新，不追加任何小宇宙请求；首次启用不会
+重复累计现有总时长。统计口径见
 [`docs/statistics.md`](docs/statistics.md)。
 
 推进单集的转写、摘要和发布：

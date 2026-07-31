@@ -4,7 +4,10 @@ from dataclasses import replace
 from datetime import UTC, date, datetime
 from typing import Any
 
-from xyz2notion.models import Episode, ListeningStatus, Podcast
+import pytest
+
+import xyz2notion.statistics.incremental as incremental_module
+from xyz2notion.models import Episode, ListeningStatus, PeriodKind, Podcast
 from xyz2notion.notion.client import JsonObject
 from xyz2notion.notion.initializer import HOME_SUMMARY_MARKER_URL
 from xyz2notion.notion.schema import NotionResource
@@ -13,6 +16,10 @@ from xyz2notion.statistics.calculator import (
     calculate_statistics,
 )
 from xyz2notion.statistics.heatmap import render_heatmap_png, render_heatmap_svg
+from xyz2notion.statistics.incremental import (
+    BASELINE_VERSION,
+    NotionIncrementalStatistics,
+)
 from xyz2notion.statistics.notion_sync import HeatmapPublisher, StatisticsSynchronizer
 from xyz2notion.sync.normalizer import MetadataSnapshot
 
@@ -450,3 +457,235 @@ def test_legacy_heatmap_caption_migrates_once_then_stays_idempotent() -> None:
     assert fake.uploads == 1
     assert len(fake.blocks["root"]) == 1
     assert fake.blocks["root"][0]["image"]["caption"][0]["text"]["content"] == "\u200b"
+
+
+def _rich(value: str) -> JsonObject:
+    return {"rich_text": [{"plain_text": value}]}
+
+
+def _period_page(
+    page_id: str,
+    key: str,
+    *,
+    seconds: int,
+    podcast_count: int,
+    played_days: int,
+) -> JsonObject:
+    return {
+        "id": page_id,
+        "properties": {
+            "Name": {"title": [{"plain_text": key}]},
+            "Period Key": _rich(key),
+            "Exact Listening Seconds": {"number": seconds},
+            "收听小时": {"number": round(seconds / 3600, 1)},
+            "Podcast Count": {"number": podcast_count},
+            "Played Days": {"number": played_days},
+            "Statistics Source": _rich("legacy"),
+        },
+    }
+
+
+def test_notion_incremental_statistics_preserves_baseline_and_never_double_counts() -> None:
+    fake = FakeStatisticsNotion()
+    fake.blocks["root"] = [
+        {
+            "id": "summary",
+            "type": "paragraph",
+            "paragraph": {
+                "rich_text": [
+                    {
+                        "type": "text",
+                        "text": {
+                            "content": "\u200b",
+                            "link": {"url": HOME_SUMMARY_MARKER_URL},
+                        },
+                    }
+                ]
+            },
+        }
+    ]
+    fake.pages["ds-podcast"] = [
+        {
+            "id": "podcast-page",
+            "properties": {
+                "Name": {"title": [{"plain_text": "Private podcast"}]},
+                "PID": _rich("p1"),
+                "Total Listening Seconds": {"number": 3600},
+                "Rank": {"number": 1},
+            },
+        }
+    ]
+    fake.pages["ds-episode"] = [
+        {
+            "id": "episode-page",
+            "properties": {
+                "Name": {"title": [{"plain_text": "Private episode"}]},
+                "EID": _rich("e1"),
+                "Played Seconds": {"number": 600},
+                "Last Played At": {"date": {"start": "2026-02-15T08:00:00Z"}},
+                "Published At": {"date": {"start": "2026-02-01T08:00:00Z"}},
+                "Podcast": {"relation": [{"id": "podcast-page"}]},
+            },
+        }
+    ]
+    fake.pages["ds-all"] = [
+        _period_page(
+            "all-page",
+            "all",
+            seconds=5400,
+            podcast_count=2,
+            played_days=3,
+        )
+    ]
+    fake.pages["ds-year"] = [
+        _period_page(
+            "year-page",
+            "2026",
+            seconds=5400,
+            podcast_count=2,
+            played_days=3,
+        )
+    ]
+    fake.pages["ds-month"] = [
+        _period_page(
+            "month-page",
+            "2026-02",
+            seconds=1800,
+            podcast_count=1,
+            played_days=1,
+        )
+    ]
+    fake.pages["ds-week"] = [
+        _period_page(
+            "week-page",
+            "2026-W07",
+            seconds=1800,
+            podcast_count=1,
+            played_days=1,
+        )
+    ]
+    fake.pages["ds-day"] = [
+        _period_page(
+            "day-page",
+            "2026-02-15",
+            seconds=1800,
+            podcast_count=1,
+            played_days=1,
+        )
+    ]
+    synchronizer = NotionIncrementalStatistics(
+        fake,
+        notion_resources(),
+        root_page_id="root",
+    )
+
+    baseline = synchronizer.sync(today=date(2026, 2, 15))
+
+    assert baseline.mode == "baseline"
+    assert baseline.baseline_episodes == 1
+    assert baseline.delta_seconds == 0
+    assert fake.pages["ds-all"][0]["properties"]["Exact Listening Seconds"]["number"] == 5400
+    assert (
+        fake.pages["ds-all"][0]["properties"]["Statistics Baseline Version"]["rich_text"][0][
+            "text"
+        ]["content"]
+        == BASELINE_VERSION
+    )
+    assert fake.pages["ds-episode"][0]["properties"]["Statistics Baseline Seconds"]["number"] == 600
+    assert (
+        fake.pages["ds-podcast"][0]["properties"]["Statistics Baseline Seconds"]["number"] == 3600
+    )
+
+    fake.pages["ds-episode"][0]["properties"]["Played Seconds"] = {"number": 900}
+    fake.pages["ds-episode"][0]["properties"]["Last Played At"] = {
+        "date": {"start": "2026-02-16T08:00:00Z"}
+    }
+
+    applied = synchronizer.sync(today=date(2026, 2, 16))
+    repeated = synchronizer.sync(today=date(2026, 2, 16))
+
+    assert applied.mode == "incremental"
+    assert applied.ledger_episodes == 1
+    assert applied.delta_seconds == 300
+    assert applied.total_seconds == 5700
+    assert repeated.delta_seconds == 0
+    assert repeated.total_seconds == 5700
+    assert fake.pages["ds-all"][0]["properties"]["Exact Listening Seconds"]["number"] == 5700
+    assert fake.pages["ds-podcast"][0]["properties"]["Total Listening Seconds"]["number"] == 3900
+    new_day = next(
+        page
+        for page in fake.pages["ds-day"]
+        if (
+            page["properties"]["Period Key"]["rich_text"][0].get("plain_text")
+            or page["properties"]["Period Key"]["rich_text"][0]["text"]["content"]
+        )
+        == "2026-02-16"
+    )
+    assert new_day["properties"]["Exact Listening Seconds"]["number"] == 300
+    ledger = fake.pages["ds-episode"][0]["properties"]["Statistics Ledger"]
+    assert "2026-02-16" in str(ledger)
+    assert "累计收听" in str(fake.blocks["root"][0])
+
+
+def test_incremental_statistics_parsers_fail_closed_on_malformed_ledgers() -> None:
+    assert incremental_module._plain_text(None) == ""  # type: ignore[attr-defined]
+    assert incremental_module._plain_text({}) == ""  # type: ignore[attr-defined]
+    assert incremental_module._number({}, "Missing") == 0  # type: ignore[attr-defined]
+    assert (  # type: ignore[attr-defined]
+        incremental_module._number({"Value": {"number": -2}}, "Value") == 0
+    )
+    assert incremental_module._day({}, "Missing") is None  # type: ignore[attr-defined]
+    assert (  # type: ignore[attr-defined]
+        incremental_module._day({"Value": {"date": {}}}, "Value") is None
+    )
+    assert (  # type: ignore[attr-defined]
+        incremental_module._day(
+            {"Value": {"date": {"start": "not-a-date"}}},
+            "Value",
+        )
+        is None
+    )
+    assert incremental_module._relation_id({}, "Missing") is None  # type: ignore[attr-defined]
+    assert (  # type: ignore[attr-defined]
+        incremental_module._relation_id(
+            {"Value": {"relation": [None, {"id": "page"}]}},
+            "Value",
+        )
+        == "page"
+    )
+    with pytest.raises(ValueError, match="invalid JSON"):
+        incremental_module._ledger(  # type: ignore[attr-defined]
+            {"Statistics Ledger": _rich("{")}
+        )
+    with pytest.raises(ValueError, match="date-to-seconds"):
+        incremental_module._ledger(  # type: ignore[attr-defined]
+            {"Statistics Ledger": _rich("[]")}
+        )
+    with pytest.raises(ValueError, match="invalid date"):
+        incremental_module._ledger(  # type: ignore[attr-defined]
+            {"Statistics Ledger": _rich('{"bad":1}')}
+        )
+    with pytest.raises(ValueError, match="invalid seconds"):
+        incremental_module._ledger(  # type: ignore[attr-defined]
+            {"Statistics Ledger": _rich('{"2026-01-01":"bad"}')}
+        )
+    assert incremental_module._period_bounds(  # type: ignore[attr-defined]
+        PeriodKind.ALL,
+        "all",
+        date(2026, 1, 2),
+    ) == (date(2026, 1, 2), date(2026, 1, 2))
+    assert incremental_module._period_bounds(  # type: ignore[attr-defined]
+        PeriodKind.YEAR,
+        "2026",
+        date(2026, 1, 2),
+    ) == (date(2026, 1, 1), date(2026, 12, 31))
+    assert incremental_module._period_bounds(  # type: ignore[attr-defined]
+        PeriodKind.MONTH,
+        "2024-02",
+        date(2026, 1, 2),
+    ) == (date(2024, 2, 1), date(2024, 2, 29))
+    assert incremental_module._period_bounds(  # type: ignore[attr-defined]
+        PeriodKind.DAY,
+        "2026-01-02",
+        date(2026, 1, 2),
+    ) == (date(2026, 1, 2), date(2026, 1, 2))

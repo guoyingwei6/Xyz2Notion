@@ -54,8 +54,6 @@ jobs:
           OPERATION: ${{ inputs.operation }}
           EPISODE_EID: ${{ inputs.episode_eid }}
           CONFIRM_CHANGES: ${{ inputs.confirm_changes }}
-          XIAOYUZHOU_REFRESH_TOKEN: ${{ secrets.XIAOYUZHOU_REFRESH_TOKEN }}
-          XIAOYUZHOU_DEVICE_ID: ${{ vars.XIAOYUZHOU_DEVICE_ID }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
           NOTION_MIGRATION_PAGE_ID: ${{ secrets.NOTION_MIGRATION_PAGE_ID }}

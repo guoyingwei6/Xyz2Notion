@@ -208,8 +208,32 @@ def test_sync_metadata_success_reports_only_counts(
             assert snapshot is fixture_snapshot
             return SimpleNamespace(created=2, updated=1, unchanged=3)
 
+    class FakeStatistics:
+        def __init__(
+            self,
+            _api: object,
+            resources: object,
+            *,
+            root_page_id: str,
+        ) -> None:
+            assert resources == {}
+            assert root_page_id == "fixture-page"
+
+        def sync(self) -> object:
+            return SimpleNamespace(
+                mode="baseline",
+                delta_seconds=0,
+                total_seconds=522_000,
+                daily=(),
+            )
+
     monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
     monkeypatch.setattr(cli_module, "MetadataSynchronizer", FakeSynchronizer)  # type: ignore[attr-defined]
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        cli_module,
+        "NotionIncrementalStatistics",
+        FakeStatistics,
+    )
     monkeypatch.setattr(  # type: ignore[attr-defined]
         cli_module,
         "collect_metadata",
@@ -218,7 +242,10 @@ def test_sync_metadata_success_reports_only_counts(
     assert main(["sync-metadata"]) == 0
     output = capsys.readouterr().out  # type: ignore[attr-defined]
     assert "created: 2, updated: 1, unchanged: 3" in output
-    assert "statistics: paused for account safety" in output
+    assert "statistics_mode: baseline" in output
+    assert "statistics_delta_seconds: 0" in output
+    assert "statistics_total_seconds: 522000" in output
+    assert "heatmap: baseline_preserved" in output
     assert "episodes played: 1, playlist: 2, favorites: 1" in output
 
 
@@ -1430,6 +1457,8 @@ def test_notion_backlog_audit_reports_only_aggregate_counts(
     output = capsys.readouterr().out  # type: ignore[attr-defined]
     assert "normal_ai_candidates=1" in output
     assert "retry_ai_candidates=1" in output
+    assert "statistics_total_seconds=0" in output
+    assert "statistics_baseline=unset" in output
     assert "asr_providers: siliconflow=1, tingwu_cookie=1" in output
     assert "asr_models: FunAudioLLM/SenseVoiceSmall=1, tingwu-web=1" in output
     assert "local_whisper:unsupported=1" in output
@@ -1925,8 +1954,72 @@ def test_redo_episode_success_does_not_print_eid(
     assert "private-eid" not in output
 
 
-def test_rebuild_statistics_and_heatmap_are_safety_stopped(capsys: object) -> None:
-    assert main(["rebuild-statistics"]) == 6
-    assert "Safety stop" in capsys.readouterr().err  # type: ignore[attr-defined]
-    assert main(["rebuild-heatmap"]) == 6
-    assert "Safety stop" in capsys.readouterr().err  # type: ignore[attr-defined]
+def test_rebuild_statistics_and_heatmap_require_only_notion_credentials(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.delenv("NOTION_TOKEN", raising=False)  # type: ignore[attr-defined]
+    assert main(["rebuild-statistics"]) == 2
+    assert "notion_token" in capsys.readouterr().err  # type: ignore[attr-defined]
+    assert main(["rebuild-heatmap"]) == 2
+    assert "notion_token" in capsys.readouterr().err  # type: ignore[attr-defined]
+
+
+def test_rebuild_statistics_runs_notion_only_reconciliation(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionClient", FakeContextClient)  # type: ignore[attr-defined]
+
+    class FakeInitializer:
+        def __init__(self, _api: object, page_id: str) -> None:
+            assert page_id == "fixture-page"
+
+        def initialize(self) -> object:
+            return SimpleNamespace(resources={"safe": "resources"})
+
+    class FakeStatistics:
+        def __init__(
+            self,
+            _api: object,
+            resources: object,
+            *,
+            root_page_id: str,
+        ) -> None:
+            assert resources == {"safe": "resources"}
+            assert root_page_id == "fixture-page"
+
+        def sync(self) -> object:
+            return SimpleNamespace(
+                mode="incremental",
+                baseline_episodes=0,
+                ledger_episodes=2,
+                delta_seconds=300,
+                total_seconds=522_300,
+                daily=(),
+            )
+
+    class FakeHeatmap:
+        def __init__(self, _api: object, root_page_id: str) -> None:
+            assert root_page_id == "fixture-page"
+
+        def publish(self, _year: int, daily: object) -> object:
+            assert daily == ()
+            return SimpleNamespace(action="unchanged")
+
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        cli_module,
+        "NotionIncrementalStatistics",
+        FakeStatistics,
+    )
+    monkeypatch.setattr(cli_module, "HeatmapPublisher", FakeHeatmap)  # type: ignore[attr-defined]
+
+    assert main(["rebuild-statistics"]) == 0
+    output = capsys.readouterr().out  # type: ignore[attr-defined]
+    assert "Notion-only statistics reconciliation OK" in output
+    assert "delta_seconds=300" in output
+    assert "total_seconds=522300" in output
+    assert "heatmap=unchanged" in output

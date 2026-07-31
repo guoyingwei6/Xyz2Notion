@@ -7,6 +7,7 @@ import sys
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
+from datetime import date
 
 from pydantic import SecretStr
 
@@ -41,6 +42,8 @@ from xyz2notion.orchestration.recovery import reset_episode_ai
 from xyz2notion.orchestration.state_store import NotionEpisodeStateStore
 from xyz2notion.security import CredentialKind, allowed_hosts
 from xyz2notion.state import PipelineRecord, PipelineState
+from xyz2notion.statistics.incremental import NotionIncrementalStatistics
+from xyz2notion.statistics.notion_sync import HeatmapPublisher
 from xyz2notion.sync.metadata import MetadataSynchronizer
 from xyz2notion.sync.pipeline import collect_metadata
 from xyz2notion.xiaoyuzhou.client import XiaoyuzhouAPIError, XiaoyuzhouClient
@@ -508,10 +511,28 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
             resources = NotionInitializer(notion, page_id).discover_existing_resources()
             episode_resource = resources.get("episode")
             podcast_resource = resources.get("podcast")
+            all_resource = resources.get("all")
             if episode_resource is None or podcast_resource is None:
                 raise NotionAPIError("Required Xyz2Notion databases were not found")
             episodes = notion.query_data_source(episode_resource.data_source_id)
             podcasts = notion.query_data_source(podcast_resource.data_source_id)
+            total_seconds = 0
+            baseline_version_set = False
+            if all_resource is not None:
+                totals = notion.query_data_source(all_resource.data_source_id)
+                for page in totals:
+                    properties = page.get("properties")
+                    if not isinstance(properties, Mapping):
+                        continue
+                    if _notion_property_text(properties, "Period Key") != "all":
+                        continue
+                    total_seconds = int(
+                        _notion_property_number(properties, "Exact Listening Seconds")
+                    )
+                    baseline_version_set = bool(
+                        _notion_property_text(properties, "Statistics Baseline Version")
+                    )
+                    break
 
             normal_candidates = episode_candidates(_eligible_ai_pages(episodes, retry_failed=False))
             retry_candidates = episode_candidates(_eligible_ai_pages(episodes, retry_failed=True))
@@ -599,6 +620,8 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
         "Notion backlog audit OK "
         f"(episodes={len(episodes)}; normal_ai_candidates={len(normal_candidates)}; "
         f"retry_ai_candidates={len(retry_candidates)}; statuses: {status_summary}; "
+        f"statistics_total_seconds={total_seconds}; "
+        f"statistics_baseline={'set' if baseline_version_set else 'unset'}; "
         f"asr_providers: {provider_summary}; asr_models: {model_summary}; "
         f"final_failure_categories: {failure_summary}; "
         f"zero_play_total={zero_play_total}; "
@@ -768,13 +791,50 @@ def _run_redo_episode(args: argparse.Namespace) -> int:
 
 
 def _run_rebuild(args: argparse.Namespace, *, heatmap_only: bool) -> int:
-    _ = (args, heatmap_only)
+    try:
+        credentials = load_runtime_credentials()
+        credentials.require("notion_token")
+        page_id = args.page_id or credentials.notion_page_id
+        if not page_id:
+            raise MissingCredentialError(
+                "Missing target page: set NOTION_PAGE_ID or pass --page-id"
+            )
+        if credentials.notion_token is None:
+            raise AssertionError("credential requirement did not narrow notion_token")
+        with NotionClient(credentials.notion_token) as notion:
+            initialization = NotionInitializer(notion, page_id).initialize()
+            report = NotionIncrementalStatistics(
+                notion,
+                initialization.resources,
+                root_page_id=page_id,
+            ).sync()
+            heatmap_action = "baseline_preserved"
+            if report.mode == "incremental":
+                heatmap_action = (
+                    HeatmapPublisher(notion, page_id)
+                    .publish(
+                        date.today().year,
+                        report.daily,
+                    )
+                    .action
+                )
+    except (ConfigurationError, MissingCredentialError) as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    except NotionAPIError as exc:
+        print(f"Notion error: {exc}", file=sys.stderr)
+        return 4
+    except ValueError as exc:
+        print(f"Statistics error: {exc}", file=sys.stderr)
+        return 6
+    operation = "heatmap" if heatmap_only else "statistics"
     print(
-        "Safety stop: statistics and heatmap rebuilds from Xiaoyuzhou are disabled "
-        "until a Notion-side incremental calculation is implemented.",
-        file=sys.stderr,
+        f"Notion-only {operation} reconciliation OK "
+        f"(mode={report.mode}; baseline_episodes={report.baseline_episodes}; "
+        f"ledger_episodes={report.ledger_episodes}; delta_seconds={report.delta_seconds}; "
+        f"total_seconds={report.total_seconds}; heatmap={heatmap_action})"
     )
-    return 6
+    return 0
 
 
 def _is_dashboard_marker(block: Mapping[str, object]) -> bool:
@@ -1284,6 +1344,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                     notion,
                     initialization.resources,
                 ).sync(snapshot)
+                statistics_report = NotionIncrementalStatistics(
+                    notion,
+                    initialization.resources,
+                    root_page_id=page_id,
+                ).sync()
+                heatmap_action = "baseline_preserved"
+                if statistics_report.mode == "incremental":
+                    heatmap_action = (
+                        HeatmapPublisher(notion, page_id)
+                        .publish(
+                            date.today().year,
+                            statistics_report.daily,
+                        )
+                        .action
+                    )
         except (ConfigurationError, MissingCredentialError) as exc:
             print(f"Configuration error: {exc}", file=sys.stderr)
             return 2
@@ -1293,11 +1368,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         except NotionAPIError as exc:
             print(f"Notion error: {exc}", file=sys.stderr)
             return 4
+        except ValueError as exc:
+            print(f"Statistics error: {exc}", file=sys.stderr)
+            return 6
         print(
             "Metadata synchronization OK "
             f"(created: {report.created}, updated: {report.updated}, "
             f"unchanged: {report.unchanged}; "
-            "statistics: paused for account safety; "
+            f"statistics_mode: {statistics_report.mode}, "
+            f"statistics_delta_seconds: {statistics_report.delta_seconds}, "
+            f"statistics_total_seconds: {statistics_report.total_seconds}, "
+            f"heatmap: {heatmap_action}; "
             f"episodes played: {played_count}, "
             f"playlist: {playlist_count}, favorites: {favorite_count})"
         )

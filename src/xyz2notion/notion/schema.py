@@ -114,6 +114,10 @@ def period_scalar_properties() -> JsonObject:
         "Podcast Count": number_property(),
         "Played Days": number_property(),
         "Statistics Source": text_property(),
+        "Statistics Baseline Seconds": number_property(),
+        "Statistics Baseline Podcast Count": number_property(),
+        "Statistics Baseline Played Days": number_property(),
+        "Statistics Baseline Version": text_property(),
     }
 
 
@@ -158,6 +162,7 @@ DATABASE_SPECS: tuple[DatabaseSpec, ...] = (
             "Description": text_property(),
             "URL": {"url": {}},
             "Total Listening Seconds": number_property(),
+            "Statistics Baseline Seconds": number_property(),
             "Rank": number_property(),
             "Updated At": {"date": {}},
         },
@@ -175,6 +180,9 @@ DATABASE_SPECS: tuple[DatabaseSpec, ...] = (
             "Audio URL": {"url": {}},
             "Duration Seconds": number_property(),
             "Played Seconds": number_property(),
+            "Statistics Baseline Seconds": number_property(),
+            "Statistics Baseline Date": {"date": {}},
+            "Statistics Ledger": text_property(),
             "Progress Ring": text_property(),
             "Listening Status": select_property(LISTENING_STATUS_OPTIONS),
             "Liked": {"checkbox": {}},

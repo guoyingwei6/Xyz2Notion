@@ -192,7 +192,6 @@ class MetadataSynchronizer:
                 "PID": _text(podcast.pid),
                 "Description": _text(podcast.description),
                 "URL": {"url": f"https://www.xiaoyuzhoufm.com/podcast/{podcast.pid}"},
-                "Total Listening Seconds": {"number": podcast.total_listening_seconds},
                 "Updated At": _date(podcast.updated_at.isoformat()),
                 "Authors": _relation(author_relations),
             }
@@ -205,6 +204,10 @@ class MetadataSynchronizer:
             result = podcast_table.upsert(
                 podcast.pid,
                 properties,
+                create_only_properties={
+                    "Total Listening Seconds": {"number": 0},
+                    "Statistics Baseline Seconds": {"number": 0},
+                },
                 icon=_external(podcast.image_url),
                 cover=_external(podcast.image_url),
             )
@@ -253,6 +256,8 @@ class MetadataSynchronizer:
                 properties,
                 create_only_properties={
                     "ASR Status": {"select": {"name": "待处理"}},
+                    "Statistics Baseline Seconds": {"number": 0},
+                    "Statistics Ledger": _text("{}"),
                 },
                 icon=_external(episode.image_url),
                 cover=_external(episode.image_url),

@@ -95,8 +95,11 @@ AI 定时任务不包含 `XIAOYUZHOU_REFRESH_TOKEN`，只处理已经保存到 N
 - `migrate-dry-run`：只读检查旧模板，默认选项；
 - `migrate`：应用原地迁移，必须同时勾选 `confirm_changes`；
 - `redo-episode`：必须在 `episode_eid` 填写精确 EID；
-- `rebuild-statistics`：当前由 CLI 安全停止，不访问小宇宙；
-- `rebuild-heatmap`：当前由 CLI 安全停止，不访问小宇宙。
+- `rebuild-statistics`：从 Notion Episode 基线与增量账本幂等重算统计；
+- `rebuild-heatmap`：从 Notion 日统计重新生成热力图。
+
+两项操作只接收 Notion Secret，不接收或访问小宇宙凭证。首次运行建立基线并原样
+保留现有总时长；后续运行只累计基线之后新增加的播放秒数。
 
 如果设置 `NOTION_MIGRATION_PAGE_ID`，两个迁移操作使用该旧模板副本；其他操作始终
 使用主 `NOTION_PAGE_ID`。工作流不会把页面 ID、EID 或迁移键写入运行摘要。
