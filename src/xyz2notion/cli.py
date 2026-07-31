@@ -177,6 +177,12 @@ def build_parser() -> argparse.ArgumentParser:
             choices=(1, 2),
             help="manually cap this run at one or two Episode candidates",
         )
+        if name == "process-ai":
+            ai_command.add_argument(
+                "--only-in-flight",
+                action="store_true",
+                help="advance only Episode rows already queued or transcribing",
+            )
     repair_covers = subparsers.add_parser(
         "repair-notion-covers",
         help="upload a bounded number of existing external covers into Notion",
@@ -279,6 +285,12 @@ def _ai_page_priority(page: Mapping[str, object]) -> int:
     }.get(_episode_asr_status(page), 5)
 
 
+def _in_flight_ai_pages[AIPage: Mapping[str, object]](
+    pages: Sequence[AIPage],
+) -> list[AIPage]:
+    return [page for page in pages if _episode_asr_status(page) in {"排队中", "转写中"}]
+
+
 def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
     try:
         config = load_config(args.config)
@@ -315,6 +327,8 @@ def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
                 _eligible_ai_pages(pages, retry_failed=retry_failed),
                 key=_ai_page_priority,
             )
+            if getattr(args, "only_in_flight", False):
+                eligible_pages = _in_flight_ai_pages(eligible_pages)
             run_limit = min(
                 args.limit or config.limits.episodes_per_run,
                 config.limits.episodes_per_run,

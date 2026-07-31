@@ -1088,8 +1088,26 @@ def test_process_ai_manual_limit_is_restricted_to_validation_batch_sizes() -> No
     parser = cli_module.build_parser()  # type: ignore[attr-defined]
     assert parser.parse_args(["process-ai", "--limit", "1"]).limit == 1
     assert parser.parse_args(["process-ai", "--limit", "2"]).limit == 2
+    assert (
+        parser.parse_args(["process-ai", "--limit", "1", "--only-in-flight"]).only_in_flight is True
+    )
     with pytest.raises(SystemExit):
         parser.parse_args(["process-ai", "--limit", "4"])
+
+
+def test_in_flight_ai_filter_never_selects_a_new_or_completed_episode() -> None:
+    def page(status: str) -> dict[str, object]:
+        return {
+            "properties": {
+                "ASR Status": {"select": {"name": status}},
+            }
+        }
+
+    queued = page("排队中")
+    running = page("转写中")
+    assert cli_module._in_flight_ai_pages(  # type: ignore[attr-defined]
+        [page("待处理"), queued, running, page("已发布")]
+    ) == [queued, running]
 
 
 def test_ai_pages_are_filtered_before_the_per_run_limit() -> None:

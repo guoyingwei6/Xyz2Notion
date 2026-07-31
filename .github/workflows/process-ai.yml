@@ -11,6 +11,11 @@ on:
         options:
           - "1"
           - "2"
+      only_in_flight:
+        description: "Advance only an existing queued/transcribing Episode"
+        required: true
+        default: false
+        type: boolean
   schedule:
     - cron: "23 */2 * * *"
 
@@ -46,6 +51,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           MANUAL_LIMIT: ${{ inputs.limit }}
+          ONLY_IN_FLIGHT: ${{ inputs.only_in_flight }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
           TINGWU_COOKIE: ${{ secrets.TINGWU_COOKIE }}
@@ -57,6 +63,9 @@ jobs:
           args=(process-ai --config "$config_path")
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             args+=(--limit "${MANUAL_LIMIT:-1}")
+            if [[ "$ONLY_IN_FLIGHT" == "true" ]]; then
+              args+=(--only-in-flight)
+            fi
           fi
           result="$(uv run xyz2notion "${args[@]}")"
           printf '%s\n' "$result"
