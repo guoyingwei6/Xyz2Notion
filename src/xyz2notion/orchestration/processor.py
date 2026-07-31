@@ -18,6 +18,8 @@ from xyz2notion.asr.tingwu import (
     TingwuTask,
     TingwuTaskState,
 )
+from xyz2notion.enrichment.client import FallbackSummaryClient, StructuredSummaryClient
+from xyz2notion.enrichment.local_qwen import LocalQwenSummaryClient
 from xyz2notion.enrichment.native import normalize_tingwu_enrichment
 from xyz2notion.enrichment.pipeline import SummaryPolicy, TranscriptEnricher
 from xyz2notion.enrichment.siliconflow import SiliconFlowSummaryClient
@@ -151,7 +153,7 @@ class EpisodeAIProcessor:
         tingwu: TingwuClient | None = None,
         siliconflow: SiliconFlowClient | None = None,
         local_whisper: LocalWhisperClient | None = None,
-        summary_client: SiliconFlowSummaryClient | None = None,
+        summary_client: StructuredSummaryClient | None = None,
         summary_policy: SummaryPolicy | None = None,
         summary_enabled: bool = True,
         tingwu_directory: str = "Xyz2Notion 播客",
@@ -447,23 +449,35 @@ def build_provider_clients(
     siliconflow_asr_models: tuple[str, ...],
     siliconflow_summary_models: tuple[str, ...],
     local_whisper_model: str | None = None,
+    local_qwen_summary: bool = True,
 ) -> tuple[
     TingwuClient | None,
     SiliconFlowClient | None,
     LocalWhisperClient | None,
-    SiliconFlowSummaryClient | None,
+    StructuredSummaryClient | None,
 ]:
     """Construct only explicitly configured user-owned providers."""
+    remote_summary = (
+        SiliconFlowSummaryClient(
+            siliconflow_summary_api_key,
+            models=siliconflow_summary_models,
+        )
+        if siliconflow_summary_api_key is not None
+        else None
+    )
+    local_summary = LocalQwenSummaryClient() if local_qwen_summary else None
+    if local_summary is not None:
+        summary_client: StructuredSummaryClient | None = FallbackSummaryClient(
+            remote_summary,
+            local_summary,
+        )
+    else:
+        summary_client = remote_summary
     return (
         TingwuClient(tingwu_cookie) if tingwu_cookie is not None else None,
         SiliconFlowClient(siliconflow_asr_api_key, models=siliconflow_asr_models)
         if siliconflow_asr_api_key is not None
         else None,
         LocalWhisperClient(local_whisper_model) if local_whisper_model is not None else None,
-        SiliconFlowSummaryClient(
-            siliconflow_summary_api_key,
-            models=siliconflow_summary_models,
-        )
-        if siliconflow_summary_api_key is not None
-        else None,
+        summary_client,
     )

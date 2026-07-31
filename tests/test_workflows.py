@@ -5,6 +5,7 @@ import yaml
 WORKFLOW_DIR = Path(".github/workflows")
 PINNED_CHECKOUT = "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09"
 PINNED_SETUP = "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1"
+PINNED_CACHE = "actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830"
 
 
 def _workflow(name: str) -> tuple[str, dict[str, object]]:
@@ -129,6 +130,16 @@ def test_ai_workflows_receive_only_expected_provider_secrets() -> None:
         ):
             assert f"secrets.{secret}" in text
         assert "XIAOYUZHOU_REFRESH_TOKEN" not in text
+
+
+def test_ai_workflows_cache_pinned_local_summary_runtime_and_model() -> None:
+    for name in ("process-ai.yml", "retry-failed.yml"):
+        text, _workflow_data = _workflow(name)
+        assert PINNED_CACHE in text
+        assert "~/.cache/xyz2notion" in text
+        assert "Qwen3-1.7B-Q4_K_M.gguf" not in text
+        assert "llama_cpp_python-0.3.19-cp312-cp312-linux_x86_64.whl" in text
+        assert "ca1b372a3f5b30dcd0a73179a33b0f675adbb805bc64f6f656f208a71ff631d4" in text
 
 
 def test_maintenance_workflow_has_safe_dispatch_guards() -> None:

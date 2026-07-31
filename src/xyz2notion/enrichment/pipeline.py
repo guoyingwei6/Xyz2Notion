@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+from xyz2notion.enrichment.client import StructuredSummaryClient
 from xyz2notion.enrichment.prompts import (
     CHUNK_PROMPT,
     FULL_PROMPT,
@@ -13,7 +14,7 @@ from xyz2notion.enrichment.prompts import (
     SYSTEM_PROMPT,
 )
 from xyz2notion.enrichment.schema import EnrichmentPayload
-from xyz2notion.enrichment.siliconflow import CompletionUsage, SiliconFlowSummaryClient
+from xyz2notion.enrichment.siliconflow import CompletionUsage
 from xyz2notion.enrichment.text import chunk_transcript
 from xyz2notion.models import (
     MindmapNode,
@@ -108,7 +109,7 @@ class TranscriptEnricher:
 
     def __init__(
         self,
-        client: SiliconFlowSummaryClient,
+        client: StructuredSummaryClient,
         *,
         policy: SummaryPolicy | None = None,
     ) -> None:

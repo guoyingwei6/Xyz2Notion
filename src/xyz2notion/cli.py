@@ -362,6 +362,7 @@ def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
                 siliconflow_asr_models=config.asr.siliconflow_models,
                 siliconflow_summary_models=config.summary.siliconflow_models,
                 local_whisper_model=local_whisper_model,
+                local_qwen_summary=config.summary.enabled and config.summary.local_qwen_fallback,
             )
             for client in (tingwu, siliconflow, local_whisper, summary_client):
                 if client is not None:

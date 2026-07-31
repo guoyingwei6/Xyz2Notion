@@ -40,7 +40,6 @@ FREE_SILICONFLOW_ASR_MODELS = frozenset(
 FREE_SILICONFLOW_SUMMARY_MODELS = frozenset(
     {
         "Qwen/Qwen3-8B",
-        "Qwen/Qwen2.5-7B-Instruct",
     }
 )
 
@@ -102,10 +101,8 @@ class SummaryConfig(StrictConfigModel):
     """Free SiliconFlow summary generation settings."""
 
     enabled: bool = True
-    siliconflow_models: tuple[str, ...] = (
-        "Qwen/Qwen3-8B",
-        "Qwen/Qwen2.5-7B-Instruct",
-    )
+    siliconflow_models: tuple[str, ...] = ("Qwen/Qwen3-8B",)
+    local_qwen_fallback: bool = True
     prompt_version: str = Field(default="summary-v1", min_length=1)
     chunk_tokens: int = Field(default=24_000, ge=1_000, le=100_000)
     chunk_minutes: int = Field(default=30, ge=5, le=120)

@@ -29,10 +29,8 @@ def test_example_config_is_valid_and_secret_free() -> None:
         AsrProvider.SILICONFLOW,
         AsrProvider.LOCAL_WHISPER,
     )
-    assert config.summary.siliconflow_models == (
-        "Qwen/Qwen3-8B",
-        "Qwen/Qwen2.5-7B-Instruct",
-    )
+    assert config.summary.siliconflow_models == ("Qwen/Qwen3-8B",)
+    assert config.summary.local_qwen_fallback is True
     assert config.summary.prompt_version == "summary-v1"
     assert config.limits.episodes_per_run == 4
     raw = Path("config.example.yaml").read_text(encoding="utf-8")
@@ -99,6 +97,7 @@ def test_summary_limits_and_free_models_are_validated() -> None:
         SummaryConfig(siliconflow_models=("same", "same"))
     for non_free_model in (
         "Pro/Qwen/Qwen2.5-7B-Instruct",
+        "Qwen/Qwen2.5-7B-Instruct",
         "Qwen/Qwen2.5-14B-Instruct",
     ):
         with pytest.raises(ValidationError):

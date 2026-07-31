@@ -22,21 +22,25 @@ ASR 或摘要模型；发布器仍采用先完成新托管内容、再归档旧�
 
 ## 默认免费模型
 
-默认按顺序尝试：
+摘要、章节和思维导图固定按以下顺序生成：
 
-1. `Qwen/Qwen3-8B`；
-2. `Qwen/Qwen2.5-7B-Instruct`。
+1. SiliconFlow 免费模型 `Qwen/Qwen3-8B`；
+2. GitHub Actions 本地 `Qwen3-1.7B-Q4_K_M`。
 
-两个模型当前在 SiliconFlow 价格页标为免费。配置和客户端仅接受这两个模型 ID，
-不会因用户误填而调用其他模型。免费政策属于服务商外部状态，未来可能变化：
+远程客户端只接受 `Qwen/Qwen3-8B`，不会因误填而调用其他远程模型或付费模型。
+免费政策属于服务商外部状态，未来可能变化：
 
 - <https://siliconflow.cn/pricing>
 - <https://docs.siliconflow.cn/cn/userguide/rate-limits/rate-limit-and-upgradation>
 
-免费模型限流、暂时不可用、下线，或“原始生成 + 一次 JSON 修复”后仍不符合
-Schema 时，按候选顺序切换到下一个免费模型。全部候选均失败后才保存失败状态，
-不会切换到付费模型。每个 `SummaryResult` 仍记录最终成功的实际模型、Prompt
-版本和所有尝试累计的输入/输出 Token，估算费用固定为 0。
+SiliconFlow 限流、暂时不可用、下线，或“原始生成 + 一次 JSON 修复”后仍不符合
+Schema 时，才启动本地模型。本地模型和 `llama-cpp-python` 运行时均进入
+GitHub Actions 缓存；有效缓存会直接复用，只有首次运行、缓存被 GitHub 回收或
+完整性校验失败时才重新下载。本地模型文件固定版本、大小和 SHA256，校验通过后
+才原子替换缓存文件。
+
+两个通道都失败后才保存失败状态。每个 `SummaryResult` 仍记录最终成功的实际模型、
+Prompt 版本和远程尝试累计的输入/输出 Token，估算费用固定为 0。
 
 ## 长文字稿
 
@@ -74,9 +78,9 @@ Prompt 设计记录见 [`prompts/summary-v1.md`](../prompts/summary-v1.md)。结
 
 `https://api.siliconflow.cn/v1/chat/completions`
 
-并设置 `response_format={"type":"json_object"}`。每个免费模型的首次结果若有
+并设置 `response_format={"type":"json_object"}`。远程模型的首次结果若有
 JSON 语法、字段类型、缺失字段、章节越界或脑图 ID 重复，只允许额外执行一次
-JSON 修复；修复 Prompt 不会重新调用 ASR，也不访问音频。当前模型修复后仍不
-合格时切换下一个免费模型；所有免费模型都失败后才保存 `schema_changed`。
-`enable_thinking=false` 仅对官方明确支持该参数的 Qwen3 模型发送；切换到
-Qwen2.5 时会省略该字段，避免 fallback 请求因模型不支持的参数被 HTTP 400 拒绝。
+JSON 修复；修复 Prompt 不会重新调用 ASR，也不访问音频。修复后仍不合格时，
+切换本地 Qwen3，再允许一次本地 JSON 修复；仍失败才保存 `schema_changed`。
+远程 Qwen3 使用 `enable_thinking=true`；本地 Qwen3 使用约束 JSON 和
+`/no_think`，优先保证结构化输出稳定。

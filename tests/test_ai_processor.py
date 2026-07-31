@@ -6,6 +6,8 @@ from xyz2notion.asr.tingwu import (
     TingwuTask,
     TingwuTaskState,
 )
+from xyz2notion.enrichment.client import FallbackSummaryClient
+from xyz2notion.enrichment.local_qwen import LocalQwenSummaryClient
 from xyz2notion.enrichment.schema import EnrichmentPayload
 from xyz2notion.enrichment.siliconflow import CompletionUsage
 from xyz2notion.models import (
@@ -23,6 +25,7 @@ from xyz2notion.orchestration.processor import (
     MAX_RETRY_ATTEMPTS,
     EpisodeAIProcessor,
     EpisodeCandidate,
+    build_provider_clients,
     episode_candidates,
 )
 from xyz2notion.orchestration.state_store import EpisodeAIState
@@ -523,3 +526,34 @@ def test_published_and_final_failed_rows_are_skipped() -> None:
     )
     final_store = FakeStateStore(EpisodeAIState(record=final_record))
     assert SiliconProcessor(FakeNotion(), final_store).process(CANDIDATE, {}).action == "skipped"
+
+
+def test_build_provider_clients_supports_local_summary_only() -> None:
+    tingwu, siliconflow, local_whisper, summary = build_provider_clients(
+        tingwu_cookie=None,
+        siliconflow_asr_api_key=None,
+        siliconflow_summary_api_key=None,
+        siliconflow_asr_models=("FunAudioLLM/SenseVoiceSmall",),
+        siliconflow_summary_models=("Qwen/Qwen3-8B",),
+        local_whisper_model=None,
+        local_qwen_summary=True,
+    )
+    assert tingwu is None
+    assert siliconflow is None
+    assert local_whisper is None
+    assert isinstance(summary, FallbackSummaryClient)
+    assert isinstance(summary.fallback, LocalQwenSummaryClient)
+    summary.close()
+
+
+def test_build_provider_clients_can_disable_all_summary_clients() -> None:
+    providers = build_provider_clients(
+        tingwu_cookie=None,
+        siliconflow_asr_api_key=None,
+        siliconflow_summary_api_key=None,
+        siliconflow_asr_models=("FunAudioLLM/SenseVoiceSmall",),
+        siliconflow_summary_models=("Qwen/Qwen3-8B",),
+        local_whisper_model=None,
+        local_qwen_summary=False,
+    )
+    assert providers == (None, None, None, None)

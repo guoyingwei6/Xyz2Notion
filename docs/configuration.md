@@ -37,14 +37,16 @@ asr:
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `enabled` | `true` | 是否在没有听悟原生结果时调用免费摘要 |
-| `siliconflow_models` | Qwen3-8B、Qwen2.5-7B-Instruct | 免费白名单摘要模型回退顺序 |
+| `siliconflow_models` | Qwen3-8B | 唯一允许的远程免费摘要模型 |
+| `local_qwen_fallback` | `true` | 远程失败后启用 GitHub Actions 本地 Qwen3-1.7B |
 | `prompt_version` | `summary-v1` | 版本化 Prompt |
 | `chunk_tokens` | `24000` | 单块最大估算 Token |
 | `chunk_minutes` | `30` | 单块最大时长 |
 | `max_output_tokens` | `8192` | 单次最大输出 |
 
-配置验证仅接受当前版本核对过的两个免费 ASR 模型和两个免费摘要模型。免费模型
-全部限流或不可用时保存可重试失败，不自动切换付费模型。
+配置验证仅接受当前版本核对过的两个免费 ASR 模型和一个免费摘要模型。远程摘要
+失败后只降级到本地 Qwen3-1.7B，不自动切换其他远程模型或付费模型。本地模型与
+运行时由 GitHub Actions 缓存，正常情况下不会每次下载。
 
 关闭摘要后，没有听悟原生摘要的单集会停在已转写状态，不会丢失文字稿，也不会重复
 执行 ASR。
@@ -53,7 +55,7 @@ asr:
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `episodes_per_run` | `2` | 每次 AI 工作流最多推进的单集数 |
+| `episodes_per_run` | `4` | 每次 AI 工作流最多推进的单集数 |
 | `asr_minutes_per_day` | `240` | 每日计划处理分钟上限 |
 | `asr_minutes_per_month` | `3000` | 每月计划处理分钟上限 |
 | `provider_poll_attempts` | `60` | 异步任务轮询上限 |

@@ -49,10 +49,7 @@ def completion(
 def client_for(
     handler: Callable[[httpx.Request], httpx.Response],
     *,
-    models: tuple[str, ...] = (
-        "Qwen/Qwen3-8B",
-        "Qwen/Qwen2.5-7B-Instruct",
-    ),
+    models: tuple[str, ...] = ("Qwen/Qwen3-8B",),
     max_retries: int = 0,
     sleeps: list[float] | None = None,
 ) -> SiliconFlowSummaryClient:
@@ -72,7 +69,7 @@ def test_structured_completion_uses_official_json_mode() -> None:
         assert request.headers["Authorization"] == f"Bearer {API_KEY}"
         body = json.loads(request.content)
         assert body["response_format"] == {"type": "json_object"}
-        assert body["enable_thinking"] is False
+        assert body["enable_thinking"] is True
         assert body["model"] == "Qwen/Qwen3-8B"
         return completion(json.dumps(payload(), ensure_ascii=False))
 
@@ -244,62 +241,7 @@ def test_context_manager_with_external_client() -> None:
     assert value.summary == "摘要"
 
 
-def test_model_fallback_pins_the_first_working_free_model() -> None:
-    requested: list[str] = []
-
-    def handle(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content)
-        requested.append(body["model"])
-        if body["model"] == "Qwen/Qwen3-8B":
-            return httpx.Response(404)
-        return completion(json.dumps(payload(), ensure_ascii=False))
-
-    client = client_for(handle)
-    value, _ = client.generate_structured(
-        EnrichmentPayload,
-        system="system",
-        user="user",
-        max_output_tokens=1000,
-    )
-    assert value.summary == "摘要"
-    assert client.active_model == "Qwen/Qwen2.5-7B-Instruct"
-    assert requested == ["Qwen/Qwen3-8B", "Qwen/Qwen2.5-7B-Instruct"]
-
-
-def test_schema_failure_falls_back_to_the_next_free_model() -> None:
-    requested: list[str] = []
-
-    def handle(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content)
-        requested.append(body["model"])
-        if body["model"] == "Qwen/Qwen3-8B":
-            assert body["enable_thinking"] is False
-            return completion("not valid json", input_tokens=3, output_tokens=1)
-        assert "enable_thinking" not in body
-        return completion(
-            json.dumps(payload("备用模型成功"), ensure_ascii=False),
-            input_tokens=5,
-            output_tokens=2,
-        )
-
-    client = client_for(handle)
-    value, usage = client.generate_structured(
-        EnrichmentPayload,
-        system="system",
-        user="user",
-        max_output_tokens=1000,
-    )
-    assert value.summary == "备用模型成功"
-    assert usage == CompletionUsage(11, 4)
-    assert client.active_model == "Qwen/Qwen2.5-7B-Instruct"
-    assert requested == [
-        "Qwen/Qwen3-8B",
-        "Qwen/Qwen3-8B",
-        "Qwen/Qwen2.5-7B-Instruct",
-    ]
-
-
-def test_schema_failure_is_final_only_after_all_free_models_fail() -> None:
+def test_schema_failure_is_final_after_the_single_free_model_and_repair_fail() -> None:
     requested: list[str] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -321,8 +263,6 @@ def test_schema_failure_is_final_only_after_all_free_models_fail() -> None:
     assert requested == [
         "Qwen/Qwen3-8B",
         "Qwen/Qwen3-8B",
-        "Qwen/Qwen2.5-7B-Instruct",
-        "Qwen/Qwen2.5-7B-Instruct",
     ]
 
 
@@ -330,6 +270,7 @@ def test_schema_failure_is_final_only_after_all_free_models_fail() -> None:
     "model",
     [
         "Pro/Qwen/Qwen2.5-7B-Instruct",
+        "Qwen/Qwen2.5-7B-Instruct",
         "Qwen/Qwen2.5-14B-Instruct",
     ],
 )

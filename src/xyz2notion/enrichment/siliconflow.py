@@ -21,10 +21,7 @@ from xyz2notion.models import (
 from xyz2notion.security import CredentialKind, validate_credential_destination
 
 SILICONFLOW_CHAT_URL = "https://api.siliconflow.cn/v1/chat/completions"
-DEFAULT_SUMMARY_MODELS = (
-    "Qwen/Qwen3-8B",
-    "Qwen/Qwen2.5-7B-Instruct",
-)
+DEFAULT_SUMMARY_MODELS = ("Qwen/Qwen3-8B",)
 FREE_SUMMARY_MODELS = frozenset(DEFAULT_SUMMARY_MODELS)
 THINKING_CONTROL_MODELS = frozenset({"Qwen/Qwen3-8B"})
 StructuredModel = TypeVar("StructuredModel", bound=BaseModel)
@@ -162,7 +159,7 @@ class SiliconFlowSummaryClient:
             "max_tokens": max_output_tokens,
         }
         if model in THINKING_CONTROL_MODELS:
-            payload["enable_thinking"] = False
+            payload["enable_thinking"] = True
         for attempt in range(self.max_retries + 1):
             response: httpx.Response | None = None
             try:
