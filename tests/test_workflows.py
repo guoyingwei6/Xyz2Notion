@@ -108,6 +108,16 @@ def test_retry_failed_runs_once_daily() -> None:
     assert workflow[True]["schedule"] == [{"cron": "47 2 * * *"}]  # type: ignore[index]
 
 
+def test_tingwu_check_is_manual_read_only_and_receives_only_cookie() -> None:
+    text, workflow = _workflow("check-tingwu.yml")
+    assert "workflow_dispatch" in workflow[True]  # type: ignore[index,operator]
+    assert "schedule" not in workflow[True]  # type: ignore[index,operator]
+    assert "secrets.TINGWU_COOKIE" in text
+    assert "secrets.NOTION_TOKEN" not in text
+    assert "secrets.XIAOYUZHOU_REFRESH_TOKEN" not in text
+    assert "uv run xyz2notion tingwu-check" in text
+
+
 def test_ai_workflows_receive_only_expected_provider_secrets() -> None:
     for name in ("process-ai.yml", "retry-failed.yml"):
         text, _workflow_data = _workflow(name)

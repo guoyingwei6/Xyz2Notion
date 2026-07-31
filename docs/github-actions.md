@@ -65,6 +65,7 @@ ASR 和免费文本模型。项目只接受代码已核对的免费模型白名�
 | `Retry Failed Episode AI` | 每日 + 手动 | 每次最多恢复 2 个 `FAILED_RETRYABLE` 单集，累计重试 3 次后停止 |
 | `Xyz2Notion Maintenance` | 手动 | 迁移、单集重做、统计或热力图重建 |
 | `Xyz2Notion Notion-only Repair` | 手动 | 只读盘点 AI/封面/零播放存量，或分批修复封面与已发布脑图 |
+| `Check Tingwu Authentication` | 手动 | 只发起一次只读目录请求验证 Cookie，不提交音频、不消耗转写额度 |
 
 元数据工作流每天 UTC 21:17（UTC+8 次日 05:17）自动运行一次；手动运行仍必须输入
 `RUN_SAFE_INCREMENTAL_SYNC`。自动与手动运行都受 20 请求、3 秒间隔、单页

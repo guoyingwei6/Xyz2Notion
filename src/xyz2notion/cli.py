@@ -11,6 +11,7 @@ from contextlib import ExitStack
 from pydantic import SecretStr
 
 from xyz2notion import __version__
+from xyz2notion.asr.tingwu import TingwuClient
 from xyz2notion.config import (
     AsrProvider,
     ConfigurationError,
@@ -26,7 +27,7 @@ from xyz2notion.migration.schema import (
     detect_workspace_schema_version,
     migration_plan,
 )
-from xyz2notion.models import ProviderFailure
+from xyz2notion.models import ProviderError, ProviderFailure
 from xyz2notion.notion.client import JsonObject, NotionAPIError, NotionClient
 from xyz2notion.notion.cover_localizer import NotionCoverLocalizer
 from xyz2notion.notion.initializer import DATA_PAGE_TITLE, HOME_MARKER_URL, NotionInitializer
@@ -144,6 +145,10 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(
         "xiaoyuzhou-check",
         help="verify Xiaoyuzhou authentication without printing account data",
+    )
+    subparsers.add_parser(
+        "tingwu-check",
+        help="verify the Tingwu Cookie with one read-only directory request",
     )
     sync_metadata = subparsers.add_parser(
         "sync-metadata",
@@ -1232,6 +1237,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"Xiaoyuzhou error: {exc}", file=sys.stderr)
             return 3
         print("Xiaoyuzhou authentication OK")
+        return 0
+    if args.command == "tingwu-check":
+        try:
+            credentials = load_runtime_credentials()
+            credentials.require("tingwu_cookie")
+            if credentials.tingwu_cookie is None:
+                raise AssertionError("credential requirement did not narrow tingwu_cookie")
+            with TingwuClient(credentials.tingwu_cookie, max_retries=0) as tingwu:
+                tingwu.health_check()
+        except (ConfigurationError, MissingCredentialError) as exc:
+            print(f"Configuration error: {exc}", file=sys.stderr)
+            return 2
+        except ProviderError as exc:
+            print(
+                f"Tingwu health check failed (category={exc.failure.category.value})",
+                file=sys.stderr,
+            )
+            return 5
+        print("Tingwu authentication OK")
         return 0
     if args.command == "sync-metadata":
         try:

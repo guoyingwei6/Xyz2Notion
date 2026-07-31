@@ -5,6 +5,7 @@ import xyz2notion.cli as cli_module
 from xyz2notion import __version__
 from xyz2notion.cli import main
 from xyz2notion.models import (
+    ProviderError,
     ProviderErrorCategory,
     ProviderFailure,
     TranscriptResult,
@@ -62,6 +63,16 @@ def test_xiaoyuzhou_check_reports_missing_token(
     monkeypatch.delenv("XIAOYUZHOU_REFRESH_TOKEN", raising=False)  # type: ignore[attr-defined]
     monkeypatch.delenv("REFRESH_TOKEN", raising=False)  # type: ignore[attr-defined]
     assert main(["xiaoyuzhou-check"]) == 2
+    error = capsys.readouterr().err  # type: ignore[attr-defined]
+    assert "Missing required credential" in error
+
+
+def test_tingwu_check_reports_missing_cookie(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.delenv("TINGWU_COOKIE", raising=False)  # type: ignore[attr-defined]
+    assert main(["tingwu-check"]) == 2
     error = capsys.readouterr().err  # type: ignore[attr-defined]
     assert "Missing required credential" in error
 
@@ -132,6 +143,38 @@ def test_xiaoyuzhou_check_succeeds_without_printing_identity(
     output = capsys.readouterr().out  # type: ignore[attr-defined]
     assert output.strip() == "Xiaoyuzhou authentication OK"
     assert "never-printed" not in output
+
+
+def test_tingwu_check_reports_only_safe_failure_category(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("TINGWU_COOKIE", "secret_fixture_cookie")  # type: ignore[attr-defined]
+
+    class FakeTingwu:
+        def __init__(self, _cookie: object, *, max_retries: int) -> None:
+            assert max_retries == 0
+
+        def __enter__(self) -> "FakeTingwu":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            pass
+
+        def health_check(self) -> bool:
+            raise ProviderError(
+                ProviderFailure(
+                    provider="tingwu_cookie",
+                    category=ProviderErrorCategory.AUTHENTICATION,
+                    message="secret fixture detail",
+                )
+            )
+
+    monkeypatch.setattr(cli_module, "TingwuClient", FakeTingwu)  # type: ignore[attr-defined]
+    assert main(["tingwu-check"]) == 5
+    error = capsys.readouterr().err  # type: ignore[attr-defined]
+    assert "category=authentication" in error
+    assert "secret fixture detail" not in error
 
 
 def test_sync_metadata_success_reports_only_counts(
