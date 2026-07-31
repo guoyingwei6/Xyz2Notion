@@ -54,7 +54,6 @@ class AsrConfig(StrictConfigModel):
     """Free speech recognition provider policy."""
 
     provider_order: tuple[AsrProvider, ...] = (
-        AsrProvider.TINGWU_COOKIE,
         AsrProvider.SILICONFLOW,
         AsrProvider.LOCAL_WHISPER,
     )

@@ -12,15 +12,17 @@ uv run xyz2notion config-check --config config.yaml
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `provider_order` | `tingwu_cookie`, `siliconflow`, `local_whisper` | ASR 优先级；空数组表示暂停新 ASR |
+| `provider_order` | `siliconflow`, `local_whisper` | ASR 优先级；空数组表示暂停新 ASR |
 | `siliconflow_models` | SenseVoiceSmall、TeleSpeechASR | 免费白名单模型 404 时依次尝试 |
 | `local_whisper_model` | `small` | 最终本地兜底；仅允许 `tiny`、`base`、`small` |
 
-只禁用 Cookie：
+当前默认不把听悟放入自动队列。听悟 Cookie 只用于手动认证检查和可见性 smoke test；
+等确认“新建转写记录”能在网页目录中真实出现后，再手动放回优先级：
 
 ```yaml
 asr:
   provider_order:
+    - tingwu_cookie
     - siliconflow
     - local_whisper
 ```

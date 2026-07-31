@@ -25,7 +25,6 @@ def test_example_config_is_valid_and_secret_free() -> None:
     config = load_config("config.example.yaml")
     assert config.schema_version == 1
     assert config.asr.provider_order == (
-        AsrProvider.TINGWU_COOKIE,
         AsrProvider.SILICONFLOW,
         AsrProvider.LOCAL_WHISPER,
     )

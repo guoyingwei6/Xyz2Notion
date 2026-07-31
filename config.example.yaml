@@ -2,7 +2,6 @@ schema_version: 1
 
 asr:
   provider_order:
-    - tingwu_cookie
     - siliconflow
     - local_whisper
   siliconflow_models:

@@ -122,8 +122,10 @@ uv run xyz2notion xiaoyuzhou-check
 认证方式、Device ID 和只读接口说明见
 [`docs/xiaoyuzhou-auth.md`](docs/xiaoyuzhou-auth.md)。
 
-默认 ASR 顺序为通义听悟 Cookie → SiliconFlow → GitHub Actions 本地 Whisper，
-不实现任何付费 Provider。本地模型无需额外 Secret，只在前两条通道失败后加载。
+默认 ASR 顺序为 SiliconFlow → GitHub Actions 本地 Whisper。通义听悟 Cookie
+仍保留为手动验证通道；只有确认网页端能真实创建可见转写记录后，才建议把
+`tingwu_cookie` 放回自动 ASR 优先级。不实现任何付费 Provider。本地模型无需
+额外 Secret，只在远程 ASR 不可用后加载。
 SiliconFlow 音频切片、免费模型降级和时间轴精度说明见
 [`docs/siliconflow-asr.md`](docs/siliconflow-asr.md)。
 本地最终兜底的资源、隐私和运行限制见

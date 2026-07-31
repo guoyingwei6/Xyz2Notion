@@ -35,7 +35,7 @@ def test_config_check_accepts_example(capsys: object) -> None:
     assert main(["config-check", "--config", "config.example.yaml"]) == 0
     output = capsys.readouterr().out  # type: ignore[attr-defined]
     assert "Configuration OK" in output
-    assert "tingwu_cookie, siliconflow" in output
+    assert "ASR: siliconflow, local_whisper" in output
 
 
 def test_config_check_reports_missing_file(capsys: object) -> None:
