@@ -75,7 +75,8 @@ GitHub-only 用法是在 `Xyz2Notion Maintenance` 选择 `redo-episode` 并填�
 `episode_eid`。
 
 该命令只清空 Xyz2Notion 管理的 AI 状态属性，不删除当前页面内容。下一次
-`process-ai` 会重新生成，并在成功后原子替换 Xyz2Notion 托管区。
+`Transcribe Episode Queue` 和 `Enrich Transcribed Episodes` 会重新生成，并在成功
+后原子替换 Xyz2Notion 托管区。
 
 重建统计或当前年度热力图：
 
@@ -84,7 +85,7 @@ uv run xyz2notion rebuild-statistics
 uv run xyz2notion rebuild-heatmap
 ```
 
-临时禁用听悟，只使用 SiliconFlow：
+临时跳过百炼，只使用 SiliconFlow：
 
 ```yaml
 asr:

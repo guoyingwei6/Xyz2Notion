@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from typing import Any, Protocol
 
 import httpx
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from xyz2notion.asr.audio import validate_public_audio_url
 from xyz2notion.models import ContractModel, SummaryResult, TranscriptResult
@@ -17,15 +17,19 @@ MAX_STATE_BYTES = 20 * 1024 * 1024
 
 
 class EpisodeAIState(ContractModel):
-    """All private checkpoints needed to continue without repeating ASR."""
+    """All private checkpoints needed to continue without repeating ASR.
+
+    ``extra=ignore`` keeps snapshots written by the retired web adapter
+    readable.  New snapshots never write those legacy fields.
+    """
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
 
     schema_version: int = 1
     record: PipelineRecord
     provider: str | None = None
     provider_task_id: str | None = None
     source_task_id: str | None = None
-    tingwu_directory_id: str | None = None
-    tingwu_title: str | None = None
     transcript: TranscriptResult | None = None
     summary: SummaryResult | None = None
     content_version: str | None = None

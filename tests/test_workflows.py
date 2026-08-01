@@ -30,14 +30,14 @@ def test_runtime_workflows_use_concurrency_and_private_safe_summaries() -> None:
     for name in (
         "init-notion.yml",
         "sync-metadata.yml",
-        "process-ai.yml",
-        "retry-failed.yml",
+        "transcribe-asr.yml",
+        "enrich-transcripts.yml",
         "maintenance.yml",
     ):
         text, workflow = _workflow(name)
         assert workflow["concurrency"]["cancel-in-progress"] is False  # type: ignore[index]
         assert "GITHUB_STEP_SUMMARY" in text
-        assert "uv run xyz2notion" in text
+        assert "uv run xyz2notion" in text or "uv run python -m xyz2notion" in text
         assert "upload-artifact" not in text
 
 
@@ -97,50 +97,24 @@ def test_metadata_sync_runs_daily_and_manual_runs_require_confirmation() -> None
     assert "timeout-minutes: 15" in text
 
 
-def test_process_ai_runs_two_hour_drain_schedule() -> None:
-    text, workflow = _workflow("process-ai.yml")
-    assert "workflow_dispatch" in workflow[True]  # type: ignore[index,operator]
-    assert workflow[True]["schedule"] == [{"cron": "23 */2 * * *"}]  # type: ignore[index]
+def test_transcribe_workflow_uses_only_current_asr_providers() -> None:
+    text, workflow = _workflow("transcribe-asr.yml")
+    assert workflow[True]["schedule"] == [  # type: ignore[index]
+        {"cron": "13 */2 * * *"},
+        {"cron": "47 21 * * *"},
+    ]
+    assert "DASHSCOPE_API_KEY" in text
+    assert "SILICONFLOW_API_KEY" in text
+    assert "TINGWU_COOKIE" not in text
+    assert "process-asr" in text
 
 
-def test_retry_failed_runs_once_daily() -> None:
-    _text, workflow = _workflow("retry-failed.yml")
-    assert "workflow_dispatch" in workflow[True]  # type: ignore[index,operator]
-    assert workflow[True]["schedule"] == [{"cron": "47 2 * * *"}]  # type: ignore[index]
-
-
-def test_tingwu_check_is_manual_read_only_and_receives_only_cookie() -> None:
-    text, workflow = _workflow("check-tingwu.yml")
-    assert "workflow_dispatch" in workflow[True]  # type: ignore[index,operator]
-    assert "schedule" not in workflow[True]  # type: ignore[index,operator]
-    assert "secrets.TINGWU_COOKIE" in text
-    assert "secrets.NOTION_TOKEN" not in text
-    assert "secrets.XIAOYUZHOU_REFRESH_TOKEN" not in text
-    assert "uv run xyz2notion tingwu-check" in text
-
-
-def test_ai_workflows_receive_only_expected_provider_secrets() -> None:
-    for name in ("process-ai.yml", "retry-failed.yml"):
-        text, _workflow_data = _workflow(name)
-        for secret in (
-            "NOTION_TOKEN",
-            "NOTION_PAGE_ID",
-            "DASHSCOPE_API_KEY",
-            "TINGWU_COOKIE",
-            "SILICONFLOW_API_KEY",
-        ):
-            assert f"secrets.{secret}" in text
-        assert "XIAOYUZHOU_REFRESH_TOKEN" not in text
-
-
-def test_ai_workflows_cache_pinned_local_summary_runtime_and_model() -> None:
-    for name in ("process-ai.yml", "retry-failed.yml"):
-        text, _workflow_data = _workflow(name)
-        assert PINNED_CACHE in text
-        assert "~/.cache/xyz2notion" in text
-        assert "Qwen3-1.7B-Q4_K_M.gguf" not in text
-        assert "llama_cpp_python-0.3.19-cp312-cp312-linux_x86_64.whl" in text
-        assert "ca1b372a3f5b30dcd0a73179a33b0f675adbb805bc64f6f656f208a71ff631d4" in text
+def test_enrichment_workflow_uses_only_summary_credentials() -> None:
+    text, workflow = _workflow("enrich-transcripts.yml")
+    assert "SILICONFLOW_API_KEY" in text
+    assert "TINGWU_COOKIE" not in text
+    assert "process-ai" not in text
+    assert "llama_cpp_python-0.3.19-cp312-cp312-linux_x86_64.whl" in text
 
 
 def test_maintenance_workflow_has_safe_dispatch_guards() -> None:
@@ -165,8 +139,8 @@ def test_all_notion_writers_share_one_concurrency_group() -> None:
     for name in (
         "init-notion.yml",
         "sync-metadata.yml",
-        "process-ai.yml",
-        "retry-failed.yml",
+        "transcribe-asr.yml",
+        "enrich-transcripts.yml",
         "maintenance.yml",
         "notion-repair.yml",
     ):

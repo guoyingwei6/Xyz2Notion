@@ -271,7 +271,6 @@ def test_run_enrichment_queue_uses_only_summary_clients(
     assert result.selected == 1
     assert result.states == {"PUBLISHED": 1}
     assert notion.queries == [("episode-ds", {"page_size": 100})]
-    assert constructed["tingwu"] is None
     assert constructed["siliconflow"] is None
     assert constructed["local_whisper"] is None
     assert constructed["summary_client"] == "summary-client"

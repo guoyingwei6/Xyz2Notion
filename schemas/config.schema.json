@@ -1,120 +1,175 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/guoyingwei6/Xyz2Notion/blob/main/schemas/config.schema.json",
-  "title": "Xyz2Notion configuration",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["schema_version"],
-  "properties": {
-    "schema_version": {
-      "const": 1
-    },
-    "asr": {
-      "type": "object",
+  "$defs": {
+    "AsrConfig": {
       "additionalProperties": false,
+      "description": "Free speech recognition provider policy.",
       "properties": {
+        "dashscope_model": {
+          "const": "paraformer-v1",
+          "default": "paraformer-v1",
+          "title": "Dashscope Model",
+          "type": "string"
+        },
+        "local_whisper_model": {
+          "default": "small",
+          "enum": [
+            "tiny",
+            "base",
+            "small"
+          ],
+          "title": "Local Whisper Model",
+          "type": "string"
+        },
         "provider_order": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {
-            "enum": ["tingwu_cookie", "siliconflow"]
-          },
-          "default": ["tingwu_cookie", "siliconflow"]
-        },
-        "siliconflow_models": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "enum": [
-              "FunAudioLLM/SenseVoiceSmall",
-              "TeleAI/TeleSpeechASR"
-            ]
-          }
-        }
-      }
-    },
-    "summary": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "enabled": {
-          "type": "boolean",
-          "default": true
-        },
-        "siliconflow_models": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "enum": [
-              "Qwen/Qwen3-8B",
-              "Qwen/Qwen2.5-7B-Instruct"
-            ]
-          },
           "default": [
-            "Qwen/Qwen3-8B",
-            "Qwen/Qwen2.5-7B-Instruct"
-          ]
+            "dashscope",
+            "siliconflow",
+            "local_whisper"
+          ],
+          "items": {
+            "$ref": "#/$defs/AsrProvider"
+          },
+          "title": "Provider Order",
+          "type": "array"
         },
-        "prompt_version": {
-          "type": "string",
-          "minLength": 1,
-          "default": "summary-v1"
-        },
-        "chunk_tokens": {
-          "type": "integer",
-          "minimum": 1000,
-          "maximum": 100000,
-          "default": 24000
-        },
-        "chunk_minutes": {
-          "type": "integer",
-          "minimum": 5,
-          "maximum": 120,
-          "default": 30
-        },
-        "max_output_tokens": {
-          "type": "integer",
-          "minimum": 512,
-          "maximum": 32768,
-          "default": 8192
+        "siliconflow_models": {
+          "default": [
+            "FunAudioLLM/SenseVoiceSmall",
+            "TeleAI/TeleSpeechASR"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Siliconflow Models",
+          "type": "array"
         }
-      }
+      },
+      "title": "AsrConfig",
+      "type": "object"
     },
-    "limits": {
-      "type": "object",
+    "AsrProvider": {
+      "description": "Supported ASR providers in fallback order.",
+      "enum": [
+        "dashscope",
+        "siliconflow",
+        "local_whisper"
+      ],
+      "title": "AsrProvider",
+      "type": "string"
+    },
+    "LimitConfig": {
       "additionalProperties": false,
+      "description": "Per-run and time-window safety limits.",
       "properties": {
-        "episodes_per_run": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 3
-        },
         "asr_minutes_per_day": {
-          "type": "integer",
+          "default": 240,
           "minimum": 1,
-          "default": 240
+          "title": "Asr Minutes Per Day",
+          "type": "integer"
         },
         "asr_minutes_per_month": {
-          "type": "integer",
+          "default": 3000,
           "minimum": 1,
-          "default": 3000
+          "title": "Asr Minutes Per Month",
+          "type": "integer"
+        },
+        "episodes_per_run": {
+          "default": 4,
+          "minimum": 1,
+          "title": "Episodes Per Run",
+          "type": "integer"
         },
         "provider_poll_attempts": {
-          "type": "integer",
+          "default": 60,
           "minimum": 1,
-          "default": 60
+          "title": "Provider Poll Attempts",
+          "type": "integer"
         }
-      }
+      },
+      "title": "LimitConfig",
+      "type": "object"
+    },
+    "SummaryConfig": {
+      "additionalProperties": false,
+      "description": "Free SiliconFlow summary generation settings.",
+      "properties": {
+        "chunk_minutes": {
+          "default": 30,
+          "maximum": 120,
+          "minimum": 5,
+          "title": "Chunk Minutes",
+          "type": "integer"
+        },
+        "chunk_tokens": {
+          "default": 24000,
+          "maximum": 100000,
+          "minimum": 1000,
+          "title": "Chunk Tokens",
+          "type": "integer"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "local_qwen_fallback": {
+          "default": true,
+          "title": "Local Qwen Fallback",
+          "type": "boolean"
+        },
+        "max_output_tokens": {
+          "default": 8192,
+          "maximum": 32768,
+          "minimum": 512,
+          "title": "Max Output Tokens",
+          "type": "integer"
+        },
+        "prompt_version": {
+          "default": "summary-v1",
+          "minLength": 1,
+          "title": "Prompt Version",
+          "type": "string"
+        },
+        "siliconflow_models": {
+          "default": [
+            "Qwen/Qwen3-8B"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Siliconflow Models",
+          "type": "array"
+        }
+      },
+      "title": "SummaryConfig",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Complete secret-free application configuration.",
+  "properties": {
+    "asr": {
+      "$ref": "#/$defs/AsrConfig"
+    },
+    "limits": {
+      "$ref": "#/$defs/LimitConfig"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
     },
     "state_file": {
-      "type": "string",
+      "default": ".xyz2notion/state.json",
       "minLength": 1,
-      "default": ".xyz2notion/state.json"
+      "title": "State File",
+      "type": "string"
+    },
+    "summary": {
+      "$ref": "#/$defs/SummaryConfig"
     }
-  }
+  },
+  "title": "AppConfig",
+  "type": "object"
 }

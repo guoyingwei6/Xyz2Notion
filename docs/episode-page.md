@@ -38,8 +38,8 @@ Xyz2Notion 不调用 Notion 的 `erase_content`，也不会清空整个 Episode 
 - Notion 原生嵌套列表脑图；
 - 按时间和说话人组织的文字稿。
 
-SiliconFlow 文字稿会明确显示 `coarse_timestamps` 警告；听悟逐句时间显示为
-`exact_timestamps`。
+百炼逐句结果通常带有 `exact_timestamps`；SiliconFlow 或本地 Whisper 只返回
+较粗粒度时间时，会明确显示 `coarse_timestamps` 警告。
 
 ## 脑图文件
 

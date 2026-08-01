@@ -17,7 +17,7 @@ uv run xyz2notion config-check --config config.yaml
 | `siliconflow_models` | SenseVoiceSmall、TeleSpeechASR | 免费白名单模型 404 时依次尝试 |
 | `local_whisper_model` | `small` | 最终本地兜底；仅允许 `tiny`、`base`、`small` |
 
-当前默认不把听悟放入自动队列。语音转文字默认优先使用百炼免费额度：
+语音转文字默认优先使用百炼免费额度，不依赖网页 Cookie：
 
 ```yaml
 asr:
@@ -38,7 +38,7 @@ asr:
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `enabled` | `true` | 是否在没有听悟原生结果时调用免费摘要 |
+| `enabled` | `true` | 是否在已有文字稿后调用免费摘要 |
 | `siliconflow_models` | Qwen3-8B | 唯一允许的远程免费摘要模型 |
 | `local_qwen_fallback` | `true` | 远程失败后启用 GitHub Actions 本地 Qwen3-1.7B |
 | `prompt_version` | `summary-v1` | 版本化 Prompt |
@@ -50,8 +50,7 @@ asr:
 失败后只降级到本地 Qwen3-1.7B，不自动切换其他远程模型或付费模型。本地模型与
 运行时由 GitHub Actions 缓存，正常情况下不会每次下载。
 
-关闭摘要后，没有听悟原生摘要的单集会停在已转写状态，不会丢失文字稿，也不会重复
-执行 ASR。
+关闭摘要后，单集会停在已转写状态，不会丢失文字稿，也不会重复执行 ASR。
 
 ## `limits`
 
@@ -67,7 +66,7 @@ asr:
 
 ## AI 处理门槛
 
-`Process Episode AI` 只处理已收听至少 120 秒或已收藏、存在音频链接、尚未发布
+`Transcribe Episode Queue` 和 `Enrich Transcribed Episodes` 只处理已收听至少 120 秒或已收藏、存在音频链接、尚未发布
 文字稿且未被标记为最终失败的单集。收藏会绕过 120 秒门槛；仅加入待听播放列表
 不会自动转写。Notion 的 Episode 数据库包含 `Skip AI` 复选框，勾选后仍可排除
 任何单集。

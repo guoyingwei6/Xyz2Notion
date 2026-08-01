@@ -205,7 +205,7 @@ class LegacyTemplateMigrator:
             if status == "Done" and not _nonempty(properties, "ASR Status"):
                 changes.update(
                     {
-                        "ASR Provider": _text("tingwu_cookie"),
+                        "ASR Provider": _text("legacy"),
                         "ASR Task ID": _text(_legacy_task_id(tongyi_url)),
                         "ASR Status": {"select": {"name": "已发布"}},
                         "Content Version": _text("legacy-import-v1"),

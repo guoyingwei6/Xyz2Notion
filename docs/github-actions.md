@@ -55,10 +55,6 @@ OAuth 回调或作者生成的 Token。
 当前代码使用 `POST /api/v1/services/audio/asr/transcription` 提交，使用
 `GET /api/v1/tasks/{task_id}` 查询异步任务。
 
-正常 ASR 队列不读取 `TINGWU_COOKIE`。该 Secret 仅供旧的手动听悟兼容入口使用；
-如果不再运行 `Check Tingwu Authentication`、旧 `Process Episode AI` 或旧任务恢复，
-可以从 Repository secrets 删除它。
-
 ### SiliconFlow
 
 `SILICONFLOW_API_KEY` 来自用户自己的 SiliconFlow 账户，用于调用配置中的免费
@@ -73,11 +69,8 @@ ASR 降级模型和免费文本摘要模型。项目只接受代码已核对的�
 | `Sync Podcast Metadata` | 每天 05:17（UTC+8）+ 手动确认 | 安全增量同步最近播放历史、待听、收藏和进度 |
 | `Transcribe Episode Queue` | 存量每 2 小时；日常 05:47（UTC+8） | 只推进到“已转写”；每次最多 2 期且两期相隔 60 秒 |
 | `Enrich Transcribed Episodes` | 存量每 2 小时；日常 06:37（UTC+8） | 只消费既有文字稿；生成摘要、章节、思维导图并发布 |
-| `Process Episode AI` | 手动验收 | 兼容入口；正式拆队后保持手动禁用 |
-| `Retry Failed Episode AI` | 每日 + 手动 | 每次最多恢复 2 个 `FAILED_RETRYABLE` 单集，累计重试 3 次后停止 |
 | `Xyz2Notion Maintenance` | 手动 | 迁移、单集重做、统计或热力图重建 |
 | `Xyz2Notion Notion-only Repair` | 手动 | 只读盘点 AI/封面/零播放存量，或分批修复封面与已发布脑图 |
-| `Check Tingwu Authentication` | 手动 | 只发起一次只读目录请求验证 Cookie，不提交音频、不消耗转写额度 |
 
 元数据工作流每天 UTC 21:17（UTC+8 次日 05:17）自动运行一次；手动运行仍必须输入
 `RUN_SAFE_INCREMENTAL_SYNC`。自动与手动运行都受 20 请求、3 秒间隔、单页
@@ -125,23 +118,20 @@ AI 定时任务不包含 `XIAOYUZHOU_REFRESH_TOKEN`。转写队列只读取 Noti
 
 ## 中断与重试
 
-听悟的解析 ID、Task ID、文字稿和摘要检查点作为 JSON 文件保存在用户自己的
-Notion Episode 中。每个外部 AI 阶段完成后都会先保存检查点。因此
-Actions 被取消或超时后，下次运行继续查询或发布，不重复提交已完成的 ASR。
-
-听悟在途检查点只能查询已有记录，禁止再次解析或提交。若列表暂时看不到刚提交的
-记录，则保持排队等待；若发现多条同名记录且无法通过已保存的真实记录 ID 唯一匹配，
-以 `ambiguous_record` 安全暂停，绝不猜测、重复提交或提前降级。
+百炼的任务 ID、文字稿和摘要检查点作为 JSON 文件保存在用户自己的 Notion Episode
+中。每个外部 AI 阶段完成后都会先保存检查点。因此 Actions 被取消或超时后，下次
+运行继续查询或发布，不重复提交已完成的 ASR。若远程 ASR 进入明确失败状态，队列才
+按固定顺序降级到 SiliconFlow，再降级到本地 Whisper；不会重复提交已经完成的阶段。
 
 临时网络、限流或服务不可用会进入 `FAILED_RETRYABLE`。修复凭证或等待服务恢复后，
-手动运行 `Retry Failed Episode AI`。认证失效、风控或听悟网页 Schema 变化属于
-明确终态时，若配置了 SiliconFlow，则自动降级；正在排队或处理中的听悟任务不会
-提前双跑。SiliconFlow ASR 仍失败时，最后才在 Runner CPU 上运行本地 Whisper；
+重新运行 `Transcribe Episode Queue` 或 `Enrich Transcribed Episodes`。百炼认证、
+配额或服务暂时不可用时，自动降级到 SiliconFlow；SiliconFlow ASR 仍失败时，最后
+才在 Runner CPU 上运行本地 Whisper；
 本地通道不需要新增 Secret。
 
 ## 轮换
 
-- 小宇宙 Refresh Token 或听悟 Cookie 失效：在 GitHub Secret 中直接覆盖旧值；
+- 小宇宙 Refresh Token 失效：在 GitHub Secret 中直接覆盖旧值；
 - Notion Token 轮换：先把同一根页面授权给新 Integration，再替换 Secret；
 - API Key 轮换：先创建新 Key、覆盖 Secret、验证工作流，再撤销旧 Key；
 - 任何 Secret 疑似泄漏：立即在原服务撤销，不要只删除 GitHub 日志。

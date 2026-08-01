@@ -14,7 +14,6 @@ from xyz2notion.security import (
     [
         (CredentialKind.XIAOYUZHOU, "https://api.xiaoyuzhoufm.com/app/v1/test"),
         (CredentialKind.NOTION, "https://api.notion.com/v1/pages"),
-        (CredentialKind.TINGWU_COOKIE, "https://tingwu.aliyun.com/api/test"),
         (CredentialKind.DASHSCOPE, "https://dashscope.aliyuncs.com/api/v1/tasks/task-1"),
         (CredentialKind.SILICONFLOW, "https://api.siliconflow.cn/v1/audio/transcriptions"),
         (CredentialKind.SILICONFLOW, "https://api.siliconflow.cn/v1/chat/completions"),
@@ -80,11 +79,11 @@ def test_redact_text_removes_tokens_cookies_and_keys() -> None:
 def test_redact_mapping_uses_sensitive_key_names() -> None:
     values = {
         "NOTION_TOKEN": "notion-secret-value",
-        "TINGWU_COOKIE": "cookie-secret-value",
+        "DASHSCOPE_API_KEY": "dashscope-secret-value",
         "status": "ready",
     }
     assert redact_mapping(values) == {
         "NOTION_TOKEN": "<REDACTED>",
-        "TINGWU_COOKIE": "<REDACTED>",
+        "DASHSCOPE_API_KEY": "<REDACTED>",
         "status": "ready",
     }

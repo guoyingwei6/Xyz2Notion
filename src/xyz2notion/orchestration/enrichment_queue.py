@@ -203,7 +203,6 @@ def run_enrichment_queue(
         processor = EpisodeAIProcessor(
             notion,
             state_store,
-            tingwu=None,
             siliconflow=None,
             local_whisper=None,
             summary_client=summary_client,

@@ -229,9 +229,9 @@ def test_transcript_without_segments_is_split_into_complete_notion_paragraphs() 
     api = FakeNotion()
     long_text = "播" * 4501
     bare = TranscriptResult(
-        provider="tingwu_cookie",
+        provider="siliconflow",
         provider_task_id="task",
-        model="tingwu",
+        model="FunAudioLLM/SenseVoiceSmall",
         duration_ms=1,
         text=long_text,
         timing_quality=TranscriptTimingQuality.EXACT,

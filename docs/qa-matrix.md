@@ -23,8 +23,8 @@ ASR 准确率。真实效果必须用用户自己的音频和 Provider 凭证验
 | 小宇宙 Token 错误/过期 | `test_xiaoyuzhou_client.py` | 401/403 立即熔断，不二次刷新，不泄漏响应 |
 | 小宇宙限速/风控 | `test_xiaoyuzhou_client.py` | 默认 20 请求预算、3 秒间隔、429 立即熔断 |
 | Notion Token 错误 | `test_notion_client.py` | 分类为安全 Notion 错误 |
-| 听悟 Cookie 过期 | `test_tingwu.py`, `test_ai_processor.py` | 熔断并降级 SiliconFlow |
-| 听悟字段改变 | `test_tingwu.py` | `schema_changed`，不解析错误数据 |
+| 百炼认证/配额失败 | `test_dashscope.py`, `test_ai_processor.py` | 熔断并降级 SiliconFlow |
+| 百炼任务轮询失败 | `test_dashscope.py` | 保存可重试状态，不重复提交 |
 | SiliconFlow 429 | `test_siliconflow.py` | 按 Retry-After 有限重试 |
 | SiliconFlow 模型 404 | `test_siliconflow.py` | 尝试下一个免费模型 |
 | SiliconFlow 最终失败 | `test_ai_processor.py` | 降级到 GitHub Actions 本地 Whisper |

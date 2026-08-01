@@ -32,11 +32,12 @@ Actions 摘要只显示聚合数量。具体单集状态在 Notion Episode 的 `
 确认目标根页面和旧模板数据库都已授权给当前 Integration。更换 Token 后要重新
 授权页面。页面 ID 可带或不带连字符，但不能填整个 OAuth 回调结果。
 
-### 听悟一直排队
+### 百炼 ASR 没有完成
 
-听悟是异步流程，通常需要多次 `Process Episode AI`。排队和处理中不会降级，以免
-双重转写。若 Cookie 已过期或接口变化，会进入明确失败并在配置了 SiliconFlow 时
-降级。
+百炼录音文件识别是异步流程，队列会保存任务 ID 并在后续运行继续轮询。只有任务进入
+明确失败状态才会降级到 SiliconFlow；SiliconFlow 失败后才使用本地 Whisper，避免
+同一音频重复提交。检查 Notion Episode 的 `ASR Status`、`ASR Provider` 和
+`Failure Reason`，不要重复手动提交同一单集。
 
 ### SiliconFlow 失败
 
@@ -57,8 +58,8 @@ SiliconFlow 文本接口；若整个 Key 或网络不可用，本地文字稿检
 
 ### 只重试失败单集
 
-运行 `Retry Failed Episode AI` 工作流。它只处理 `FAILED_RETRYABLE`，不会重跑
-正常、已发布或最终失败的单集。
+重新运行 `Transcribe Episode Queue` 或 `Enrich Transcribed Episodes`。它们只消费
+对应阶段的 `FAILED_RETRYABLE` 状态，不会重跑正常、已发布或最终失败的单集。
 
 ### 强制重做一个单集
 
@@ -70,7 +71,6 @@ uv run xyz2notion redo-episode --eid <EID>
 
 ## 已知限制
 
-- 听悟使用网页 Cookie 和内部接口，稳定性低于正式 API；
 - SiliconFlow 免费 ASR 的说话人和逐句时间精度可能较低；
 - 方言、多人重叠说话、背景音乐和远场录音效果取决于 Provider；
 - 小宇宙接口没有公开稳定契约，字段变化时需更新适配；

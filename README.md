@@ -45,10 +45,10 @@ Fork 本仓库，在 `Settings → Secrets and variables → Actions` 至少添�
 分别手动运行一次 `Transcribe Episode Queue` 和
 `Enrich Transcribed Episodes` 验收。验收完成后，元数据每天 UTC+8 05:17
 执行一次受限增量同步；首次存量转写与增强每两小时最多处理 2 期，清空后切换为
-每天 05:47 转写新增、06:37 增强新增。听悟 Cookie 明确失效时
-自动降级到 SiliconFlow；如果两条远程通道都不可用，最后才在 GitHub Actions
-CPU 上运行本地 `faster-whisper small`。工作流中断后从用户自己 Notion 里的
-私有检查点继续。
+每天 05:47 转写新增、06:37 增强新增。转写按百炼 `paraformer-v1` →
+SiliconFlow → GitHub Actions 本地 `faster-whisper small` 降级；摘要、章节和脑图
+按 SiliconFlow `Qwen/Qwen3-8B` → 缓存的本地 Qwen3-1.7B 降级。工作流中断后从
+用户自己 Notion 里的私有检查点继续。
 
 只有满足以下条件的单集才会进入 AI 队列：
 
@@ -73,13 +73,13 @@ CPU 上运行本地 `faster-whisper small`。工作流中断后从用户自己 N
 封面外链失效或旧版已发布页面缺少独立脑图记录时，使用
 `Xyz2Notion Notion-only Repair`。该工作流只读取 `NOTION_TOKEN` 和
 `NOTION_PAGE_ID`：封面单次最多本地化 10 张，AI 结果单次最多核对 2 期；
-不会读取小宇宙、听悟或 SiliconFlow 凭证，也不会启动新转写。
+不会读取小宇宙或任何 ASR 凭证，也不会启动新转写。
 
 完成初期验收后，AI 队列按每 2 小时最多 2 期慢速推进；可重试失败每天处理一次，
 同一期累计重试 3 次后停止。AI 工作流不含小宇宙凭证，只使用已写入 Notion 的
 Episode 音频地址和状态文件。
 
-v0.1.0 已实现自主 Notion 模板、元数据与统计同步、听悟 Cookie → SiliconFlow →
+v0.1.0 已实现自主 Notion 模板、元数据与统计同步、百炼 Paraformer → SiliconFlow →
 本地 Whisper 三级降级转写、SiliconFlow 免费摘要、脑图、迁移和可恢复的 GitHub Actions 编排。真实账户验收按
 [实施 Checklist](outputs/Xyz2Notion项目实施Checklist.md)
 继续记录；缺少用户凭证的项目不会用 Mock 冒充真实通过。
@@ -123,7 +123,7 @@ uv run xyz2notion xiaoyuzhou-check
 [`docs/xiaoyuzhou-auth.md`](docs/xiaoyuzhou-auth.md)。
 
 默认 ASR 顺序为阿里云百炼 `paraformer-v1` → SiliconFlow → GitHub Actions 本地
-Whisper。不再使用通义听悟网页 Cookie 作为自动转写通道。不实现任何付费 Provider。
+Whisper。不接入网页 Cookie 或其他付费 Provider。
 本地模型无需额外 Secret，只在远程 ASR 不可用后加载。
 百炼 Paraformer 的接口、配额和时间轴说明见
 [`docs/dashscope-asr.md`](docs/dashscope-asr.md)。
@@ -136,7 +136,7 @@ SiliconFlow 音频切片、免费模型降级和时间轴精度说明见
 [`docs/ai-enrichment.md`](docs/ai-enrichment.md)。
 单集页面的托管区边界、播放器、原生脑图、SVG 脑图和用户笔记保护机制见
 [`docs/episode-page.md`](docs/episode-page.md)。
-GitHub Secrets、五个运行工作流、调度时间和手动维护方法见
+GitHub Secrets、运行工作流、调度时间和手动维护方法见
 [`docs/github-actions.md`](docs/github-actions.md)。
 旧 Podcast2Notion 模板的原地迁移、dry-run、单集重做和统计重建见
 [`docs/migration.md`](docs/migration.md)。
@@ -177,17 +177,14 @@ Notion Episode 的基线与日期增量账本更新，不追加任何小宇宙�
 重复累计现有总时长。统计口径见
 [`docs/statistics.md`](docs/statistics.md)。
 
-推进单集的转写、摘要和发布：
+推进单集的转写：
 
 ```bash
-uv run xyz2notion process-ai --config config.yaml
+uv run xyz2notion process-asr --config config.yaml
 ```
 
-只重试已经标记为“可重试失败”的单集：
-
-```bash
-uv run xyz2notion retry-failed --config config.yaml
-```
+摘要和脑图只消费已写入 Notion 的文字稿，由 `Enrich Transcribed Episodes` 工作流
+推进；不会再次调用 ASR。需要重试时，在 Actions 中重新运行该工作流即可。
 
 ## 安全原则
 

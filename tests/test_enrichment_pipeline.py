@@ -86,7 +86,7 @@ def test_single_chunk_generates_complete_result_and_cost() -> None:
 def test_long_transcript_uses_map_reduce_and_accumulates_usage() -> None:
     client = FakeClient()
     transcript = TranscriptResult(
-        provider="tingwu_cookie",
+        provider="siliconflow",
         provider_task_id="task",
         model="model",
         duration_ms=180_000,

@@ -2,14 +2,14 @@
 
 ## 威胁模型
 
-Xyz2Notion 会处理小宇宙 Refresh Token、Notion Token、通义听悟 Cookie 和
-第三方 ASR API Key。主要风险包括：
+Xyz2Notion 会处理小宇宙 Refresh Token、Notion Token，以及用户自己的百炼和
+SiliconFlow API Key。主要风险包括：
 
 1. 凭证被错误发送到非目标域名；
 2. 异常响应、调试日志或测试快照泄漏凭证；
 3. GitHub Actions 在不可信 PR 上读取 Secrets；
 4. 依赖或 Action 版本漂移造成供应链风险；
-5. 网页 Cookie 失效或被服务端撤销。
+5. API Key 失效或被服务端撤销。
 
 当前安全边界：
 
@@ -30,8 +30,7 @@ Xyz2Notion 会处理小宇宙 Refresh Token、Notion Token、通义听悟 Cookie
 
 - 小宇宙：Refresh Token 失效或疑似泄漏后，退出相关登录会话并重新登录获取。
 - Notion：在 Notion 集成设置中撤销旧 Token，创建新 Token，并重新授权目标页面。
-- 通义听悟：退出全部网页会话后重新登录，更新 `TINGWU_COOKIE`。
-- SiliconFlow：在服务商控制台删除旧 Key，创建权限最小的新 Key。
+- 百炼 / SiliconFlow：在对应控制台撤销旧 Key，创建权限最小的新 Key。
 
 轮换后只更新 GitHub Secret，不要在提交历史中保存旧值。若凭证曾被提交，
 仅删除文件并不够，必须先撤销凭证，再清理 Git 历史。

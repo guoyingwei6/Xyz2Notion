@@ -7,13 +7,11 @@ import xyz2notion.cli as cli_module
 from xyz2notion import __version__
 from xyz2notion.cli import main
 from xyz2notion.models import (
-    ProviderError,
     ProviderErrorCategory,
     ProviderFailure,
     TranscriptResult,
     TranscriptSegment,
 )
-from xyz2notion.orchestration.processor import ProcessingOutcome
 from xyz2notion.orchestration.state_store import EpisodeAIState
 from xyz2notion.state import PipelineRecord, PipelineState
 
@@ -22,7 +20,7 @@ def test_doctor_reports_installation(capsys: object) -> None:
     assert main(["doctor"]) == 0
     output = capsys.readouterr().out  # type: ignore[attr-defined]
     assert f"Xyz2Notion {__version__}: OK" in output
-    assert "5 credential types" in output
+    assert "4 credential types" in output
 
 
 def test_help_is_default(capsys: object) -> None:
@@ -69,16 +67,6 @@ def test_xiaoyuzhou_check_reports_missing_token(
     assert "Missing required credential" in error
 
 
-def test_tingwu_check_reports_missing_cookie(
-    capsys: object,
-    monkeypatch: object,
-) -> None:
-    monkeypatch.delenv("TINGWU_COOKIE", raising=False)  # type: ignore[attr-defined]
-    assert main(["tingwu-check"]) == 2
-    error = capsys.readouterr().err  # type: ignore[attr-defined]
-    assert "Missing required credential" in error
-
-
 def test_sync_metadata_reports_missing_tokens(
     capsys: object,
     monkeypatch: object,
@@ -91,16 +79,6 @@ def test_sync_metadata_reports_missing_tokens(
     ):
         monkeypatch.delenv(name, raising=False)  # type: ignore[attr-defined]
     assert main(["sync-metadata"]) == 2
-    error = capsys.readouterr().err  # type: ignore[attr-defined]
-    assert "Missing required credential" in error
-
-
-def test_process_ai_reports_missing_notion_token(
-    capsys: object,
-    monkeypatch: object,
-) -> None:
-    monkeypatch.delenv("NOTION_TOKEN", raising=False)  # type: ignore[attr-defined]
-    assert main(["process-ai", "--config", "config.example.yaml"]) == 2
     error = capsys.readouterr().err  # type: ignore[attr-defined]
     assert "Missing required credential" in error
 
@@ -145,112 +123,6 @@ def test_xiaoyuzhou_check_succeeds_without_printing_identity(
     output = capsys.readouterr().out  # type: ignore[attr-defined]
     assert output.strip() == "Xiaoyuzhou authentication OK"
     assert "never-printed" not in output
-
-
-def test_tingwu_check_reports_only_safe_failure_category(
-    capsys: object,
-    monkeypatch: object,
-) -> None:
-    monkeypatch.setenv("TINGWU_COOKIE", "secret_fixture_cookie")  # type: ignore[attr-defined]
-
-    class FakeTingwu:
-        def __init__(self, _cookie: object, *, max_retries: int) -> None:
-            assert max_retries == 0
-
-        def __enter__(self) -> "FakeTingwu":
-            return self
-
-        def __exit__(self, *_args: object) -> None:
-            pass
-
-        def health_check(self) -> bool:
-            raise ProviderError(
-                ProviderFailure(
-                    provider="tingwu_cookie",
-                    category=ProviderErrorCategory.AUTHENTICATION,
-                    message="secret fixture detail",
-                )
-            )
-
-    monkeypatch.setattr(cli_module, "TingwuClient", FakeTingwu)  # type: ignore[attr-defined]
-    assert main(["tingwu-check"]) == 5
-    error = capsys.readouterr().err  # type: ignore[attr-defined]
-    assert "category=authentication" in error
-    assert "secret fixture detail" not in error
-
-
-def test_tingwu_visible_smoke_requires_explicit_confirmation(
-    capsys: object,
-    monkeypatch: object,
-) -> None:
-    monkeypatch.setenv("TINGWU_COOKIE", "secret_fixture_cookie")  # type: ignore[attr-defined]
-    assert main(["tingwu-visible-smoke", "--confirm", "WRONG"]) == 2
-    error = capsys.readouterr().err  # type: ignore[attr-defined]
-    assert "CREATE_TINGWU_VISIBLE_SMOKE" in error
-
-
-def test_tingwu_visible_smoke_reports_only_aggregate_status(
-    capsys: object,
-    monkeypatch: object,
-) -> None:
-    monkeypatch.setenv("TINGWU_COOKIE", "secret_fixture_cookie")  # type: ignore[attr-defined]
-
-    class FakeTask:
-        provider_task_id = "private-task"
-        directory_id = "private-directory"
-        title = "private-title"
-        state = SimpleNamespace(value="submitted")
-
-    class FakeVisibleTingwu:
-        smoke_title = ""
-
-        def __init__(self, _cookie: object, *, max_retries: int) -> None:
-            assert max_retries == 0
-
-        def __enter__(self) -> "FakeVisibleTingwu":
-            return self
-
-        def __exit__(self, *_args: object) -> None:
-            pass
-
-        def submit_episode(
-            self,
-            directory_name: str,
-            title: str,
-            audio_url: str,
-            *,
-            parse_poll_attempts: int,
-        ) -> FakeTask:
-            assert directory_name
-            assert title.startswith("Xyz2Notion smoke ")
-            assert audio_url.startswith("https://")
-            assert parse_poll_attempts == 3
-            self.smoke_title = title
-            return FakeTask()
-
-        def find_records(self, _directory_id: str, _title: str) -> tuple[dict[str, object]]:
-            return ({"genRecordId": "private-task", "status": 1, "showName": "private-title"},)
-
-        def task_from_record(
-            self,
-            _record: object,
-            *,
-            directory_id: str,
-            title: str,
-        ) -> object:
-            assert directory_id == "private-directory"
-            assert title == self.smoke_title
-            return SimpleNamespace(state=SimpleNamespace(value="processing"))
-
-    monkeypatch.setattr(cli_module, "TingwuClient", FakeVisibleTingwu)  # type: ignore[attr-defined]
-    assert main(["tingwu-visible-smoke", "--confirm", "CREATE_TINGWU_VISIBLE_SMOKE"]) == 0
-    output = capsys.readouterr().out  # type: ignore[attr-defined]
-    assert "submitted=1" in output
-    assert "visible_records=1" in output
-    assert "state=processing" in output
-    assert "private-title" not in output
-    assert "private-task" not in output
-    assert "secret_fixture_cookie" not in output
 
 
 def test_sync_metadata_success_reports_only_counts(
@@ -1056,94 +928,6 @@ def test_rebuild_dashboard_layout_preserves_data_page_and_bootstraps_home(
     assert "managed-" not in output
 
 
-def test_process_ai_reports_only_aggregate_counts(
-    capsys: object,
-    monkeypatch: object,
-) -> None:
-    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
-    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
-
-    page = {
-        "id": "episode-page",
-        "properties": {
-            "Name": {"title": [{"plain_text": "private episode title"}]},
-            "EID": {"rich_text": [{"plain_text": "private-eid"}]},
-            "Audio URL": {"url": "https://example.com/audio.mp3"},
-            "Played Seconds": {"number": 120},
-        },
-    }
-
-    class FakeNotion(FakeContextClient):
-        def query_data_source(
-            self,
-            data_source_id: str,
-            _payload: object,
-        ) -> list[object]:
-            assert data_source_id == "episode-source"
-            return [page]
-
-    class FakeInitializer:
-        def __init__(self, _api: object, page_id: str) -> None:
-            assert page_id == "fixture-page"
-
-        def initialize(self) -> object:
-            return SimpleNamespace(
-                resources={
-                    "episode": SimpleNamespace(data_source_id="episode-source"),
-                    "mindmap": SimpleNamespace(data_source_id="mindmap-source"),
-                }
-            )
-
-    class FakeStore:
-        def __init__(self, _api: object) -> None:
-            pass
-
-        def __enter__(self) -> "FakeStore":
-            return self
-
-        def __exit__(self, *_args: object) -> None:
-            pass
-
-    class FakeProcessor:
-        def __init__(self, *_args: object, **_kwargs: object) -> None:
-            pass
-
-        def process(
-            self,
-            candidate: object,
-            candidate_page: object,
-            *,
-            retry_failed: bool,
-            only_failed: bool,
-        ) -> ProcessingOutcome:
-            assert candidate_page == page
-            assert retry_failed is False
-            assert only_failed is False
-            return ProcessingOutcome(
-                candidate.eid,  # type: ignore[attr-defined]
-                "pending",
-                PipelineState.ASR_RUNNING,
-            )
-
-    monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
-    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
-    monkeypatch.setattr(cli_module, "NotionEpisodeStateStore", FakeStore)  # type: ignore[attr-defined]
-    monkeypatch.setattr(cli_module, "EpisodeAIProcessor", FakeProcessor)  # type: ignore[attr-defined]
-    monkeypatch.setattr(  # type: ignore[attr-defined]
-        cli_module,
-        "build_provider_clients",
-        lambda **_kwargs: (None, None, None, None, None),
-    )
-
-    assert main(["process-ai", "--config", "config.example.yaml"]) == 0
-    output = capsys.readouterr().out  # type: ignore[attr-defined]
-    assert "selected=1" in output
-    assert "pending=1" in output
-    assert "ASR_RUNNING=1" in output
-    assert "private episode title" not in output
-    assert "private-eid" not in output
-
-
 def test_episode_asr_status_distinguishes_retryable_rows() -> None:
     assert (
         cli_module._episode_asr_status(  # type: ignore[attr-defined]
@@ -1156,52 +940,9 @@ def test_episode_asr_status_distinguishes_retryable_rows() -> None:
         == "可重试失败"
     )
     assert cli_module._episode_asr_status({"properties": {}}) == ""  # type: ignore[attr-defined]
-
-
-def test_process_ai_manual_limit_is_restricted_to_validation_batch_sizes() -> None:
-    parser = cli_module.build_parser()  # type: ignore[attr-defined]
-    assert parser.parse_args(["process-ai", "--limit", "1"]).limit == 1
-    assert parser.parse_args(["process-ai", "--limit", "2"]).limit == 2
-    assert (
-        parser.parse_args(["process-ai", "--limit", "1", "--only-in-flight"]).only_in_flight is True
+    assert (  # type: ignore[attr-defined]
+        cli_module._episode_asr_status({"properties": {"ASR Status": {"select": "bad"}}}) == ""
     )
-    assert (
-        parser.parse_args(["process-ai", "--limit", "1", "--only-transcribed"]).only_transcribed
-        is True
-    )
-    with pytest.raises(SystemExit):
-        parser.parse_args(["process-ai", "--limit", "1", "--only-in-flight", "--only-transcribed"])
-    with pytest.raises(SystemExit):
-        parser.parse_args(["process-ai", "--limit", "4"])
-
-
-def test_in_flight_ai_filter_never_selects_a_new_or_completed_episode() -> None:
-    def page(status: str) -> dict[str, object]:
-        return {
-            "properties": {
-                "ASR Status": {"select": {"name": status}},
-            }
-        }
-
-    queued = page("排队中")
-    running = page("转写中")
-    assert cli_module._in_flight_ai_pages(  # type: ignore[attr-defined]
-        [page("待处理"), queued, running, page("已发布")]
-    ) == [queued, running]
-
-
-def test_transcribed_ai_filter_never_selects_new_or_in_flight_episode() -> None:
-    def page(status: str) -> dict[str, object]:
-        return {
-            "properties": {
-                "ASR Status": {"select": {"name": status}},
-            }
-        }
-
-    transcribed = page("已转写")
-    assert cli_module._transcribed_ai_pages(  # type: ignore[attr-defined]
-        [page("待处理"), page("排队中"), transcribed, page("已发布")]
-    ) == [transcribed]
 
 
 def test_ai_pages_are_filtered_before_the_per_run_limit() -> None:
@@ -1230,6 +971,7 @@ def test_ai_pages_prioritize_persisted_checkpoints() -> None:
         "排队中",
         "待处理",
     ]
+    assert cli_module._ai_page_priority({"properties": {}}) == 5  # type: ignore[attr-defined]
 
 
 def test_notion_cover_repair_requires_limit_bound_confirmation(
@@ -1494,8 +1236,8 @@ def test_notion_backlog_audit_reports_only_aggregate_counts(
         episode(
             "normal",
             played=300,
-            provider="tingwu_cookie",
-            model="tingwu-web",
+            provider="legacy",
+            model="legacy",
         ),
         episode("protected-zero", playlist=True),
         episode("legacy-zero"),
@@ -1581,9 +1323,9 @@ def test_notion_backlog_audit_reports_only_aggregate_counts(
     assert "retry_ai_candidates=1" in output
     assert "statistics_total_seconds=0" in output
     assert "statistics_baseline=unset" in output
-    assert "asr_providers: siliconflow=1, tingwu_cookie=1" in output
-    assert "asr_models: FunAudioLLM/SenseVoiceSmall=1, tingwu-web=1" in output
-    assert "tingwu_checkpoints: new_submission=0, existing_record=1" in output
+    assert "asr_providers: legacy=1, siliconflow=1" in output
+    assert "asr_models: FunAudioLLM/SenseVoiceSmall=1, legacy=1" in output
+    assert "tingwu_checkpoints" not in output
     assert "local_whisper:unsupported=1" in output
     assert "zero_play_total=2" in output
     assert "zero_play_protected=1" in output

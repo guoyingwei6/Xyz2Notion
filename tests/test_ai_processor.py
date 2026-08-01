@@ -1,11 +1,6 @@
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from xyz2notion.asr.tingwu import (
-    TingwuEnrichment,
-    TingwuTask,
-    TingwuTaskState,
-)
 from xyz2notion.enrichment.client import FallbackSummaryClient
 from xyz2notion.enrichment.local_qwen import LocalQwenSummaryClient
 from xyz2notion.enrichment.schema import EnrichmentPayload
@@ -200,34 +195,6 @@ class DashScopeProcessor(SiliconProcessor):
                 )
             )
         return transcript("dashscope")
-
-
-class FakeTingwu:
-    def __init__(self, task: TingwuTask, *, fail_auth: bool = False) -> None:
-        self.task = task
-        self.fail_auth = fail_auth
-        self.calls = 0
-
-    def submit_episode(self, *_args: object, **_kwargs: object) -> TingwuTask:
-        self.calls += 1
-        if self.fail_auth:
-            raise ProviderError(
-                ProviderFailure(
-                    provider="tingwu_cookie",
-                    category=ProviderErrorCategory.AUTHENTICATION,
-                    message="expired",
-                )
-            )
-        return self.task
-
-    def get_transcript(self, _task_id: str) -> TranscriptResult:
-        return transcript("tingwu_cookie")
-
-    def get_enrichment(self, _task_id: str) -> TingwuEnrichment:
-        return TingwuEnrichment(
-            summary="听悟摘要",
-            mindmap={"content": "主题", "children": []},
-        )
 
 
 CANDIDATE = EpisodeCandidate("page", "episode", "标题", "https://cdn.example/audio")
@@ -456,68 +423,6 @@ def test_transcribed_checkpoint_waits_for_summary_key_without_repeating_asr() ->
     assert store.saved == []
 
 
-def test_tingwu_processing_is_persisted_and_not_fallen_back() -> None:
-    task = TingwuTask(
-        provider_task_id="source",
-        source_task_id="source",
-        state=TingwuTaskState.SOURCE_PARSING,
-        directory_id="dir",
-        title="标题",
-    )
-    store = FakeStateStore()
-    processor = EpisodeAIProcessor(
-        FakeNotion(),
-        store,  # type: ignore[arg-type]
-        tingwu=FakeTingwu(task),  # type: ignore[arg-type]
-        siliconflow=object(),  # type: ignore[arg-type]
-    )
-    outcome = processor.process(CANDIDATE, {})
-    assert outcome.action == "pending"
-    assert outcome.state is PipelineState.ASR_SUBMITTED
-    assert store.state.source_task_id == "source"
-
-
-def test_tingwu_native_success_publishes_without_summary_api() -> None:
-    task = TingwuTask(
-        provider_task_id="record",
-        state=TingwuTaskState.SUCCEEDED,
-        directory_id="dir",
-        title="标题",
-        record_status=30,
-    )
-    store = FakeStateStore()
-    processor = EpisodeAIProcessor(
-        FakeNotion(),
-        store,  # type: ignore[arg-type]
-        tingwu=FakeTingwu(task),  # type: ignore[arg-type]
-    )
-    outcome = processor.process(CANDIDATE, {})
-    assert outcome.state is PipelineState.PUBLISHED
-    assert store.state.summary is not None
-    assert store.state.summary.prompt_version == "tingwu-native"
-
-
-def test_expired_tingwu_falls_back_to_siliconflow() -> None:
-    task = TingwuTask(
-        provider_task_id="unused",
-        state=TingwuTaskState.PROCESSING,
-        directory_id="dir",
-        title="标题",
-    )
-    store = FakeStateStore()
-    processor = SiliconProcessor(
-        FakeNotion(),
-        store,
-        tingwu=FakeTingwu(task, fail_auth=True),
-        siliconflow=object(),
-        summary_client=FakeSummaryClient(),
-    )
-    outcome = processor.process(CANDIDATE, {})
-    assert outcome.state is PipelineState.PUBLISHED
-    assert processor.asr_calls == 1
-    assert store.state.provider == "siliconflow"
-
-
 def test_retryable_failure_resumes_exact_stage_on_manual_retry() -> None:
     store = FakeStateStore()
     processor = SiliconProcessor(
@@ -607,8 +512,7 @@ def test_published_and_final_failed_rows_are_skipped() -> None:
 
 
 def test_build_provider_clients_supports_local_summary_only() -> None:
-    dashscope, tingwu, siliconflow, local_whisper, summary = build_provider_clients(
-        tingwu_cookie=None,
+    dashscope, siliconflow, local_whisper, summary = build_provider_clients(
         siliconflow_asr_api_key=None,
         siliconflow_summary_api_key=None,
         siliconflow_asr_models=("FunAudioLLM/SenseVoiceSmall",),
@@ -617,7 +521,6 @@ def test_build_provider_clients_supports_local_summary_only() -> None:
         local_qwen_summary=True,
     )
     assert dashscope is None
-    assert tingwu is None
     assert siliconflow is None
     assert local_whisper is None
     assert isinstance(summary, FallbackSummaryClient)
@@ -627,7 +530,6 @@ def test_build_provider_clients_supports_local_summary_only() -> None:
 
 def test_build_provider_clients_can_disable_all_summary_clients() -> None:
     providers = build_provider_clients(
-        tingwu_cookie=None,
         siliconflow_asr_api_key=None,
         siliconflow_summary_api_key=None,
         siliconflow_asr_models=("FunAudioLLM/SenseVoiceSmall",),
@@ -635,4 +537,4 @@ def test_build_provider_clients_can_disable_all_summary_clients() -> None:
         local_whisper_model=None,
         local_qwen_summary=False,
     )
-    assert providers == (None, None, None, None, None)
+    assert providers == (None, None, None, None)

@@ -12,17 +12,9 @@ from xyz2notion.asr.audio import AudioPreparationError, validate_public_audio_ur
 from xyz2notion.asr.dashscope import DashScopeParaformerClient
 from xyz2notion.asr.local_whisper import LocalWhisperClient
 from xyz2notion.asr.pipeline import transcribe_siliconflow_episode
-from xyz2notion.asr.router import tingwu_fallback_allowed
 from xyz2notion.asr.siliconflow import SiliconFlowClient
-from xyz2notion.asr.tingwu import (
-    TingwuClient,
-    TingwuEnrichment,
-    TingwuTask,
-    TingwuTaskState,
-)
 from xyz2notion.enrichment.client import FallbackSummaryClient, StructuredSummaryClient
 from xyz2notion.enrichment.local_qwen import LocalQwenSummaryClient
-from xyz2notion.enrichment.native import normalize_tingwu_enrichment
 from xyz2notion.enrichment.pipeline import SummaryPolicy, TranscriptEnricher
 from xyz2notion.enrichment.siliconflow import SiliconFlowSummaryClient
 from xyz2notion.models import (
@@ -159,25 +151,21 @@ class EpisodeAIProcessor:
         state_store: NotionEpisodeStateStore,
         *,
         dashscope: DashScopeParaformerClient | None = None,
-        tingwu: TingwuClient | None = None,
         siliconflow: SiliconFlowClient | None = None,
         local_whisper: LocalWhisperClient | None = None,
         summary_client: StructuredSummaryClient | None = None,
         summary_policy: SummaryPolicy | None = None,
         summary_enabled: bool = True,
-        tingwu_directory: str = "Xyz2Notion 播客",
         mindmap_data_source_id: str | None = None,
     ) -> None:
         self.notion = notion
         self.state_store = state_store
         self.dashscope = dashscope
-        self.tingwu = tingwu
         self.siliconflow = siliconflow
         self.local_whisper = local_whisper
         self.summary_client = summary_client
         self.summary_policy = summary_policy or SummaryPolicy()
         self.summary_enabled = summary_enabled
-        self.tingwu_directory = tingwu_directory
         self.mindmap_data_source_id = mindmap_data_source_id
 
     def _save(self, page_id: str, state: EpisodeAIState) -> EpisodeAIState:
@@ -249,55 +237,6 @@ class EpisodeAIProcessor:
                 )
             ) from exc
 
-    def _tingwu_task(
-        self,
-        candidate: EpisodeCandidate,
-        state: EpisodeAIState,
-    ) -> TingwuTask:
-        if self.tingwu is None:
-            raise _failure(
-                ProviderErrorCategory.UNSUPPORTED,
-                "Tingwu Cookie provider is not configured",
-            )
-        if state.record.state in {
-            PipelineState.ASR_SUBMITTED,
-            PipelineState.ASR_RUNNING,
-        }:
-            if (
-                not state.tingwu_directory_id
-                or not state.tingwu_title
-                or not state.provider_task_id
-            ):
-                raise _failure(
-                    ProviderErrorCategory.SCHEMA_CHANGED,
-                    "Persisted Tingwu submission checkpoint is incomplete",
-                )
-            return self.tingwu.resume_episode(
-                state.tingwu_directory_id,
-                state.tingwu_title,
-                provider_task_id=state.provider_task_id,
-                source_task_id=state.source_task_id,
-            )
-        return self.tingwu.submit_episode(
-            self.tingwu_directory,
-            candidate.title,
-            candidate.audio_url,
-            source_task_id=state.source_task_id,
-        )
-
-    def _transcript_from_tingwu(
-        self,
-        task: TingwuTask,
-    ) -> tuple[TranscriptResult, TingwuEnrichment | None]:
-        if self.tingwu is None:
-            raise AssertionError("Tingwu task cannot complete without a client")
-        transcript = self.tingwu.get_transcript(task.provider_task_id)
-        try:
-            native = self.tingwu.get_enrichment(task.provider_task_id)
-        except ProviderError:
-            native = None
-        return transcript, native
-
     def _advance_asr(
         self,
         candidate: EpisodeCandidate,
@@ -324,60 +263,6 @@ class EpisodeAIProcessor:
                     ),
                     False,
                 )
-
-        use_tingwu = state.provider in {None, "tingwu_cookie"} and self.tingwu is not None
-        if use_tingwu:
-            was_in_flight = state.record.state in {
-                PipelineState.ASR_SUBMITTED,
-                PipelineState.ASR_RUNNING,
-            }
-            try:
-                task = self._tingwu_task(candidate, state)
-            except ProviderError as exc:
-                if (
-                    was_in_flight or (self.siliconflow is None and self.local_whisper is None)
-                ) or not tingwu_fallback_allowed(exc):
-                    raise
-            else:
-                checkpoint = state.model_copy(
-                    update={
-                        "provider": "tingwu_cookie",
-                        "provider_task_id": task.provider_task_id,
-                        "source_task_id": task.source_task_id or state.source_task_id,
-                        "tingwu_directory_id": task.directory_id,
-                        "tingwu_title": task.title,
-                    }
-                )
-                if task.state in {
-                    TingwuTaskState.SOURCE_PARSING,
-                    TingwuTaskState.SUBMITTED,
-                }:
-                    record = checkpoint.record
-                    if record.state is PipelineState.DISCOVERED:
-                        record = record.transition(PipelineState.ASR_SUBMITTED)
-                    return checkpoint.model_copy(update={"record": record}), True
-                if task.state is TingwuTaskState.PROCESSING:
-                    record = checkpoint.record
-                    if record.state is PipelineState.DISCOVERED:
-                        record = record.transition(PipelineState.ASR_SUBMITTED)
-                    if record.state is PipelineState.ASR_SUBMITTED:
-                        record = record.transition(PipelineState.ASR_RUNNING)
-                    return checkpoint.model_copy(update={"record": record}), True
-                if task.state is TingwuTaskState.SUCCEEDED:
-                    transcript, native = self._transcript_from_tingwu(task)
-                    record = checkpoint.record.transition(PipelineState.TRANSCRIBED)
-                    summary = normalize_tingwu_enrichment(native) if native is not None else None
-                    return (
-                        checkpoint.model_copy(
-                            update={
-                                "record": record,
-                                "transcript": transcript,
-                                "summary": summary,
-                            }
-                        ),
-                        False,
-                    )
-                # A terminal Tingwu record may safely switch to SiliconFlow.
 
         if self.siliconflow is not None:
             try:
@@ -451,7 +336,11 @@ class EpisodeAIProcessor:
                 PipelineState.ASR_SUBMITTED,
                 PipelineState.ASR_RUNNING,
             }:
-                if self.tingwu is None and self.siliconflow is None and self.local_whisper is None:
+                if (
+                    self.dashscope is None
+                    and self.siliconflow is None
+                    and self.local_whisper is None
+                ):
                     return ProcessingOutcome(
                         candidate.eid,
                         "paused",
@@ -515,12 +404,7 @@ class EpisodeAIProcessor:
             PipelineState.ASR_RUNNING,
         }:
             return ProcessingOutcome(candidate.eid, "skipped", state.record.state)
-        if (
-            self.dashscope is None
-            and self.tingwu is None
-            and self.siliconflow is None
-            and self.local_whisper is None
-        ):
+        if self.dashscope is None and self.siliconflow is None and self.local_whisper is None:
             return ProcessingOutcome(candidate.eid, "paused", state.record.state)
         try:
             state, pending = self._advance_asr(candidate, state)
@@ -539,7 +423,6 @@ def build_provider_clients(
     *,
     dashscope_api_key: SecretStr | None = None,
     dashscope_model: str = "paraformer-v1",
-    tingwu_cookie: SecretStr | None,
     siliconflow_asr_api_key: SecretStr | None,
     siliconflow_summary_api_key: SecretStr | None,
     siliconflow_asr_models: tuple[str, ...],
@@ -548,7 +431,6 @@ def build_provider_clients(
     local_qwen_summary: bool = True,
 ) -> tuple[
     DashScopeParaformerClient | None,
-    TingwuClient | None,
     SiliconFlowClient | None,
     LocalWhisperClient | None,
     StructuredSummaryClient | None,
@@ -574,7 +456,6 @@ def build_provider_clients(
         DashScopeParaformerClient(dashscope_api_key, model=dashscope_model)
         if dashscope_api_key is not None
         else None,
-        TingwuClient(tingwu_cookie) if tingwu_cookie is not None else None,
         SiliconFlowClient(siliconflow_asr_api_key, models=siliconflow_asr_models)
         if siliconflow_asr_api_key is not None
         else None,

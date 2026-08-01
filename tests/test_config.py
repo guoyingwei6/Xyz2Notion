@@ -177,7 +177,6 @@ def test_secret_values_are_not_serialized_or_represented() -> None:
             "XIAOYUZHOU_REFRESH_TOKEN": "refresh-example",
             "NOTION_TOKEN": "notion-example",
             "NOTION_PAGE_ID": "page-example",
-            "TINGWU_COOKIE": "cookie-example",
             "DASHSCOPE_API_KEY": "dashscope-example",
             "SILICONFLOW_API_KEY": "silicon-example",
         },
@@ -187,7 +186,6 @@ def test_secret_values_are_not_serialized_or_represented() -> None:
     for secret in (
         "refresh-example",
         "notion-example",
-        "cookie-example",
         "dashscope-example",
         "silicon-example",
     ):

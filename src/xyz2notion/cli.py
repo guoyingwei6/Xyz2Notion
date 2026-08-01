@@ -8,12 +8,11 @@ import time
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
-from datetime import UTC, date, datetime
+from datetime import date
 
 from pydantic import SecretStr
 
 from xyz2notion import __version__
-from xyz2notion.asr.tingwu import TingwuClient
 from xyz2notion.config import (
     AsrProvider,
     ConfigurationError,
@@ -22,14 +21,13 @@ from xyz2notion.config import (
     load_config,
     load_runtime_credentials,
 )
-from xyz2notion.enrichment.pipeline import SummaryPolicy
 from xyz2notion.migration.legacy import LegacyTemplateMigrator
 from xyz2notion.migration.schema import (
     CURRENT_WORKSPACE_SCHEMA_VERSION,
     detect_workspace_schema_version,
     migration_plan,
 )
-from xyz2notion.models import ProviderError, ProviderFailure
+from xyz2notion.models import ProviderFailure
 from xyz2notion.notion.client import JsonObject, NotionAPIError, NotionClient
 from xyz2notion.notion.cover_localizer import NotionCoverLocalizer
 from xyz2notion.notion.initializer import DATA_PAGE_TITLE, HOME_MARKER_URL, NotionInitializer
@@ -50,12 +48,6 @@ from xyz2notion.sync.pipeline import collect_metadata
 from xyz2notion.xiaoyuzhou.client import XiaoyuzhouAPIError, XiaoyuzhouClient
 
 ASR_INTER_EPISODE_SECONDS = 60
-TINGWU_SMOKE_AUDIO_URL = (
-    "https://raw.githubusercontent.com/Jakobovski/"
-    "free-spoken-digit-dataset/master/recordings/0_jackson_0.wav"
-)
-TINGWU_SMOKE_DIRECTORY = "Xyz2Notion smoke test"
-TINGWU_SMOKE_CONFIRMATION = "CREATE_TINGWU_VISIBLE_SMOKE"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -158,31 +150,6 @@ def build_parser() -> argparse.ArgumentParser:
         "xiaoyuzhou-check",
         help="verify Xiaoyuzhou authentication without printing account data",
     )
-    subparsers.add_parser(
-        "tingwu-check",
-        help="verify the Tingwu Cookie with one read-only directory request",
-    )
-    tingwu_smoke = subparsers.add_parser(
-        "tingwu-visible-smoke",
-        help="create one public-audio Tingwu record and verify it is visible",
-    )
-    tingwu_smoke.add_argument(
-        "--confirm",
-        required=True,
-        help=f"required external-write confirmation: {TINGWU_SMOKE_CONFIRMATION}",
-    )
-    tingwu_smoke.add_argument(
-        "--poll-attempts",
-        type=int,
-        default=3,
-        help="source-parser polling attempts before giving up",
-    )
-    tingwu_smoke.add_argument(
-        "--visible-attempts",
-        type=int,
-        default=3,
-        help="directory visibility checks after submission",
-    )
     sync_metadata = subparsers.add_parser(
         "sync-metadata",
         help="sync Xiaoyuzhou metadata and listening progress to Notion",
@@ -191,34 +158,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--page-id",
         help="target root page ID; defaults to NOTION_PAGE_ID",
     )
-    for name, help_text in (
-        ("process-ai", "advance ASR, summary, and Notion publishing"),
-        ("retry-failed", "retry only resumable failed Episode AI jobs"),
-    ):
-        ai_command = subparsers.add_parser(name, help=help_text)
-        ai_command.add_argument("--config", default="config.yaml", help="path to config.yaml")
-        ai_command.add_argument(
-            "--page-id",
-            help="target root page ID; defaults to NOTION_PAGE_ID",
-        )
-        ai_command.add_argument(
-            "--limit",
-            type=int,
-            choices=(1, 2),
-            help="manually cap this run at one or two Episode candidates",
-        )
-        if name == "process-ai":
-            checkpoint_group = ai_command.add_mutually_exclusive_group()
-            checkpoint_group.add_argument(
-                "--only-in-flight",
-                action="store_true",
-                help="advance only Episode rows already queued or transcribing",
-            )
-            checkpoint_group.add_argument(
-                "--only-transcribed",
-                action="store_true",
-                help="advance only Episode rows with a persisted transcript",
-            )
     process_asr = subparsers.add_parser(
         "process-asr",
         help="advance only ASR checkpoints and stop at a persisted transcript",
@@ -308,16 +247,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _summary_policy(config: object) -> SummaryPolicy:
-    summary = config.summary  # type: ignore[attr-defined]
-    return SummaryPolicy(
-        prompt_version=summary.prompt_version,
-        chunk_tokens=summary.chunk_tokens,
-        chunk_minutes=summary.chunk_minutes,
-        max_output_tokens=summary.max_output_tokens,
-    )
-
-
 def _episode_asr_status(page: Mapping[str, object]) -> str:
     properties = page.get("properties")
     if not isinstance(properties, Mapping):
@@ -350,127 +279,12 @@ def _ai_page_priority(page: Mapping[str, object]) -> int:
     }.get(_episode_asr_status(page), 5)
 
 
-def _in_flight_ai_pages[AIPage: Mapping[str, object]](
-    pages: Sequence[AIPage],
-) -> list[AIPage]:
-    return [page for page in pages if _episode_asr_status(page) in {"排队中", "转写中"}]
-
-
-def _transcribed_ai_pages[AIPage: Mapping[str, object]](
-    pages: Sequence[AIPage],
-) -> list[AIPage]:
-    return [page for page in pages if _episode_asr_status(page) == "已转写"]
-
-
 def _asr_queue_pages[AIPage: Mapping[str, object]](
     pages: Sequence[AIPage],
 ) -> list[AIPage]:
     """Select only rows that may advance toward, but never beyond, TRANSCRIBED."""
     allowed = {"待处理", "排队中", "转写中"}
     return [page for page in pages if _episode_asr_status(page) in allowed]
-
-
-def _run_ai(args: argparse.Namespace, *, retry_failed: bool) -> int:
-    try:
-        config = load_config(args.config)
-        credentials = load_runtime_credentials()
-        credentials.require("notion_token")
-        page_id = args.page_id or credentials.notion_page_id
-        if not page_id:
-            raise MissingCredentialError(
-                "Missing target page: set NOTION_PAGE_ID or pass --page-id"
-            )
-        if credentials.notion_token is None:
-            raise AssertionError("credential requirement did not narrow notion_token")
-
-        selected = set(config.asr.provider_order)
-        dashscope_api_key = (
-            credentials.dashscope_api_key if AsrProvider.DASHSCOPE in selected else None
-        )
-        tingwu_cookie = credentials.tingwu_cookie if AsrProvider.TINGWU_COOKIE in selected else None
-        siliconflow_asr_api_key = (
-            credentials.siliconflow_api_key if AsrProvider.SILICONFLOW in selected else None
-        )
-        local_whisper_model = (
-            config.asr.local_whisper_model if AsrProvider.LOCAL_WHISPER in selected else None
-        )
-        siliconflow_summary_api_key = (
-            credentials.siliconflow_api_key if config.summary.enabled else None
-        )
-
-        with ExitStack() as stack:
-            notion = stack.enter_context(NotionClient(credentials.notion_token))
-            initialization = NotionInitializer(notion, page_id).initialize()
-            pages = notion.query_data_source(
-                initialization.resources["episode"].data_source_id,
-                {"page_size": 100},
-            )
-            eligible_pages = sorted(
-                _eligible_ai_pages(pages, retry_failed=retry_failed),
-                key=_ai_page_priority,
-            )
-            if getattr(args, "only_in_flight", False):
-                eligible_pages = _in_flight_ai_pages(eligible_pages)
-            if getattr(args, "only_transcribed", False):
-                eligible_pages = _transcribed_ai_pages(eligible_pages)
-            run_limit = min(
-                args.limit or config.limits.episodes_per_run,
-                config.limits.episodes_per_run,
-            )
-            candidates = episode_candidates(eligible_pages)[:run_limit]
-            dashscope, tingwu, siliconflow, local_whisper, summary_client = build_provider_clients(
-                dashscope_api_key=dashscope_api_key,
-                dashscope_model=config.asr.dashscope_model,
-                tingwu_cookie=tingwu_cookie,
-                siliconflow_asr_api_key=siliconflow_asr_api_key,
-                siliconflow_summary_api_key=siliconflow_summary_api_key,
-                siliconflow_asr_models=config.asr.siliconflow_models,
-                siliconflow_summary_models=config.summary.siliconflow_models,
-                local_whisper_model=local_whisper_model,
-                local_qwen_summary=config.summary.enabled and config.summary.local_qwen_fallback,
-            )
-            for client in (dashscope, tingwu, siliconflow, local_whisper, summary_client):
-                if client is not None:
-                    stack.enter_context(client)
-            state_store = stack.enter_context(NotionEpisodeStateStore(notion))
-            processor = EpisodeAIProcessor(
-                notion,
-                state_store,
-                dashscope=dashscope,
-                tingwu=tingwu,
-                siliconflow=siliconflow,
-                local_whisper=local_whisper,
-                summary_client=summary_client,
-                summary_policy=_summary_policy(config),
-                summary_enabled=config.summary.enabled,
-                mindmap_data_source_id=initialization.resources["mindmap"].data_source_id,
-            )
-            page_by_id = {str(page.get("id")): page for page in pages}
-            outcomes = [
-                processor.process(
-                    candidate,
-                    page_by_id[candidate.page_id],
-                    retry_failed=retry_failed,
-                    only_failed=retry_failed,
-                )
-                for candidate in candidates
-            ]
-    except (ConfigurationError, MissingCredentialError) as exc:
-        print(f"Configuration error: {exc}", file=sys.stderr)
-        return 2
-    except NotionAPIError as exc:
-        print(f"Notion error: {exc}", file=sys.stderr)
-        return 4
-
-    actions = Counter(outcome.action for outcome in outcomes)
-    states = Counter(outcome.state.value for outcome in outcomes)
-    action_summary = ", ".join(f"{name}={actions[name]}" for name in sorted(actions)) or "none=0"
-    state_summary = ", ".join(f"{name}={states[name]}" for name in sorted(states)) or "none=0"
-    print(
-        f"Episode AI processing OK (selected={len(candidates)}; "
-        f"actions: {action_summary}; states: {state_summary})"
-    )
-    return 0
 
 
 def _run_asr_queue(args: argparse.Namespace) -> int:
@@ -490,9 +304,6 @@ def _run_asr_queue(args: argparse.Namespace) -> int:
         selected_providers = set(config.asr.provider_order)
         dashscope_api_key = (
             credentials.dashscope_api_key if AsrProvider.DASHSCOPE in selected_providers else None
-        )
-        tingwu_cookie = (
-            credentials.tingwu_cookie if AsrProvider.TINGWU_COOKIE in selected_providers else None
         )
         siliconflow_asr_api_key = (
             credentials.siliconflow_api_key
@@ -515,10 +326,9 @@ def _run_asr_queue(args: argparse.Namespace) -> int:
             eligible_pages = sorted(_asr_queue_pages(pages), key=_ai_page_priority)
             all_candidates = episode_candidates(eligible_pages)
             candidates = all_candidates[: args.limit]
-            dashscope, tingwu, siliconflow, local_whisper, _summary_client = build_provider_clients(
+            dashscope, siliconflow, local_whisper, _summary_client = build_provider_clients(
                 dashscope_api_key=dashscope_api_key,
                 dashscope_model=config.asr.dashscope_model,
-                tingwu_cookie=tingwu_cookie,
                 siliconflow_asr_api_key=siliconflow_asr_api_key,
                 siliconflow_summary_api_key=None,
                 siliconflow_asr_models=config.asr.siliconflow_models,
@@ -526,7 +336,7 @@ def _run_asr_queue(args: argparse.Namespace) -> int:
                 local_whisper_model=local_whisper_model,
                 local_qwen_summary=False,
             )
-            for client in (dashscope, tingwu, siliconflow, local_whisper):
+            for client in (dashscope, siliconflow, local_whisper):
                 if client is not None:
                     stack.enter_context(client)
             state_store = stack.enter_context(NotionEpisodeStateStore(notion))
@@ -534,7 +344,6 @@ def _run_asr_queue(args: argparse.Namespace) -> int:
                 notion,
                 state_store,
                 dashscope=dashscope,
-                tingwu=tingwu,
                 siliconflow=siliconflow,
                 local_whisper=local_whisper,
                 summary_enabled=False,
@@ -762,7 +571,6 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
             statuses = Counter(_episode_asr_status(page) or "未设置" for page in episodes)
             asr_providers: Counter[str] = Counter()
             asr_models: Counter[str] = Counter()
-            tingwu_submission_checkpoints: Counter[str] = Counter()
             for page in episodes:
                 properties = page.get("properties")
                 if not isinstance(properties, Mapping):
@@ -773,10 +581,6 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
                     asr_providers[provider] += 1
                 if model:
                     asr_models[model] += 1
-                if provider == "tingwu_cookie":
-                    source_task_id = _notion_property_text(properties, "ASR Source Task ID")
-                    checkpoint_kind = "new_submission" if source_task_id else "existing_record"
-                    tingwu_submission_checkpoints[checkpoint_kind] += 1
             final_pages = [page for page in episodes if _episode_asr_status(page) == "最终失败"]
             failure_categories: Counter[str] = Counter()
             with NotionEpisodeStateStore(notion) as state_store:
@@ -844,10 +648,6 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
     model_summary = (
         ", ".join(f"{name}={asr_models[name]}" for name in sorted(asr_models)) or "none=0"
     )
-    tingwu_checkpoint_summary = ", ".join(
-        f"{name}={tingwu_submission_checkpoints[name]}"
-        for name in ("new_submission", "existing_record")
-    )
     print(
         "Notion backlog audit OK "
         f"(episodes={len(episodes)}; normal_ai_candidates={len(normal_candidates)}; "
@@ -855,7 +655,6 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
         f"statistics_total_seconds={total_seconds}; "
         f"statistics_baseline={'set' if baseline_version_set else 'unset'}; "
         f"asr_providers: {provider_summary}; asr_models: {model_summary}; "
-        f"tingwu_checkpoints: {tingwu_checkpoint_summary}; "
         f"final_failure_categories: {failure_summary}; "
         f"zero_play_total={zero_play_total}; "
         f"zero_play_protected={protected_zero_play}; "
@@ -1558,80 +1357,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 3
         print("Xiaoyuzhou authentication OK")
         return 0
-    if args.command == "tingwu-check":
-        try:
-            credentials = load_runtime_credentials()
-            credentials.require("tingwu_cookie")
-            if credentials.tingwu_cookie is None:
-                raise AssertionError("credential requirement did not narrow tingwu_cookie")
-            with TingwuClient(credentials.tingwu_cookie, max_retries=0) as tingwu:
-                tingwu.health_check()
-        except (ConfigurationError, MissingCredentialError) as exc:
-            print(f"Configuration error: {exc}", file=sys.stderr)
-            return 2
-        except ProviderError as exc:
-            print(
-                f"Tingwu health check failed (category={exc.failure.category.value})",
-                file=sys.stderr,
-            )
-            return 5
-        print("Tingwu authentication OK")
-        return 0
-    if args.command == "tingwu-visible-smoke":
-        if args.confirm != TINGWU_SMOKE_CONFIRMATION:
-            print(
-                f"Confirmation error: use --confirm {TINGWU_SMOKE_CONFIRMATION}",
-                file=sys.stderr,
-            )
-            return 2
-        if args.poll_attempts < 1 or args.visible_attempts < 1:
-            print("Confirmation error: attempts must be positive", file=sys.stderr)
-            return 2
-        try:
-            credentials = load_runtime_credentials()
-            credentials.require("tingwu_cookie")
-            if credentials.tingwu_cookie is None:
-                raise AssertionError("credential requirement did not narrow tingwu_cookie")
-            title = f"Xyz2Notion smoke {datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
-            with TingwuClient(credentials.tingwu_cookie, max_retries=0) as tingwu:
-                task = tingwu.submit_episode(
-                    TINGWU_SMOKE_DIRECTORY,
-                    title,
-                    TINGWU_SMOKE_AUDIO_URL,
-                    parse_poll_attempts=args.poll_attempts,
-                )
-                visible = 0
-                state = task.state.value
-                for attempt in range(args.visible_attempts):
-                    records = tingwu.find_records(task.directory_id, title)
-                    visible = len(records)
-                    if visible:
-                        state = tingwu.task_from_record(
-                            records[0],
-                            directory_id=task.directory_id,
-                            title=title,
-                        ).state.value
-                        break
-                    if attempt + 1 < args.visible_attempts:
-                        time.sleep(2)
-        except (ConfigurationError, MissingCredentialError) as exc:
-            print(f"Configuration error: {exc}", file=sys.stderr)
-            return 2
-        except ProviderError as exc:
-            code = f"; code={exc.failure.code}" if exc.failure.code else ""
-            print(
-                f"Tingwu visible smoke failed (category={exc.failure.category.value}{code})",
-                file=sys.stderr,
-            )
-            return 5
-        if visible < 1:
-            print(
-                "Tingwu visible smoke failed (category=unavailable; code=record_not_visible)",
-                file=sys.stderr,
-            )
-            return 5
-        print(f"Tingwu visible smoke OK (submitted=1; visible_records={visible}; state={state})")
-        return 0
     if args.command == "sync-metadata":
         try:
             credentials = load_runtime_credentials()
@@ -1698,8 +1423,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"playlist: {playlist_count}, favorites: {favorite_count})"
         )
         return 0
-    if args.command in {"process-ai", "retry-failed"}:
-        return _run_ai(args, retry_failed=args.command == "retry-failed")
     if args.command == "process-asr":
         return _run_asr_queue(args)
     if args.command == "repair-notion-covers":

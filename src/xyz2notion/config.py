@@ -26,7 +26,6 @@ class MissingCredentialError(ConfigurationError):
 class AsrProvider(StrEnum):
     """Supported ASR providers in fallback order."""
 
-    TINGWU_COOKIE = "tingwu_cookie"
     DASHSCOPE = "dashscope"
     SILICONFLOW = "siliconflow"
     LOCAL_WHISPER = "local_whisper"
@@ -145,7 +144,6 @@ class RuntimeCredentials(BaseModel):
     xiaoyuzhou_device_id: str
     notion_token: SecretStr | None = None
     notion_page_id: str | None = None
-    tingwu_cookie: SecretStr | None = None
     dashscope_api_key: SecretStr | None = None
     siliconflow_api_key: SecretStr | None = None
 
@@ -238,7 +236,6 @@ def load_runtime_credentials(
         xiaoyuzhou_device_id=device_id,
         notion_token=secret("NOTION_TOKEN"),
         notion_page_id=env.get("NOTION_PAGE_ID", "").strip() or None,
-        tingwu_cookie=secret("TINGWU_COOKIE"),
         dashscope_api_key=secret("DASHSCOPE_API_KEY"),
         siliconflow_api_key=secret("SILICONFLOW_API_KEY"),
     )
