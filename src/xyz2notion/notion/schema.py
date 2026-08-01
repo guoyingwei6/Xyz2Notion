@@ -260,7 +260,7 @@ def relational_properties(resources: dict[str, NotionResource]) -> dict[str, Jso
                 author,
                 synced_property_name="Podcasts",
             ),
-            "收听分钟": formula_property('round(prop("Total Listening Seconds") / 60 * 10) / 10'),
+            "收听小时": formula_property('round(prop("Total Listening Seconds") / 3600 * 10) / 10'),
         },
         "episode": {
             "Podcast": relation_property(
@@ -481,7 +481,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         source="podcast",
         name="收听时长排行榜",
         view_type="table",
-        visible_properties=("Rank", "Name", "Cover", "收听分钟"),
+        visible_properties=("Rank", "Name", "Cover", "收听小时"),
         filter={
             "property": "Total Listening Seconds",
             "number": {"greater_than": 0},
@@ -493,7 +493,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         source="podcast",
         name="Podcast",
         view_type="gallery",
-        visible_properties=("Name", "收听分钟"),
+        visible_properties=("Name", "收听小时"),
         filter={
             "property": "Total Listening Seconds",
             "number": {"greater_than": 0},

@@ -301,8 +301,8 @@ def test_initializer_creates_complete_clean_room_template() -> None:
         "synced_property_name": "Podcasts"
     }
     assert (
-        podcast_properties["收听分钟"]["formula"]["expression"]
-        == 'round(prop("Total Listening Seconds") / 60 * 10) / 10'
+        podcast_properties["收听小时"]["formula"]["expression"]
+        == 'round(prop("Total Listening Seconds") / 3600 * 10) / 10'
     )
     assert "Progress Percent" in episode_properties
     assert "Progress Ring" in episode_properties
@@ -332,14 +332,14 @@ def test_initializer_creates_complete_clean_room_template() -> None:
     }
     assert {item["property_id"] for item in podcast_view["configuration"]["properties"]} == {
         podcast_properties["Name"]["id"],
-        podcast_properties["收听分钟"]["id"],
+        podcast_properties["收听小时"]["id"],
     }
 
     ranking_view = next(view for view in fake.views.values() if view["name"] == "收听时长排行榜")
     ranking_property_ids = {
         item["property_id"] for item in ranking_view["configuration"]["properties"]
     }
-    assert podcast_properties["收听分钟"]["id"] in ranking_property_ids
+    assert podcast_properties["收听小时"]["id"] in ranking_property_ids
     assert podcast_properties["Total Listening Seconds"]["id"] not in ranking_property_ids
     assert "Statistics Baseline Seconds" in podcast_properties
     assert "Statistics Baseline Seconds" in episode_properties
