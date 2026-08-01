@@ -12,6 +12,10 @@ DashScope REST API 提交 Notion 已保存的公开音频 URL，等待异步任�
 DASHSCOPE_API_KEY
 ```
 
+这里使用中国内地百炼的通用 API Key（不是 Token Plan/Coding Plan 专属 Key）。
+项目不需要把 Key、URL 或模型写进 Secret：URL 和模型由代码固定为国内通用端点与
+`paraformer-v1`。
+
 `config.example.yaml` 默认 ASR 顺序为：
 
 ```yaml
@@ -25,6 +29,14 @@ asr:
 
 项目只允许 `paraformer-v1`，避免误配付费或未知模型。Key 只会发送到
 `dashscope.aliyuncs.com`。
+
+实际请求端点为：
+
+- 提交：`POST https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription`
+- 查询：`POST https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}`
+
+阿里云目前还提供带 Workspace ID 的北京专属域名；官方说明现有
+`dashscope.aliyuncs.com` 仍可正常使用，因此本项目不要求额外配置 Workspace ID。
 
 ## 降级规则
 

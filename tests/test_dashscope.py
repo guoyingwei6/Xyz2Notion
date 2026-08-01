@@ -30,6 +30,7 @@ def test_submit_poll_fetch_and_parse_paraformer_result() -> None:
             return httpx.Response(200, json={"output": {"task_id": "task-1"}})
         if str(request.url) == DASHSCOPE_TASK_URL.format(task_id="task-1"):
             assert request.headers["Authorization"] == "Bearer dashscope-fixture-secret"
+            assert request.method == "POST"
             return httpx.Response(
                 200,
                 json={
@@ -189,11 +190,14 @@ def test_wait_result_url_polls_running_then_succeeds() -> None:
         ]
     )
     sleeps: list[float] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        return httpx.Response(200, json=next(statuses))
+
     client = DashScopeParaformerClient(
         "dashscope-fixture-secret",
-        client=httpx.Client(
-            transport=httpx.MockTransport(lambda _request: httpx.Response(200, json=next(statuses)))
-        ),
+        client=httpx.Client(transport=httpx.MockTransport(handle)),
         poll_interval_seconds=3,
         sleep=sleeps.append,
     )

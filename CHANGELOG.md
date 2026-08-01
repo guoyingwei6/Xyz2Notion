@@ -7,9 +7,11 @@
 - 新增只读权限的 `Xyz2Notion Maintenance` 手动工作流；
 - GitHub-only 支持迁移 dry-run/确认应用、单集重做、统计和热力图重建；
 - 所有 Notion 写工作流统一互斥，避免初始化、同步、AI 和维护并发修改页面。
-- 移除 DashScope 凭证、付费 ASR 与金额预算配置；
-- 文字稿摘要改用用户自己的 `SILICONFLOW_API_KEY`，按两个免费 Qwen 模型回退；
-- ASR 与摘要客户端只接受当前版本核对过的 SiliconFlow 免费模型白名单。
+- ASR 默认改为用户自己的百炼 `paraformer-v1` 免费额度，失败后降级
+  SiliconFlow 免费 ASR 与本地 Whisper；
+- 文字稿摘要继续使用用户自己的 `SILICONFLOW_API_KEY`，失败后回退到缓存的本地
+  Qwen 模型；
+- 自动 ASR 队列不再读取通义听悟 Cookie，听悟仅保留旧兼容/手动诊断入口。
 
 ## 0.1.0 - 2026-07-29
 
