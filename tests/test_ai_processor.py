@@ -297,6 +297,32 @@ def test_candidate_extraction_skips_incomplete_rows() -> None:
     )
 
 
+def test_candidate_extraction_skips_invalid_audio_urls() -> None:
+    pages = [
+        {
+            "id": "invalid",
+            "properties": {
+                "EID": {"rich_text": [{"plain_text": "invalid"}]},
+                "Name": {"title": [{"plain_text": "坏地址"}]},
+                "Audio URL": {"url": "http://legacy.example/audio"},
+                "Played Seconds": {"number": 120},
+            },
+        },
+        {
+            "id": "valid",
+            "properties": {
+                "EID": {"rich_text": [{"plain_text": "valid"}]},
+                "Name": {"title": [{"plain_text": "有效地址"}]},
+                "Audio URL": {"url": "https://cdn.example/audio"},
+                "Played Seconds": {"number": 120},
+            },
+        },
+    ]
+    assert episode_candidates(pages) == (
+        EpisodeCandidate("valid", "valid", "有效地址", "https://cdn.example/audio"),
+    )
+
+
 def test_siliconflow_summary_and_publish_are_checkpointed() -> None:
     store = FakeStateStore()
     processor = SiliconProcessor(

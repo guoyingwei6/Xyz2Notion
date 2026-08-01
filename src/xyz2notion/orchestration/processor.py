@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import SecretStr
 
+from xyz2notion.asr.audio import AudioPreparationError, validate_public_audio_url
 from xyz2notion.asr.dashscope import DashScopeParaformerClient
 from xyz2notion.asr.local_whisper import LocalWhisperClient
 from xyz2notion.asr.pipeline import transcribe_siliconflow_episode
@@ -129,6 +130,12 @@ def episode_candidates(pages: list[JsonObject]) -> tuple[EpisodeCandidate, ...]:
             and not skip_ai
             and asr_status not in {"已发布", "最终失败"}
         ):
+            try:
+                validate_public_audio_url(audio_url)
+            except AudioPreparationError:
+                # A stale/non-public legacy URL must not abort the whole queue;
+                # leave the row pending and let a later metadata sync repair it.
+                continue
             result.append(EpisodeCandidate(str(page["id"]), eid, title, audio_url))
     return tuple(result)
 
