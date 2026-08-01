@@ -34,7 +34,7 @@ from xyz2notion.orchestration.processor import (
 from xyz2notion.orchestration.state_store import NotionEpisodeStateStore
 
 BACKLOG_LIMIT = 2
-NORMAL_LIMIT = 1
+NORMAL_LIMIT = 2
 ENRICHMENT_STATUSES = frozenset({"已转写", "已增强"})
 _STATUS_PRIORITY = {"已增强": 0, "已转写": 1}
 

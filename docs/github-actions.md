@@ -68,7 +68,7 @@ ASR 降级模型和免费文本摘要模型。项目只接受代码已核对的�
 | `Initialize Notion` | 手动 | `bootstrap` 首次建首页；`initialize` 日常只修复数据库和视图 |
 | `Sync Podcast Metadata` | 每天 05:17（UTC+8）+ 手动确认 | 安全增量同步最近播放历史、待听、收藏和进度 |
 | `Transcribe Episode Queue` | 元数据同步成功后；存量每 2 小时 | 只推进到“已转写”；日常每次最多 2 期且两期相隔 60 秒 |
-| `Enrich Transcribed Episodes` | 转写队列成功后；存量每 2 小时 | 只消费既有文字稿；日常每次最多 1 期，生成摘要、章节、思维导图并发布 |
+| `Enrich Transcribed Episodes` | 转写队列成功后；存量每 2 小时 | 只消费既有文字稿；日常每次最多 2 期，生成摘要、章节、思维导图并发布 |
 | `Xyz2Notion Maintenance` | 手动 | 迁移、单集重做、统计或热力图重建 |
 | `Xyz2Notion Notion-only Repair` | 手动 | 只读盘点 AI/封面/零播放存量，或分批修复封面与已发布脑图 |
 

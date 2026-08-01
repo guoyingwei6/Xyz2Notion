@@ -144,8 +144,9 @@ def test_enrichment_pass_is_bounded_and_reports_only_aggregates() -> None:
 def test_queue_modes_apply_strict_caps() -> None:
     assert resolve_queue_limit("backlog") == BACKLOG_LIMIT == 2
     assert resolve_queue_limit("backlog", 99) == 2
-    assert resolve_queue_limit("normal") == NORMAL_LIMIT == 1
-    assert resolve_queue_limit("normal", 2) == 1
+    assert resolve_queue_limit("normal") == NORMAL_LIMIT == 2
+    assert resolve_queue_limit("normal", 2) == 2
+    assert resolve_queue_limit("normal", 99) == 2
     with pytest.raises(ValueError, match="positive"):
         resolve_queue_limit("backlog", 0)
 

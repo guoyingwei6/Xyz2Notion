@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "backlog: at most 2; normal: at most 1"
+        description: "backlog: at most 2; normal: at most 2"
         required: true
         default: "backlog"
         type: choice
@@ -103,7 +103,7 @@ jobs:
           config_path="config.yaml"
           if [[ ! -f "$config_path" ]]; then config_path="config.example.yaml"; fi
           mode="normal"
-          limit="1"
+          limit="2"
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             mode="${MANUAL_MODE:-backlog}"
             limit="${MANUAL_LIMIT:-2}"
