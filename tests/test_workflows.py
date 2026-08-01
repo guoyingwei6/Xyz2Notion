@@ -101,20 +101,36 @@ def test_transcribe_workflow_uses_only_current_asr_providers() -> None:
     text, workflow = _workflow("transcribe-asr.yml")
     assert workflow[True]["schedule"] == [  # type: ignore[index]
         {"cron": "13 */2 * * *"},
-        {"cron": "47 21 * * *"},
     ]
+    assert workflow[True]["workflow_run"] == {  # type: ignore[index]
+        "workflows": ["Sync Podcast Metadata"],
+        "types": ["completed"],
+    }
     assert "DASHSCOPE_API_KEY" in text
     assert "SILICONFLOW_API_KEY" in text
     assert "TINGWU_COOKIE" not in text
     assert "process-asr" in text
+    assert "github.event.workflow_run.conclusion == 'success'" in text
+    assert "github.event_name == 'workflow_run'" in text
+    assert "47 21 * * *" not in text
 
 
 def test_enrichment_workflow_uses_only_summary_credentials() -> None:
     text, workflow = _workflow("enrich-transcripts.yml")
+    assert workflow[True]["schedule"] == [  # type: ignore[index]
+        {"cron": "41 */2 * * *"},
+    ]
+    assert workflow[True]["workflow_run"] == {  # type: ignore[index]
+        "workflows": ["Transcribe Episode Queue"],
+        "types": ["completed"],
+    }
     assert "SILICONFLOW_API_KEY" in text
     assert "TINGWU_COOKIE" not in text
     assert "process-ai" not in text
     assert "llama_cpp_python-0.3.19-cp312-cp312-linux_x86_64.whl" in text
+    assert "github.event.workflow_run.conclusion == 'success'" in text
+    assert "github.event_name == 'workflow_run'" in text
+    assert "37 22 * * *" not in text
 
 
 def test_maintenance_workflow_has_safe_dispatch_guards() -> None:

@@ -21,8 +21,10 @@ on:
           - "2"
   schedule:
     - cron: "41 */2 * * *"
-    # Normal lane: once daily at 06:37 UTC+8, after metadata and ASR.
-    - cron: "37 22 * * *"
+  # Normal lane: start only after the ASR workflow completes successfully.
+  workflow_run:
+    workflows: ["Transcribe Episode Queue"]
+    types: [completed]
 
 permissions:
   contents: read
@@ -38,8 +40,12 @@ jobs:
       (
         vars.XYZ2NOTION_ENRICHMENT_QUEUE_ENABLED == 'true' &&
         (
-          github.event.schedule == '37 22 * * *' ||
-          vars.XYZ2NOTION_ENRICHMENT_BACKLOG == 'true'
+          (github.event_name == 'schedule' &&
+           github.event.schedule == '41 */2 * * *' &&
+           vars.XYZ2NOTION_ENRICHMENT_BACKLOG == 'true') ||
+          (github.event_name == 'workflow_run' &&
+           github.event.workflow_run.conclusion == 'success' &&
+           vars.XYZ2NOTION_ENRICHMENT_BACKLOG != 'true')
         )
       )
     runs-on: ubuntu-latest

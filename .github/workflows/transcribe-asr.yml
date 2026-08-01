@@ -23,8 +23,10 @@ on:
     # Backfill lane: at most two sequential candidates every two hours,
     # with a fixed 60-second gap between Episode candidates.
     - cron: "13 */2 * * *"
-    # Normal lane: once daily at 05:47 UTC+8, after the 05:17 metadata sync.
-    - cron: "47 21 * * *"
+  # Normal lane: start only after the metadata workflow completes successfully.
+  workflow_run:
+    workflows: ["Sync Podcast Metadata"]
+    types: [completed]
 
 permissions:
   contents: read
@@ -40,9 +42,11 @@ jobs:
       (
         vars.ASR_QUEUE_ENABLED == 'true' &&
         (
-          (github.event.schedule == '13 */2 * * *' &&
+          (github.event_name == 'schedule' &&
+           github.event.schedule == '13 */2 * * *' &&
            vars.ASR_BACKFILL_ACTIVE == 'true') ||
-          (github.event.schedule == '47 21 * * *' &&
+          (github.event_name == 'workflow_run' &&
+           github.event.workflow_run.conclusion == 'success' &&
            vars.ASR_BACKFILL_ACTIVE != 'true')
         )
       )

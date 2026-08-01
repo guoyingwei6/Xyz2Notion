@@ -67,8 +67,8 @@ ASR 降级模型和免费文本摘要模型。项目只接受代码已核对的�
 | --- | --- | --- |
 | `Initialize Notion` | 手动 | `bootstrap` 首次建首页；`initialize` 日常只修复数据库和视图 |
 | `Sync Podcast Metadata` | 每天 05:17（UTC+8）+ 手动确认 | 安全增量同步最近播放历史、待听、收藏和进度 |
-| `Transcribe Episode Queue` | 存量每 2 小时；日常 05:47（UTC+8） | 只推进到“已转写”；每次最多 2 期且两期相隔 60 秒 |
-| `Enrich Transcribed Episodes` | 存量每 2 小时；日常 06:37（UTC+8） | 只消费既有文字稿；生成摘要、章节、思维导图并发布 |
+| `Transcribe Episode Queue` | 元数据同步成功后；存量每 2 小时 | 只推进到“已转写”；日常每次最多 2 期且两期相隔 60 秒 |
+| `Enrich Transcribed Episodes` | 转写队列成功后；存量每 2 小时 | 只消费既有文字稿；日常每次最多 1 期，生成摘要、章节、思维导图并发布 |
 | `Xyz2Notion Maintenance` | 手动 | 迁移、单集重做、统计或热力图重建 |
 | `Xyz2Notion Notion-only Repair` | 手动 | 只读盘点 AI/封面/零播放存量，或分批修复封面与已发布脑图 |
 
@@ -83,8 +83,8 @@ AI 定时任务不包含 `XIAOYUZHOU_REFRESH_TOKEN`。转写队列只读取 Noti
 音频地址并停在“已转写”。当前默认 ASR 队列按
 `DashScope paraformer-v1 -> SiliconFlow -> 本地 Whisper` 降级；增强队列不接收
 小宇宙或任何 ASR 凭证，只消费 Notion 已保存文字稿。存量模式两条队列均每两小时最多 2 期；转写队列两期之间
-固定等待 60 秒。存量清空后将两个 backlog Variable 改为 `false`，之后转写每天
-05:47、增强每天 06:37 仅处理新增检查点。可重试失败每日最多 2 期，同一期累计
+固定等待 60 秒。存量清空后将两个 backlog Variable 改为 `false`，之后元数据同步
+成功才启动日常转写，转写成功才启动日常增强，不受固定半小时窗口影响。可重试失败每日最多 2 期，同一期累计
 重试 3 次后转为最终失败。
 
 首次使用顺序：

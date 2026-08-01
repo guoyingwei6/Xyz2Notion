@@ -44,8 +44,9 @@ Fork 本仓库，在 `Settings → Secrets and variables → Actions` 至少添�
 
 分别手动运行一次 `Transcribe Episode Queue` 和
 `Enrich Transcribed Episodes` 验收。验收完成后，元数据每天 UTC+8 05:17
-执行一次受限增量同步；首次存量转写与增强每两小时最多处理 2 期，清空后切换为
-每天 05:47 转写新增、06:37 增强新增。转写按百炼 `paraformer-v1` →
+执行一次受限增量同步；成功后自动启动日常转写，转写成功后自动启动摘要/章节/脑图
+增强，不依赖固定的半小时窗口。一次性存量若开启则每两小时最多处理 2 期；日常
+转写每次最多 2 期，增强每次最多 1 期。转写按百炼 `paraformer-v1` →
 SiliconFlow → GitHub Actions 本地 `faster-whisper small` 降级；摘要、章节和脑图
 按 SiliconFlow `Qwen/Qwen3-8B` → 缓存的本地 Qwen3-1.7B 降级。工作流中断后从
 用户自己 Notion 里的私有检查点继续。

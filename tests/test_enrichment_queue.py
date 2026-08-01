@@ -363,14 +363,19 @@ def test_enrichment_workflow_is_asr_free_cached_and_mode_gated() -> None:
     assert workflow["concurrency"]["group"] == "xyz2notion-runtime"
     assert workflow[True]["schedule"] == [
         {"cron": "41 */2 * * *"},
-        {"cron": "37 22 * * *"},
     ]
+    assert workflow[True]["workflow_run"] == {
+        "workflows": ["Transcribe Episode Queue"],
+        "types": ["completed"],
+    }
     assert "XYZ2NOTION_ENRICHMENT_QUEUE_ENABLED" in text
     assert "XYZ2NOTION_ENRICHMENT_BACKLOG" in text
     assert "TINGWU_COOKIE" not in text
     assert "XIAOYUZHOU_REFRESH_TOKEN" not in text
     assert "ffmpeg" not in text.lower()
     assert "process-ai" not in text
+    assert "github.event.workflow_run.conclusion == 'success'" in text
+    assert "37 22 * * *" not in text
     assert "xyz2notion.orchestration.enrichment_queue" in text
     assert "~/.cache/xyz2notion" in text
     assert "llama_cpp_python-0.3.19-cp312-cp312-linux_x86_64.whl" in text
