@@ -456,6 +456,7 @@ def test_process_asr_cli_runs_two_sequential_candidates_with_safe_aggregate_outp
     assert "transcribed=1" in output
     assert "ASR_RUNNING=1" in output
     assert "TRANSCRIBED=1" in output
+    assert "providers: unknown=2" in output
     assert "private title" not in output
     assert "private-eid" not in output
 

@@ -559,8 +559,12 @@ def _run_asr_queue(args: argparse.Namespace) -> int:
 
     actions = Counter(outcome.action for outcome in outcomes)
     states = Counter(outcome.state.value for outcome in outcomes)
+    providers = Counter(outcome.detail or "unknown" for outcome in outcomes)
     action_summary = ", ".join(f"{name}={actions[name]}" for name in sorted(actions)) or "none=0"
     state_summary = ", ".join(f"{name}={states[name]}" for name in sorted(states)) or "none=0"
+    provider_summary = (
+        ", ".join(f"{name}={providers[name]}" for name in sorted(providers)) or "none=0"
+    )
     remaining = max(0, len(all_candidates) - len(candidates)) + sum(
         outcome.state in {PipelineState.ASR_SUBMITTED, PipelineState.ASR_RUNNING}
         for outcome in outcomes
@@ -568,7 +572,7 @@ def _run_asr_queue(args: argparse.Namespace) -> int:
     print(
         f"Episode ASR queue OK (mode={args.mode}; selected={len(candidates)}; "
         f"remaining={remaining}; interval_seconds={ASR_INTER_EPISODE_SECONDS}; "
-        f"actions: {action_summary}; states: {state_summary})"
+        f"actions: {action_summary}; states: {state_summary}; providers: {provider_summary})"
     )
     return 0
 

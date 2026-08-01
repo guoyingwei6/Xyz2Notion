@@ -529,6 +529,7 @@ class EpisodeAIProcessor:
                 candidate.eid,
                 "pending" if pending else "transcribed",
                 state.record.state,
+                detail=state.provider or "unknown",
             )
         except ProviderError as exc:
             return self._fail(candidate, state, exc)
