@@ -1,91 +1,125 @@
 # Xyz2Notion
 
-Xyz2Notion 是一个完全自托管的开源工具，用 GitHub Actions 将小宇宙收听记录、
-待听播放列表、收藏、播放进度、文字稿、AI 总结和思维导图同步到用户自己的 Notion。
+Xyz2Notion 是一个完全自托管的播客工作流：用 GitHub Actions 从小宇宙同步实际收听记录、待听播放列表、收藏、喜欢和播放进度，再写入用户自己的 Notion，并为符合条件的单集生成文字稿、摘要、章节和思维导图。
 
-项目不依赖作者服务器、NotionHub 插件或激活服务。用户自行提供小宇宙、
-Notion 和可选语音识别服务的凭证，所有任务运行在用户自己的 GitHub Actions
-中。
+项目不依赖作者服务器、NotionHub 插件或激活服务。所有任务都运行在你自己的 GitHub Actions 中；凭证只通过 GitHub Secrets/Variables 注入。
 
 ## 三步开始
 
 ### 1. Fork 并配置凭证
 
-Fork 本仓库，在 `Settings → Secrets and variables → Actions` 至少添加：
+Fork 本仓库，在 `Settings → Secrets and variables → Actions` 添加：
+
+必需 Secrets：
 
 - `XIAOYUZHOU_REFRESH_TOKEN`
 - `NOTION_TOKEN`
 - `NOTION_PAGE_ID`
 
-转写和免费摘要建议再添加 `DASHSCOPE_API_KEY` 和 `SILICONFLOW_API_KEY`。获取方法见
-[GitHub Actions 与 Secrets](docs/github-actions.md)。
+启用完整 AI 链路还需要：
+
+- `DASHSCOPE_API_KEY`：阿里云百炼 `paraformer-v1` 的 API Key
+- `SILICONFLOW_API_KEY`：SiliconFlow 的免费 ASR/摘要 API Key
+
+可选 Repository Variable：
+
+- `XIAOYUZHOU_DEVICE_ID`：不填时由安装身份稳定派生
+- `ASR_QUEUE_ENABLED`：日常转写队列开关
+- `XYZ2NOTION_ENRICHMENT_QUEUE_ENABLED`：日常摘要/章节/脑图队列开关
+- `ASR_BACKFILL_ACTIVE`、`XYZ2NOTION_ENRICHMENT_BACKLOG`：一次性存量队列开关，默认应保持关闭
+
+当前版本不使用 `TINGWU_COOKIE`，也不需要为百炼额外配置 URL、模型名或 Workspace ID。百炼接口和模型由代码固定为中国内地通用端点与 `paraformer-v1`。详细配置见 [GitHub Actions 与 Secrets](docs/github-actions.md) 和 [百炼 ASR](docs/dashscope-asr.md)。
 
 ### 2. 初始化并同步
 
-在 Fork 的 `Actions` 页面依次手动运行：
+在 Fork 的 `Actions` 页面依次运行：
 
-1. `Initialize Notion`，首次选择 `bootstrap`
-2. `Sync Podcast Metadata`
+1. `Initialize Notion`，首次选择 `bootstrap`；
+2. `Sync Podcast Metadata`，手动运行时输入精确确认语 `RUN_SAFE_INCREMENTAL_SYNC`。
 
-它会在已授权的空白 Notion 页面中创建九个数据库、19 个视图、统计关系和首页，
-再以严格限速的小批量方式同步最近播放历史、待听、收藏和进度。
+在授权的空白 Notion 页面中，初始化会创建 9 个底层数据库，并按 8 个主页模块组织 17 个展示视图。日常运行是幂等的：只更新现有数据库/视图，不会再追加第二套主页布局，也不会清空用户内容。
 
-数据口径：
+同步包含实际播放历史、待听播放列表、收藏、喜欢、订阅播客和播放进度。统计只使用真实播放秒数；仅浏览、仅加入待听或仅收藏的单集不会被算入收听时长、收听天数、排行或热力图。
 
-- `Episode · 在听` 与 `Episode · 听过` 覆盖实际播放过的单集；
-- `Episode · 待听` 按小宇宙播放列表顺序显示，未播放时不参与统计；
-- `Episode · 收藏` 显示小宇宙收藏，未播放时不参与统计；
-- `Episode · 喜欢` 对应小宇宙 `isPicked`，与收藏是两个不同状态；
-- 安全增量同步不会把本轮未抓到的旧记录误判为“已移除”，也不会删除页面、
-  文字稿或用户笔记；
-- 时长、天数、期数、排行和热力图只统计播放秒数大于 0 的记录。
+### 3. 让 AI 队列自动运行
 
-### 3. 生成文字稿与 AI 内容
+先手动运行一次 `Transcribe Episode Queue` 和 `Enrich Transcribed Episodes`，确认自己的凭证和 Notion 页面可用。验收通过后保持两个日常队列开关开启即可。
 
-分别手动运行一次 `Transcribe Episode Queue` 和
-`Enrich Transcribed Episodes` 验收。验收完成后，元数据每天 UTC+8 05:17
-执行一次受限增量同步；成功后自动启动日常转写，转写成功后自动启动摘要/章节/脑图
-增强，不依赖固定的半小时窗口。一次性存量若开启则每两小时最多处理 2 期；日常
-转写每次最多 2 期，增强每次最多 2 期。转写按百炼 `paraformer-v1` →
-SiliconFlow → GitHub Actions 本地 `faster-whisper small` 降级；摘要、章节和脑图
-按 SiliconFlow `Qwen/Qwen3-8B` → 缓存的本地 Qwen3-1.7B 降级。工作流中断后从
-用户自己 Notion 里的私有检查点继续。
+日常链路是事件驱动的，不依赖“固定半小时后再启动”：
 
-只有满足以下条件的单集才会进入 AI 队列：
+1. 每天 05:17（UTC+8）运行一次受限的小宇宙增量同步；
+2. 元数据同步成功后自动触发转写队列；
+3. 转写工作流成功后自动触发增强队列；
+4. 增强队列只读取 Notion 已保存的文字稿，不再访问小宇宙或调用 ASR。
 
-- 已收听至少 120 秒，或者已加入小宇宙收藏；
-- 存在可访问的音频链接；
-- 尚未发布文字稿，且不是“最终失败”；
-- Notion 中的 `Skip AI` 未勾选。
+日常每次最多处理 2 期；ASR 两期之间至少等待 60 秒。每个工作流都带有 GitHub Actions 并发锁，前一步未完成时不会并行启动下一次。每两小时的存量调度仍保留在 YAML 中，但由存量开关控制；本项目当前默认关闭，不会与日常链路争抢任务。
 
-不想处理某一期时，在 Notion 勾选 `Skip AI` 即可永久排除。已成功发布的单集不会
-重复转写、摘要或生成思维导图。
+ASR 固定按以下顺序降级：
 
-> 建议第一次把 `config.yaml` 中的 `episodes_per_run` 设为 1，先用一个短单集验证。
+1. 阿里云百炼 `paraformer-v1`；
+2. SiliconFlow 免费 ASR；
+3. GitHub Actions 本地 `faster-whisper small`。
 
-## 项目状态
+摘要、章节和思维导图固定使用：
 
-当前安全版本每天 UTC+8 05:17 执行一次小宇宙受限增量同步，并继续暂停全量历史
-统计重建。元数据同步采用最新 25 条的小批量增量，并有每次运行 20 请求、
-请求间隔 3 秒及 401/403/429 立即熔断保护。历史统计保留在 Notion 中，
-待改为完全基于 Notion 数据增量计算。同步完成后自动本地化最多 10 张新 Podcast
-封面，已有 Notion 内部封面永远不会被小宇宙外链覆盖。
+1. SiliconFlow 免费 `Qwen/Qwen3-8B`；
+2. 缓存的 GitHub Actions 本地 `Qwen3-1.7B-Q4_K_M`。
 
-封面外链失效或旧版已发布页面缺少独立脑图记录时，使用
-`Xyz2Notion Notion-only Repair`。该工作流只读取 `NOTION_TOKEN` 和
-`NOTION_PAGE_ID`：封面单次最多本地化 10 张，AI 结果单次最多核对 2 期；
-不会读取小宇宙或任何 ASR 凭证，也不会启动新转写。
+本地模型只在远程服务不可用时兜底。ASR 工作流为本地音频兜底安装 FFmpeg；摘要工作流复用缓存的本地模型和 `llama-cpp-python` 运行时，不重复下载完整模型。
 
-完成初期验收后，AI 队列按每 2 小时最多 2 期慢速推进；可重试失败每天处理一次，
-同一期累计重试 3 次后停止。AI 工作流不含小宇宙凭证，只使用已写入 Notion 的
-Episode 音频地址和状态文件。
+AI 候选必须同时满足基础条件：
 
-v0.1.0 已实现自主 Notion 模板、元数据与统计同步、百炼 Paraformer → SiliconFlow →
-本地 Whisper 三级降级转写、SiliconFlow 免费摘要、脑图、迁移和可恢复的 GitHub Actions 编排。真实账户验收按
-[实施 Checklist](outputs/Xyz2Notion项目实施Checklist.md)
-继续记录；缺少用户凭证的项目不会用 Mock 冒充真实通过。
+- 已播放至少 120 秒，或已加入小宇宙收藏；
+- Notion 中存在可访问的音频地址；
+- 尚未成功发布文字稿/增强内容，且不是最终失败状态；
+- `Skip AI` 未勾选。
 
-## 本地开发
+已成功发布的单集不会重复 ASR、摘要或思维导图。不想处理某一期时，在 Notion 勾选 `Skip AI` 即可排除。
+
+## Notion 数据与界面
+
+### Episode 的五个标签
+
+主页只保留以下五个 Episode 视图，顺序固定为：
+
+`待听｜在听｜听过｜喜欢｜收藏`
+
+- **待听**：小宇宙播放列表中的单集；可以尚未播放，不计入统计。
+- **在听**：已经开始播放，但尚未播放到结束位置的单集。
+- **听过**：播放到节目末尾附近（允许最后约 15 秒上报误差）或小宇宙标记为已完成。
+- **喜欢**：小宇宙 `isPicked`，并且确实有播放秒数；它和收藏是两个独立状态。
+- **收藏**：小宇宙 `isFavorited`；可以尚未播放，收藏本身不会增加收听统计，但会进入 AI 候选。
+
+Episode 底层数据库仍保留完整属性、文字稿状态、播放进度、人工笔记和 AI 检查点；主页不再使用容易混淆的“全部”标签。
+
+### 统计口径
+
+- 每日趋势：最近 7 天；
+- 每周趋势：最近 1 个月；
+- 每月趋势：最近 1 年；
+- 年度趋势：全部年份；
+- 年/月/周/日明细表：保留全量历史，作为图表的统计来源；
+- Podcast 排行显示收听小时，底层仍保存精确的播放秒数；
+- 热力图只标记有真实播放的日期。
+
+统计完全基于 Notion 已保存的 Episode 和增量账本。首次启用时会把当前数据固定为基线，后续只累计新增播放秒数，不会重复计算旧的收听时长，也不会为统计额外请求小宇宙。
+
+Podcast 封面在同步后会分批本地化到 Notion；已有的 Notion 内部封面不会被外链覆盖。已确认的旧零播放页面采用可恢复的 Notion 归档，受保护的待听、收藏、喜欢或 AI 页面不会被清理。
+
+## 小宇宙同步安全边界
+
+每次元数据同步都受硬限制保护：
+
+- 单次最多 20 个小宇宙请求；
+- 请求之间至少间隔 3 秒；
+- 列表最多读取 1 页、25 条；
+- 播放进度最多查询 25 个 EID；
+- 播放列表单集补全最多 3 条，缺失 Podcast 补全最多 2 条；
+- 遇到 401、403 或 429 立即熔断，不刷新 Token、不重试、不继续抓取。
+
+项目不会按月份遍历全历史，也不会因为本次增量没有看到某条旧记录就删除 Notion 页面。完整认证说明见 [`docs/xiaoyuzhou-auth.md`](docs/xiaoyuzhou-auth.md)。
+
+## 配置与本地开发
 
 需要 Python 3.12 和 [uv](https://docs.astral.sh/uv/)：
 
@@ -97,107 +131,44 @@ uv run mypy src
 uv run pytest
 ```
 
-## 配置
-
-复制 `config.example.yaml` 为 `config.yaml`，其中只保存免费模型顺序和
-任务上限等公开配置：
+公开配置复制自 `config.example.yaml`：
 
 ```bash
 cp config.example.yaml config.yaml
 uv run xyz2notion config-check --config config.yaml
 ```
 
-凭证只通过 GitHub Actions Secrets 或环境变量提供。兼容旧变量
-`REFRESH_TOKEN`，但推荐迁移为 `XIAOYUZHOU_REFRESH_TOKEN`。
+配置文件只保存公开的模型顺序和任务上限；Token、Cookie、API Key 只能通过环境变量或 GitHub Secrets 提供。旧版的 `REFRESH_TOKEN` 仍兼容，但新安装推荐使用 `XIAOYUZHOU_REFRESH_TOKEN`。
 
-`XIAOYUZHOU_DEVICE_ID` 可以不填。省略时会根据
-`XYZ2NOTION_INSTALLATION_ID`、`GITHUB_REPOSITORY` 或 Notion 页面 ID
-稳定派生 UUID；显式填写则始终使用用户提供的设备 ID。
-
-放入小宇宙 Refresh Token 后，可以执行不会输出 UID 或 Token 的认证检查：
+本地运行安全的 ASR 队列：
 
 ```bash
-uv run xyz2notion xiaoyuzhou-check
+uv run xyz2notion process-asr --config config.yaml --mode incremental --limit 2
 ```
 
-认证方式、Device ID 和只读接口说明见
-[`docs/xiaoyuzhou-auth.md`](docs/xiaoyuzhou-auth.md)。
+摘要和脑图只消费 Notion 中已经保存的文字稿：
 
-默认 ASR 顺序为阿里云百炼 `paraformer-v1` → SiliconFlow → GitHub Actions 本地
-Whisper。不接入网页 Cookie 或其他付费 Provider。
-本地模型无需额外 Secret，只在远程 ASR 不可用后加载。
-百炼 Paraformer 的接口、配额和时间轴说明见
-[`docs/dashscope-asr.md`](docs/dashscope-asr.md)。
-SiliconFlow 音频切片、免费模型降级和时间轴精度说明见
-[`docs/siliconflow-asr.md`](docs/siliconflow-asr.md)。
-本地最终兜底的资源、隐私和运行限制见
-[`docs/local-whisper.md`](docs/local-whisper.md)。
+```bash
+uv run python -m xyz2notion.orchestration.enrichment_queue \
+  --config config.yaml --mode normal --limit 2
+```
 
-文字稿的 SiliconFlow 免费结构化摘要、长文本分段和 Token 记录见
-[`docs/ai-enrichment.md`](docs/ai-enrichment.md)。
-单集页面的托管区边界、播放器、原生脑图、SVG 脑图和用户笔记保护机制见
-[`docs/episode-page.md`](docs/episode-page.md)。
-GitHub Secrets、运行工作流、调度时间和手动维护方法见
-[`docs/github-actions.md`](docs/github-actions.md)。
-旧 Podcast2Notion 模板的原地迁移、dry-run、单集重做和统计重建见
-[`docs/migration.md`](docs/migration.md)。
-配置字段见 [`docs/configuration.md`](docs/configuration.md)，成本边界见
-[`docs/costs.md`](docs/costs.md)，故障处理与限制见
-[`docs/troubleshooting.md`](docs/troubleshooting.md)，测试证据见
-[`docs/qa-matrix.md`](docs/qa-matrix.md)。
+更多说明：
+
+- [GitHub Actions 与 Secrets](docs/github-actions.md)
+- [小宇宙认证与 Device ID](docs/xiaoyuzhou-auth.md)
+- [百炼 Paraformer ASR](docs/dashscope-asr.md)
+- [SiliconFlow ASR](docs/siliconflow-asr.md)
+- [本地 Whisper 兜底](docs/local-whisper.md)
+- [摘要、章节与思维导图](docs/ai-enrichment.md)
+- [单集页面与人工笔记](docs/episode-page.md)
+- [Notion 模板与迁移](docs/notion-template.md)
+- [统计实现](docs/statistics.md)
+- [故障处理](docs/troubleshooting.md)
 
 ## 可恢复运行
 
-每个单集使用独立状态机记录发现、ASR 提交、转写、AI 增强和发布阶段。
-状态以不可变 JSON 快照保存在用户自己的 Notion 文件属性中；GitHub Actions
-中断后会从最后状态继续，而不是重新执行已经完成的步骤。仓库和 Actions
-Artifact 都不会保存音频、文字稿或摘要。
-
-## 初始化 Notion
-
-授权空白页面并配置 `NOTION_TOKEN`、`NOTION_PAGE_ID` 后运行：
-
-```bash
-uv run xyz2notion notion-init --create-home
-```
-
-首次引导会创建九个数据库、关系、公式、统计视图、Gallery 和首页布局。
-此后运行不带 `--create-home` 的 `notion-init`，只协调数据库和视图，绝不会
-追加第二套主页普通布局，也不会删除用户自行添加的字段、视图或笔记。完整说明见
-[`docs/notion-template.md`](docs/notion-template.md)。
-
-初始化完成后，小批量同步最近播放记录、待听、收藏和播放进度：
-
-```bash
-uv run xyz2notion sync-metadata
-```
-
-命令有 20 请求硬预算和 3 秒最小请求间隔，再按 Author ID、PID、EID 执行最小
-差异 upsert；不会覆盖未知属性、用户笔记或单集页面块。元数据写入后，统计只从
-Notion Episode 的基线与日期增量账本更新，不追加任何小宇宙请求；首次启用不会
-重复累计现有总时长。统计口径见
-[`docs/statistics.md`](docs/statistics.md)。
-
-推进单集的转写：
-
-```bash
-uv run xyz2notion process-asr --config config.yaml
-```
-
-摘要和脑图只消费已写入 Notion 的文字稿，由 `Enrich Transcribed Episodes` 工作流
-推进；不会再次调用 ASR。需要重试时，在 Actions 中重新运行该工作流即可。
-
-## 安全原则
-
-- 凭证只能发送到对应服务的精确域名。
-- `malinkang.com`、`notionhub.app` 及其子域名在运行时明确禁止。
-- 日志输出前必须经过统一脱敏。
-- GitHub Actions 默认只有 `contents: read` 权限。
-- 小宇宙工作流默认无定时触发；单次最多 20 个请求，任意请求至少间隔 3 秒。
-- 小宇宙返回 401、403 或 429 时立即熔断，本次运行不刷新、不重试、不继续抓取。
-- 仓库不保存 Token、Cookie、API Key 或真实用户 Fixture。
-
-完整说明见 [SECURITY.md](SECURITY.md)。
+每个单集都有独立的发现、ASR 提交、转写、AI 增强和发布检查点，检查点保存在用户自己的 Notion 页面属性中。工作流中断后会从最后一个完成阶段继续，不会重复已完成的 ASR 或摘要。GitHub Actions 日志只输出聚合状态，不输出 Token、Cookie、音频 URL、节目标题、EID 或文字稿正文。
 
 ## 许可证
 
