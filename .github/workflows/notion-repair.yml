@@ -13,8 +13,9 @@ on:
           - reconcile-published-ai
           - reopen-timeline-failures
           - reopen-summary-failures
+          - archive-legacy-zero-play
       limit:
-        description: "Cover: 1-10; published AI: 1-2"
+        description: "Cover: 1-10; published AI: 1-2; archive: exact eligible count"
         required: true
         default: "2"
         type: string
@@ -76,6 +77,14 @@ jobs:
             reopen-summary-failures)
               result="$(uv run xyz2notion reopen-summary-failures \
                 --limit "$LIMIT" --confirm "$CONFIRMATION")"
+              ;;
+            archive-legacy-zero-play)
+              if [[ ! "$LIMIT" =~ ^[1-9][0-9]*$ ]]; then
+                printf 'Archive count must be a positive integer.\n' >&2
+                exit 2
+              fi
+              result="$(uv run xyz2notion archive-legacy-zero-play \
+                --expected-count "$LIMIT" --confirm "$CONFIRMATION")"
               ;;
             *)
               printf 'Unsupported Notion-only operation.\n' >&2

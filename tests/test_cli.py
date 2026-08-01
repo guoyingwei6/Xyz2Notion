@@ -1199,6 +1199,348 @@ def test_published_ai_reconciliation_runs_notion_only(
     assert "mindmaps_created=1" in output
 
 
+def test_archive_legacy_zero_play_trashes_only_unprotected_pages(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "secret_fixture_token")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+    pages = [
+        {
+            "id": "legacy-page",
+            "properties": {
+                "Played Seconds": {"number": 0},
+                "In Playlist": {"checkbox": False},
+                "Favorited": {"checkbox": False},
+                "Liked": {"checkbox": False},
+                "ASR Status": {"select": {"name": "待处理"}},
+                "Name": {"title": [{"plain_text": "private legacy title"}]},
+            },
+        },
+        {
+            "id": "protected-page",
+            "properties": {
+                "Played Seconds": {"number": 0},
+                "In Playlist": {"checkbox": True},
+                "Favorited": {"checkbox": False},
+                "Liked": {"checkbox": False},
+                "ASR Status": {"select": {"name": "待处理"}},
+            },
+        },
+        {
+            "id": "played-page",
+            "properties": {
+                "Played Seconds": {"number": 1},
+                "In Playlist": {"checkbox": False},
+                "Favorited": {"checkbox": False},
+                "Liked": {"checkbox": False},
+                "ASR Status": {"select": {"name": "待处理"}},
+            },
+        },
+        {"id": "already-trashed", "in_trash": True},
+    ]
+    updates: list[tuple[str, object]] = []
+    trashed: set[str] = set()
+
+    class FakeNotion(FakeContextClient):
+        def query_data_source(self, source: str) -> list[dict[str, object]]:
+            assert source == "episodes"
+            return [page for page in pages if str(page["id"]) not in trashed]
+
+        def update_page(self, page_id: str, payload: object) -> dict[str, object]:
+            updates.append((page_id, payload))
+            trashed.add(page_id)
+            return {"id": page_id, "in_trash": True}
+
+    class FakeInitializer:
+        def __init__(self, _api: object, page_id: str) -> None:
+            assert page_id == "fixture-page"
+
+        def discover_existing_resources(self) -> dict[str, object]:
+            return {"episode": SimpleNamespace(data_source_id="episodes")}
+
+    def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module.time, "sleep", no_sleep)  # type: ignore[attr-defined]
+
+    assert (
+        main(
+            [
+                "archive-legacy-zero-play",
+                "--expected-count",
+                "1",
+                "--confirm",
+                "ARCHIVE_1_LEGACY_ZERO_PLAY_EPISODES",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out  # type: ignore[attr-defined]
+    assert "selected=1" in output
+    assert "archived=1" in output
+    assert "protected_zero_play=1" in output
+    assert "legacy-page" not in output
+    assert "private legacy title" not in output
+    assert updates == [("legacy-page", {"in_trash": True})]
+
+
+def test_archive_legacy_zero_play_refuses_count_drift_without_changes(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "secret_fixture_token")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+    updates: list[tuple[str, object]] = []
+
+    class FakeNotion(FakeContextClient):
+        def query_data_source(self, _source: str) -> list[dict[str, object]]:
+            return [
+                {
+                    "id": "one",
+                    "properties": {
+                        "Played Seconds": {"number": 0},
+                        "ASR Status": {"select": {"name": "待处理"}},
+                    },
+                }
+            ]
+
+        def update_page(self, page_id: str, payload: object) -> dict[str, object]:
+            updates.append((page_id, payload))
+            return {}
+
+    class FakeInitializer:
+        def __init__(self, _api: object, _page_id: str) -> None:
+            pass
+
+        def discover_existing_resources(self) -> dict[str, object]:
+            return {"episode": SimpleNamespace(data_source_id="episodes")}
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+
+    assert (
+        main(
+            [
+                "archive-legacy-zero-play",
+                "--expected-count",
+                "2",
+                "--confirm",
+                "ARCHIVE_2_LEGACY_ZERO_PLAY_EPISODES",
+            ]
+        )
+        == 2
+    )
+    error = capsys.readouterr().err  # type: ignore[attr-defined]
+    assert "exact preflight count changed" in error
+    assert "no changes" in error
+    assert updates == []
+
+
+def test_archive_legacy_zero_play_refuses_missing_page_id(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "secret_fixture_token")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+
+    class FakeNotion(FakeContextClient):
+        def query_data_source(self, _source: str) -> list[dict[str, object]]:
+            return [{"properties": {"Played Seconds": {"number": 0}}}]
+
+    class FakeInitializer:
+        def __init__(self, _api: object, _page_id: str) -> None:
+            pass
+
+        def discover_existing_resources(self) -> dict[str, object]:
+            return {"episode": SimpleNamespace(data_source_id="episodes")}
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+
+    assert (
+        main(
+            [
+                "archive-legacy-zero-play",
+                "--expected-count",
+                "1",
+                "--confirm",
+                "ARCHIVE_1_LEGACY_ZERO_PLAY_EPISODES",
+            ]
+        )
+        == 2
+    )
+    error = capsys.readouterr().err  # type: ignore[attr-defined]
+    assert "missing stable IDs" in error
+    assert "no changes" in error
+
+
+def test_archive_legacy_zero_play_reports_incomplete_verification(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "secret_fixture_token")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+    page = {
+        "id": "legacy-page",
+        "properties": {"Played Seconds": {"number": 0}},
+    }
+
+    class FakeNotion(FakeContextClient):
+        def query_data_source(self, _source: str) -> list[dict[str, object]]:
+            return [page]
+
+        def update_page(self, _page_id: str, _payload: object) -> dict[str, object]:
+            return {"in_trash": True}
+
+    class FakeInitializer:
+        def __init__(self, _api: object, _page_id: str) -> None:
+            pass
+
+        def discover_existing_resources(self) -> dict[str, object]:
+            return {"episode": SimpleNamespace(data_source_id="episodes")}
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+
+    assert (
+        main(
+            [
+                "archive-legacy-zero-play",
+                "--expected-count",
+                "1",
+                "--confirm",
+                "ARCHIVE_1_LEGACY_ZERO_PLAY_EPISODES",
+            ]
+        )
+        == 4
+    )
+    error = capsys.readouterr().err  # type: ignore[attr-defined]
+    assert "Archive incomplete" in error
+    assert "remaining=1" in error
+
+
+def test_archive_legacy_zero_play_reports_notion_error(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "secret_fixture_token")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+
+    class FakeNotion(FakeContextClient):
+        def query_data_source(self, _source: str) -> list[dict[str, object]]:
+            return [{"id": "legacy", "properties": {"Played Seconds": {"number": 0}}}]
+
+        def update_page(self, _page_id: str, _payload: object) -> dict[str, object]:
+            raise cli_module.NotionAPIError("safe archive fixture failure")  # type: ignore[attr-defined]
+
+    class FakeInitializer:
+        def __init__(self, _api: object, _page_id: str) -> None:
+            pass
+
+        def discover_existing_resources(self) -> dict[str, object]:
+            return {"episode": SimpleNamespace(data_source_id="episodes")}
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+
+    assert (
+        main(
+            [
+                "archive-legacy-zero-play",
+                "--expected-count",
+                "1",
+                "--confirm",
+                "ARCHIVE_1_LEGACY_ZERO_PLAY_EPISODES",
+            ]
+        )
+        == 4
+    )
+    error = capsys.readouterr().err  # type: ignore[attr-defined]
+    assert "Notion archive error" in error
+    assert "archived_before_failure=0" in error
+    assert "safe archive fixture failure" in error
+
+
+def test_archive_legacy_zero_play_reports_missing_resource(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "secret_fixture_token")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+
+    class FakeInitializer:
+        def __init__(self, _api: object, _page_id: str) -> None:
+            pass
+
+        def discover_existing_resources(self) -> dict[str, object]:
+            return {}
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeContextClient)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+
+    assert (
+        main(
+            [
+                "archive-legacy-zero-play",
+                "--expected-count",
+                "1",
+                "--confirm",
+                "ARCHIVE_1_LEGACY_ZERO_PLAY_EPISODES",
+            ]
+        )
+        == 4
+    )
+    error = capsys.readouterr().err  # type: ignore[attr-defined]
+    assert "Required Episode database was not found" in error
+
+
+def test_archive_legacy_zero_play_reports_configuration_error(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    def fail_runtime(_args: object) -> tuple[object, str]:
+        raise cli_module.ConfigurationError("safe configuration fixture failure")  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(cli_module, "_notion_runtime", fail_runtime)  # type: ignore[attr-defined]
+    assert (
+        main(
+            [
+                "archive-legacy-zero-play",
+                "--expected-count",
+                "1",
+                "--confirm",
+                "ARCHIVE_1_LEGACY_ZERO_PLAY_EPISODES",
+            ]
+        )
+        == 2
+    )
+    error = capsys.readouterr().err  # type: ignore[attr-defined]
+    assert "Configuration error" in error
+    assert "safe configuration fixture failure" in error
+
+
+def test_archive_legacy_zero_play_requires_bound_confirmation(
+    capsys: object,
+) -> None:
+    assert (
+        main(
+            [
+                "archive-legacy-zero-play",
+                "--expected-count",
+                "1142",
+                "--confirm",
+                "WRONG_CONFIRMATION",
+            ]
+        )
+        == 2
+    )
+    error = capsys.readouterr().err  # type: ignore[attr-defined]
+    assert "ARCHIVE_1142_LEGACY_ZERO_PLAY_EPISODES" in error
+
+
 def test_notion_backlog_audit_reports_only_aggregate_counts(
     capsys: object,
     monkeypatch: object,

@@ -48,6 +48,7 @@ from xyz2notion.sync.pipeline import collect_metadata
 from xyz2notion.xiaoyuzhou.client import XiaoyuzhouAPIError, XiaoyuzhouClient
 
 ASR_INTER_EPISODE_SECONDS = 60
+ARCHIVE_INTER_PAGE_SECONDS = 0.4
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -199,6 +200,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="report aggregate AI, cover, and zero-play backlog counts without changes",
     )
     audit_backlog.add_argument("--page-id")
+    archive_legacy = subparsers.add_parser(
+        "archive-legacy-zero-play",
+        help="trash an exact, confirmed set of unprotected zero-play Episode pages",
+    )
+    archive_legacy.add_argument(
+        "--expected-count",
+        required=True,
+        type=int,
+        help="exact number of eligible legacy zero-play Episode pages",
+    )
+    archive_legacy.add_argument(
+        "--confirm",
+        required=True,
+        help="required confirmation bound to the exact expected count",
+    )
+    archive_legacy.add_argument("--page-id")
     reopen_timeline = subparsers.add_parser(
         "reopen-timeline-failures",
         help="resume bounded timeline-only summary failures from persisted transcripts",
@@ -509,6 +526,40 @@ def _notion_property_checkbox(properties: Mapping[str, object], name: str) -> bo
     return bool(value.get("checkbox")) if isinstance(value, Mapping) else False
 
 
+def _legacy_zero_play_pages(
+    pages: Sequence[JsonObject],
+) -> tuple[list[JsonObject], int, int]:
+    """Return eligible legacy pages plus aggregate zero-play protection counts.
+
+    The legacy category is intentionally defined by the same safeguards used by
+    ``audit-notion-backlog``: no playback, no playlist/favorite/like marker, and
+    no non-pending AI checkpoint.  It is not inferred from a title or an EID.
+    """
+    candidates: list[JsonObject] = []
+    zero_play_total = protected_zero_play = 0
+    for page in pages:
+        if page.get("in_trash") is True or page.get("is_archived") is True:
+            continue
+        properties = page.get("properties")
+        if not isinstance(properties, Mapping):
+            continue
+        if _notion_property_number(properties, "Played Seconds") > 0:
+            continue
+        zero_play_total += 1
+        status = _episode_asr_status(page)
+        protected = (
+            _notion_property_checkbox(properties, "In Playlist")
+            or _notion_property_checkbox(properties, "Favorited")
+            or _notion_property_checkbox(properties, "Liked")
+            or status not in {"", "待处理"}
+        )
+        if protected:
+            protected_zero_play += 1
+        else:
+            candidates.append(page)
+    return candidates, protected_zero_play, zero_play_total
+
+
 def _cover_storage_kind(properties: Mapping[str, object]) -> str:
     value = properties.get("Cover")
     if not isinstance(value, Mapping):
@@ -605,25 +656,8 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
                         reason = _safe_failure_reason_code(failure)
                         failure_categories[f"{failure.provider}:{reason}"] += 1
 
-            zero_play_total = protected_zero_play = legacy_zero_play = 0
-            for page in episodes:
-                properties = page.get("properties")
-                if not isinstance(properties, Mapping):
-                    continue
-                if _notion_property_number(properties, "Played Seconds") > 0:
-                    continue
-                zero_play_total += 1
-                status = _episode_asr_status(page)
-                protected = (
-                    _notion_property_checkbox(properties, "In Playlist")
-                    or _notion_property_checkbox(properties, "Favorited")
-                    or _notion_property_checkbox(properties, "Liked")
-                    or status not in {"", "待处理"}
-                )
-                if protected:
-                    protected_zero_play += 1
-                else:
-                    legacy_zero_play += 1
+            legacy_pages, protected_zero_play, zero_play_total = _legacy_zero_play_pages(episodes)
+            legacy_zero_play = len(legacy_pages)
 
             cover_kinds = Counter(
                 _cover_storage_kind(properties)
@@ -661,6 +695,75 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
         f"legacy_zero_play={legacy_zero_play}; "
         f"podcasts={len(podcasts)}; external_covers={cover_kinds['external']}; "
         f"notion_covers={cover_kinds['notion']}; missing_covers={cover_kinds['missing']})"
+    )
+    return 0
+
+
+def _run_archive_legacy_zero_play(args: argparse.Namespace) -> int:
+    """Trash exactly the user-confirmed legacy zero-play Episode pages."""
+    expected_confirmation = f"ARCHIVE_{args.expected_count}_LEGACY_ZERO_PLAY_EPISODES"
+    if args.expected_count < 1 or args.confirm != expected_confirmation:
+        print(
+            f"Confirmation error: use --expected-count 1.. and --confirm {expected_confirmation}",
+            file=sys.stderr,
+        )
+        return 2
+
+    archived = 0
+    try:
+        token, page_id = _notion_runtime(args)
+        with NotionClient(token) as notion:
+            resources = NotionInitializer(notion, page_id).discover_existing_resources()
+            episode_resource = resources.get("episode")
+            if episode_resource is None:
+                raise NotionAPIError("Required Episode database was not found")
+            episodes = notion.query_data_source(episode_resource.data_source_id)
+            candidates, protected_zero_play, _zero_play_total = _legacy_zero_play_pages(episodes)
+            if len(candidates) != args.expected_count:
+                print(
+                    "Archive refused: exact preflight count changed "
+                    f"(expected={args.expected_count}; eligible={len(candidates)}; "
+                    f"protected={protected_zero_play}; no changes)",
+                    file=sys.stderr,
+                )
+                return 2
+            missing_ids = sum(not page.get("id") for page in candidates)
+            if missing_ids:
+                print(
+                    "Archive refused: eligible pages missing stable IDs "
+                    f"(count={missing_ids}; no changes)",
+                    file=sys.stderr,
+                )
+                return 2
+            for candidate in candidates:
+                notion.update_page(str(candidate["id"]), {"in_trash": True})
+                archived += 1
+                if archived < len(candidates):
+                    time.sleep(ARCHIVE_INTER_PAGE_SECONDS)
+            remaining_pages, _remaining_protected, _remaining_zero_play = _legacy_zero_play_pages(
+                notion.query_data_source(episode_resource.data_source_id)
+            )
+            if remaining_pages:
+                print(
+                    "Archive incomplete: active eligible pages remain "
+                    f"(archived={archived}; remaining={len(remaining_pages)})",
+                    file=sys.stderr,
+                )
+                return 4
+    except (ConfigurationError, MissingCredentialError) as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    except NotionAPIError as exc:
+        print(
+            f"Notion archive error: {exc} (archived_before_failure={archived})",
+            file=sys.stderr,
+        )
+        return 4
+
+    print(
+        "Legacy zero-play archive OK "
+        f"(selected={args.expected_count}; archived={archived}; "
+        f"protected_zero_play={protected_zero_play}; remaining=0)"
     )
     return 0
 
@@ -1431,6 +1534,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_published_ai_reconciliation(args)
     if args.command == "audit-notion-backlog":
         return _run_notion_backlog_audit(args)
+    if args.command == "archive-legacy-zero-play":
+        return _run_archive_legacy_zero_play(args)
     if args.command == "reopen-timeline-failures":
         return _run_reopen_timeline_failures(args)
     if args.command == "reopen-summary-failures":

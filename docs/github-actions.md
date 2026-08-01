@@ -70,7 +70,7 @@ ASR 降级模型和免费文本摘要模型。项目只接受代码已核对的�
 | `Transcribe Episode Queue` | 元数据同步成功后；存量每 2 小时 | 只推进到“已转写”；日常每次最多 2 期且两期相隔 60 秒 |
 | `Enrich Transcribed Episodes` | 转写队列成功后；存量每 2 小时 | 只消费既有文字稿；日常每次最多 2 期，生成摘要、章节、思维导图并发布 |
 | `Xyz2Notion Maintenance` | 手动 | 迁移、单集重做、统计或热力图重建 |
-| `Xyz2Notion Notion-only Repair` | 手动 | 只读盘点 AI/封面/零播放存量，或分批修复封面与已发布脑图 |
+| `Xyz2Notion Notion-only Repair` | 手动 | 只读盘点 AI/封面/零播放存量，或分批修复封面与已发布脑图；归档已确认的 legacy 零播放页面 |
 
 元数据工作流每天 UTC 21:17（UTC+8 次日 05:17）自动运行一次；手动运行仍必须输入
 `RUN_SAFE_INCREMENTAL_SYNC`。自动与手动运行都受 20 请求、3 秒间隔、单页
