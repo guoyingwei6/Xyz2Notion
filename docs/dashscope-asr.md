@@ -33,7 +33,7 @@ asr:
 实际请求端点为：
 
 - 提交：`POST https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription`
-- 查询：`POST https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}`
+- 查询：`GET https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}`
 
 阿里云目前还提供带 Workspace ID 的北京专属域名；官方说明现有
 `dashscope.aliyuncs.com` 仍可正常使用，因此本项目不要求额外配置 Workspace ID。

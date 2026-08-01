@@ -53,7 +53,7 @@ OAuth 回调或作者生成的 Token。
 `dashscope.aliyuncs.com`，并且只允许 `paraformer-v1` 作为自动 ASR 模型。
 请使用中国内地百炼的通用 API Key；不需要另设 URL、Workspace ID 或模型 Secret。
 当前代码使用 `POST /api/v1/services/audio/asr/transcription` 提交，使用
-`POST /api/v1/tasks/{task_id}` 查询异步任务。
+`GET /api/v1/tasks/{task_id}` 查询异步任务。
 
 正常 ASR 队列不读取 `TINGWU_COOKIE`。该 Secret 仅供旧的手动听悟兼容入口使用；
 如果不再运行 `Check Tingwu Authentication`、旧 `Process Episode AI` 或旧任务恢复，

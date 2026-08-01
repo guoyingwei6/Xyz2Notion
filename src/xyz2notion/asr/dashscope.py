@@ -356,9 +356,9 @@ class DashScopeParaformerClient:
         """Poll DashScope until the task succeeds or reaches a terminal failure."""
         task_url = DASHSCOPE_TASK_URL.format(task_id=task_id)
         for attempt in range(self.poll_attempts):
-            # DashScope's recorded-speech API documents task-status polling as
-            # POST with an empty body (the submission endpoint is also POST).
-            payload = self._request_json("POST", task_url)
+            # The current recorded-speech REST/SDK examples query task status
+            # with GET; only task submission uses POST.
+            payload = self._request_json("GET", task_url)
             try:
                 output = _output(payload)
             except DashScopeAPIError as exc:
