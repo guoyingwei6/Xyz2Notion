@@ -180,8 +180,8 @@ def test_heatmap_svg_and_png_cover_every_date_without_external_assets() -> None:
     png = render_heatmap_png(2026, daily)
     assert png.startswith(b"\x89PNG\r\n\x1a\n")
     width, height = struct.unpack(">II", png[16:24])
-    assert width > 530
-    assert height > 75
+    assert width >= 800
+    assert height >= 120
     assert png.endswith(b"IEND\xaeB`\x82")
 
 

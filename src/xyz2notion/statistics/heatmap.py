@@ -149,34 +149,43 @@ def _draw_text(
     y: int,
     text: str,
     color: tuple[int, int, int],
+    *,
+    scale: int = 2,
 ) -> None:
-    """Draw compact labels with a deterministic embedded 3x5 bitmap font."""
+    """Draw readable labels with a deterministic embedded 3x5 bitmap font."""
+    if scale < 1:
+        raise ValueError("bitmap font scale must be positive")
     cursor = x
     for character in text:
         glyph = _FONT_3X5.get(character)
         if glyph is None:
-            cursor += 4
+            cursor += 4 * scale
             continue
         for row, pattern in enumerate(glyph):
             for column, bit in enumerate(pattern):
                 if bit == "1":
-                    pixels[y + row][cursor + column] = color
-        cursor += 4
+                    for pixel_y in range(y + row * scale, y + (row + 1) * scale):
+                        for pixel_x in range(
+                            cursor + column * scale,
+                            cursor + (column + 1) * scale,
+                        ):
+                            pixels[pixel_y][pixel_x] = color
+        cursor += 4 * scale
 
 
 def render_heatmap_png(
     year: int,
     daily: tuple[DailyListening, ...],
     *,
-    cell_size: int = 8,
-    gap: int = 2,
-    margin: int = 4,
+    cell_size: int = 12,
+    gap: int = 3,
+    margin: int = 8,
 ) -> bytes:
-    """Render an RGB PNG using only the Python standard library."""
+    """Render a readable RGB PNG using only the Python standard library."""
     grid_start, weeks = _year_grid(year)
     values = {value.day: value for value in daily if value.day.year == year}
-    left = 16
-    top = 11
+    left = 32
+    top = 22
     width = left + weeks * (cell_size + gap) - gap + margin
     height = top + 7 * (cell_size + gap) - gap + margin
     background = (255, 255, 255)
