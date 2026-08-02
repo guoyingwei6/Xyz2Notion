@@ -34,6 +34,7 @@ from xyz2notion.notion.initializer import DATA_PAGE_TITLE, HOME_MARKER_URL, Noti
 from xyz2notion.notion.published_ai import PublishedAIReconciler
 from xyz2notion.orchestration.processor import (
     EpisodeAIProcessor,
+    ai_category_priority,
     build_provider_clients,
     episode_candidates,
 )
@@ -285,15 +286,16 @@ def _eligible_ai_pages(
     return [page for page in pages if (_episode_asr_status(page) == "可重试失败") is retry_failed]
 
 
-def _ai_page_priority(page: Mapping[str, object]) -> int:
-    """Finish persisted checkpoints before starting new ASR work."""
-    return {
+def _ai_page_priority(page: Mapping[str, object]) -> tuple[int, int, str]:
+    """Order ASR candidates by category, then persisted checkpoint."""
+    checkpoint_priority = {
         "已增强": 0,
         "已转写": 1,
         "转写中": 2,
         "排队中": 3,
         "待处理": 4,
     }.get(_episode_asr_status(page), 5)
+    return (ai_category_priority(page), checkpoint_priority, str(page.get("id") or ""))
 
 
 def _asr_queue_pages[AIPage: Mapping[str, object]](

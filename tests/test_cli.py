@@ -971,7 +971,7 @@ def test_ai_pages_prioritize_persisted_checkpoints() -> None:
         "排队中",
         "待处理",
     ]
-    assert cli_module._ai_page_priority({"properties": {}}) == 5  # type: ignore[attr-defined]
+    assert cli_module._ai_page_priority({"properties": {}}) == (5, 5, "")  # type: ignore[attr-defined]
 
 
 def test_notion_cover_repair_requires_limit_bound_confirmation(

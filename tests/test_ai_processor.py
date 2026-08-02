@@ -20,6 +20,7 @@ from xyz2notion.orchestration.processor import (
     MAX_RETRY_ATTEMPTS,
     EpisodeAIProcessor,
     EpisodeCandidate,
+    ai_category_priority,
     build_provider_clients,
     episode_candidates,
 )
@@ -198,6 +199,17 @@ class DashScopeProcessor(SiliconProcessor):
 
 
 CANDIDATE = EpisodeCandidate("page", "episode", "标题", "https://cdn.example/audio")
+
+
+def test_ai_category_priority_is_favorite_then_like_then_listening_state() -> None:
+    pages = [
+        {"properties": {"Favorited": {"checkbox": True}, "Liked": {"checkbox": True}}},
+        {"properties": {"Liked": {"checkbox": True}}},
+        {"properties": {"Listening Status": {"select": {"name": "听过"}}}},
+        {"properties": {"Listening Status": {"select": {"name": "在听"}}}},
+        {"properties": {"In Playlist": {"checkbox": True}}},
+    ]
+    assert [ai_category_priority(page) for page in pages] == [0, 1, 2, 3, 4]
 
 
 def test_candidate_extraction_skips_incomplete_rows() -> None:

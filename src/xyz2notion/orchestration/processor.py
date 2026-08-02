@@ -100,6 +100,30 @@ def _property_checkbox(properties: Mapping[str, Any], name: str) -> bool:
     return bool(value.get("checkbox")) if isinstance(value, Mapping) else False
 
 
+def ai_category_priority(page: Mapping[str, Any]) -> int:
+    """Return the user's preferred AI order for an eligible Episode page.
+
+    The priority is separate from the candidate safety gate below: a row must
+    still have at least 120 played seconds (or be favorited) before it enters
+    the queue. Overlapping flags use the most important category.
+    """
+    properties = page.get("properties")
+    if not isinstance(properties, Mapping):
+        return 5
+    if _property_checkbox(properties, "Favorited"):
+        return 0
+    if _property_checkbox(properties, "Liked"):
+        return 1
+    listening_status = _property_selection(properties, "Listening Status")
+    if listening_status == "听过":
+        return 2
+    if listening_status == "在听":
+        return 3
+    if listening_status == "未听" or _property_checkbox(properties, "In Playlist"):
+        return 4
+    return 5
+
+
 def episode_candidates(pages: list[JsonObject]) -> tuple[EpisodeCandidate, ...]:
     """Extract processable rows without exposing titles in logs."""
     result: list[EpisodeCandidate] = []
