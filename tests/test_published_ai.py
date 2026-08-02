@@ -13,6 +13,7 @@ from xyz2notion.state import PipelineRecord
 class FakeAPI:
     def __init__(self) -> None:
         self.mindmaps: list[JsonObject] = []
+        self.updates: list[tuple[str, Mapping[str, Any]]] = []
 
     def list_block_children(self, _block_id: str) -> list[JsonObject]:
         return [
@@ -42,7 +43,8 @@ class FakeAPI:
         self.mindmaps.append(page)
         return page
 
-    def update_page(self, page_id: str, _payload: Mapping[str, Any]) -> JsonObject:
+    def update_page(self, page_id: str, payload: Mapping[str, Any]) -> JsonObject:
+        self.updates.append((page_id, payload))
         return {"id": page_id}
 
 
@@ -91,6 +93,9 @@ def test_published_ai_reconciliation_audits_and_backfills_one_row() -> None:
     assert report.page_ready == 1
     assert report.mindmaps_created == 1
     assert report.incomplete == 0
+    timestamp_properties = api.updates[0][1]["properties"]
+    assert "转写完成时间" in timestamp_properties
+    assert "总结完成时间" in timestamp_properties
 
 
 def test_published_ai_reconciliation_counts_invalid_and_incomplete_rows() -> None:

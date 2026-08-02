@@ -108,6 +108,17 @@ class PublishedAIReconciler:
                 transcripts += 1
             if state.summary is not None:
                 summaries += 1
+            timestamps: JsonObject = {}
+            if state.transcript is not None:
+                timestamps["转写完成时间"] = {
+                    "date": {"start": state.transcript.created_at.isoformat()}
+                }
+            if state.summary is not None:
+                timestamps["总结完成时间"] = {
+                    "date": {"start": state.summary.created_at.isoformat()}
+                }
+            if timestamps:
+                self.api.update_page(page_id, {"properties": timestamps})
             roots = self.api.list_block_children(page_id)
             if any(
                 block.get("type") == "toggle"
