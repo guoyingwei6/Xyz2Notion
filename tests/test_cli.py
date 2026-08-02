@@ -1132,8 +1132,24 @@ def test_published_ai_reconciliation_runs_notion_only(
             assert payload == {
                 "page_size": 2,
                 "filter": {
-                    "property": "ASR Status",
-                    "select": {"equals": "已发布"},
+                    "and": [
+                        {
+                            "property": "ASR Status",
+                            "select": {"equals": "已发布"},
+                        },
+                        {
+                            "or": [
+                                {
+                                    "property": "转写完成时间",
+                                    "date": {"is_empty": True},
+                                },
+                                {
+                                    "property": "总结完成时间",
+                                    "date": {"is_empty": True},
+                                },
+                            ]
+                        },
+                    ]
                 },
             }
             return [{"id": "published"}]

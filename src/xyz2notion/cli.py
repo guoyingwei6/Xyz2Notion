@@ -463,8 +463,24 @@ def _run_published_ai_reconciliation(args: argparse.Namespace) -> int:
                 {
                     "page_size": args.limit,
                     "filter": {
-                        "property": "ASR Status",
-                        "select": {"equals": "已发布"},
+                        "and": [
+                            {
+                                "property": "ASR Status",
+                                "select": {"equals": "已发布"},
+                            },
+                            {
+                                "or": [
+                                    {
+                                        "property": "转写完成时间",
+                                        "date": {"is_empty": True},
+                                    },
+                                    {
+                                        "property": "总结完成时间",
+                                        "date": {"is_empty": True},
+                                    },
+                                ]
+                            },
+                        ]
                     },
                 },
             )
