@@ -484,6 +484,7 @@ def _run_published_ai_reconciliation(args: argparse.Namespace) -> int:
                             },
                         ]
                     },
+                    "sorts": [{"timestamp": "last_edited_time", "direction": "descending"}],
                 },
             )
             with NotionEpisodeStateStore(notion) as state_store:

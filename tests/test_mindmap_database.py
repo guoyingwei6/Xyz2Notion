@@ -66,6 +66,7 @@ def test_mindmap_database_sync_creates_relation_and_stable_key() -> None:
     assert properties["Episode"] == {"relation": [{"id": "episode-page"}]}
     assert properties["Mindmap Key"]["rich_text"][0]["text"]["content"] == "episode-1"
     assert properties["Content Version"]["rich_text"][0]["text"]["content"] == "hash"
+    assert "总结完成时间" in properties
 
 
 def test_mermaid_render_is_deterministic_and_sanitized() -> None:

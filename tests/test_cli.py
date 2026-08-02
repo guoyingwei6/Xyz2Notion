@@ -1147,10 +1147,11 @@ def test_published_ai_reconciliation_runs_notion_only(
                                     "property": "总结完成时间",
                                     "date": {"is_empty": True},
                                 },
-                            ]
+                            ],
                         },
-                    ]
+                    ],
                 },
+                "sorts": [{"timestamp": "last_edited_time", "direction": "descending"}],
             }
             return [{"id": "published"}]
 

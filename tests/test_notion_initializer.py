@@ -783,3 +783,10 @@ def test_ai_views_are_separate_from_native_episode_status_tabs() -> None:
     assert mindmap.name == "AI总结与思维导图"
     assert mindmap.aliases == ("思维导图",)
     assert transcript.sorts == ({"property": "转写完成时间", "direction": "descending"},)
+    assert mindmap.visible_properties == (
+        "Name",
+        "Episode",
+        "总结完成时间",
+        "Content Version",
+    )
+    assert mindmap.sorts == ({"property": "总结完成时间", "direction": "descending"},)

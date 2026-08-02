@@ -58,6 +58,7 @@ class MindmapDatabaseSynchronizer:
                 "Mermaid": _text(render_mindmap_mermaid(summary.mindmap)),
                 "Content Version": _text(content_version),
                 "Updated At": {"date": {"start": updated_at.isoformat()}},
+                "总结完成时间": {"date": {"start": updated_at.isoformat()}},
                 "Episode": {"relation": [{"id": episode_page_id}]},
             },
         )

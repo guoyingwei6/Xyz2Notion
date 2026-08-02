@@ -248,6 +248,7 @@ DATABASE_SPECS: tuple[DatabaseSpec, ...] = (
             "Mermaid": text_property(),
             "Content Version": text_property(),
             "Updated At": {"date": {}},
+            "总结完成时间": {"date": {}},
         },
     ),
 )
@@ -586,8 +587,8 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         name="AI总结与思维导图",
         aliases=("思维导图",),
         view_type="table",
-        visible_properties=("Name", "Episode", "Content Version", "Updated At"),
-        sorts=({"property": "Updated At", "direction": "descending"},),
+        visible_properties=("Name", "Episode", "总结完成时间", "Content Version"),
+        sorts=({"property": "总结完成时间", "direction": "descending"},),
     ),
 )
 
