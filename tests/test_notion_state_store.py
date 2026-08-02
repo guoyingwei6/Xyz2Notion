@@ -81,7 +81,8 @@ def test_save_uploads_private_json_then_switches_episode_property() -> None:
         api,
         http_client=httpx.Client(transport=httpx.MockTransport(lambda _request: None)),
     )
-    saved = store.save("page", full_state())
+    state = full_state()
+    saved = store.save("page", state)
     assert saved.state_revision == 1
     assert api.uploads[0][0].endswith("-r0001.json")
     assert api.uploads[0][1] == "application/json"
@@ -95,6 +96,12 @@ def test_save_uploads_private_json_then_switches_episode_property() -> None:
     assert payload["properties"]["ASR Status"]["select"]["name"] == "已转写"
     assert payload["properties"]["ASR Provider"]["rich_text"][0]["text"]["content"] == (
         "siliconflow"
+    )
+    assert payload["properties"]["转写完成时间"]["date"]["start"] == (
+        state.transcript.created_at.isoformat()  # type: ignore[union-attr]
+    )
+    assert payload["properties"]["总结完成时间"]["date"]["start"] == (
+        state.summary.created_at.isoformat()  # type: ignore[union-attr]
     )
     assert payload["properties"]["AI State File"]["files"][0]["file_upload"]["id"] == ("upload-1")
 

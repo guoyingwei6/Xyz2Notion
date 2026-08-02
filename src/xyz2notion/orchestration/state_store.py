@@ -165,10 +165,15 @@ class NotionEpisodeStateStore:
         }
         if revised.transcript is not None:
             properties["ASR Model"] = {"rich_text": rich_text(revised.transcript.model)}
+            properties["转写完成时间"] = {
+                "date": {"start": revised.transcript.created_at.isoformat()}
+            }
             properties["ASR Quality"] = {
                 "rich_text": rich_text(revised.transcript.timing_quality.value)
             }
             if revised.transcript.accuracy_hint is not None:
                 properties["ASR Accuracy"] = {"number": revised.transcript.accuracy_hint}
+        if revised.summary is not None:
+            properties["总结完成时间"] = {"date": {"start": revised.summary.created_at.isoformat()}}
         self.api.update_page(page_id, {"properties": properties})
         return revised

@@ -383,8 +383,8 @@ def home_blocks() -> list[JsonObject]:
         _paragraph("收听排行与播客封面"),
         _heading(2, "Episode"),
         _paragraph("待听 · 在听 · 听过 · 喜欢 · 收藏"),
-        _heading(2, "思维导图"),
-        _paragraph("每期节目的可视化脑图与原生大纲"),
+        _heading(2, "转写与总结"),
+        _paragraph("转写文本, AI 总结与思维导图由同一次增强流程生成。"),
         _home_marker(),
     ]
 
@@ -597,7 +597,12 @@ class NotionInitializer:
                 "快速入口": ("heading_2", "菜单"),
                 "Podcast · Episode · 思维导图": (
                     "paragraph",
-                    "总收听时长\n收听时长排行\nAuthor\nPodcast\nEpisode\n待听\n收藏\n思维导图",
+                    "总收听时长\n收听时长排行\nAuthor\nPodcast\nEpisode\n待听\n收藏\n转写与总结",
+                ),
+                "思维导图": ("heading_2", "转写与总结"),
+                "每期节目的可视化脑图与原生大纲": (
+                    "paragraph",
+                    "转写文本, AI 总结与思维导图由同一次增强流程生成。",
                 ),
                 "同步状态": ("heading_2", "播客记录"),
                 "统计与内容由 Xyz2Notion 工作流幂等更新。": (
@@ -704,6 +709,8 @@ class NotionInitializer:
     @staticmethod
     def _view_group(spec: ViewSpec) -> str:
         """Group compatible statistics sources into one linked database module."""
+        if spec.home_group is not None:
+            return spec.home_group
         if spec.source in {"all", "year", "month", "week", "day"}:
             return "statistics"
         return spec.source
@@ -714,6 +721,7 @@ class NotionInitializer:
             "收听总览": "statistics",
             "Podcast": "podcast",
             "Episode": "episode",
+            "转写与总结": "ai",
             "思维导图": "mindmap",
         }
         pending_group: str | None = None
@@ -745,10 +753,23 @@ class NotionInitializer:
                     None,
                 )
                 if source_key is not None:
+                    view_name = str(view.get("name") or "")
+                    matching_spec = next(
+                        (
+                            spec
+                            for spec in VIEW_SPECS
+                            if spec.source == source_key and view_name in (spec.name, *spec.aliases)
+                        ),
+                        None,
+                    )
                     group = (
-                        "statistics"
-                        if source_key in {"all", "year", "month", "week", "day"}
-                        else source_key
+                        self._view_group(matching_spec)
+                        if matching_spec is not None
+                        else (
+                            "statistics"
+                            if source_key in {"all", "year", "month", "week", "day"}
+                            else source_key
+                        )
                     )
                     linked_databases.setdefault(group, str(parent["database_id"]))
         anchors = self._section_anchors()
@@ -759,6 +780,11 @@ class NotionInitializer:
             source = resources[spec.source]
             group = self._view_group(spec)
             existing = managed_views.get((source.data_source_id, spec.name))
+            if existing is None:
+                for alias in spec.aliases:
+                    existing = managed_views.get((source.data_source_id, alias))
+                    if existing is not None:
+                        break
             if existing is None:
                 view = self.api.create_view(
                     self._view_payload(

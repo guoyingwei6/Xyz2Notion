@@ -30,6 +30,8 @@ class ViewSpec:
     filter: JsonObject | None = None
     sorts: tuple[JsonObject, ...] = ()
     linked_on_home: bool = True
+    home_group: str | None = None
+    aliases: tuple[str, ...] = ()
     cover_property: str | None = None
     chart_type: Literal["column", "bar", "line", "donut", "number"] | None = None
     chart_x_property: str | None = None
@@ -200,6 +202,8 @@ DATABASE_SPECS: tuple[DatabaseSpec, ...] = (
             "ASR Accuracy": number_property("percent"),
             "Failure Reason": text_property(),
             "Content Version": text_property(),
+            "转写完成时间": {"date": {}},
+            "总结完成时间": {"date": {}},
             "AI State File": {"files": {}},
         },
     ),
@@ -560,9 +564,27 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         cover_property="Cover",
     ),
     ViewSpec(
+        key="episodes_transcript",
+        source="episode",
+        home_group="ai",
+        name="转写文本",
+        view_type="table",
+        visible_properties=("Name", "ASR Status", "ASR Provider", "转写完成时间"),
+        filter={
+            "or": [
+                {"property": "ASR Status", "select": {"equals": "已转写"}},
+                {"property": "ASR Status", "select": {"equals": "已增强"}},
+                {"property": "ASR Status", "select": {"equals": "已发布"}},
+            ]
+        },
+        sorts=({"property": "转写完成时间", "direction": "descending"},),
+    ),
+    ViewSpec(
         key="mindmaps",
         source="mindmap",
-        name="思维导图",
+        home_group="ai",
+        name="AI总结与思维导图",
+        aliases=("思维导图",),
         view_type="table",
         visible_properties=("Name", "Episode", "Content Version", "Updated At"),
         sorts=({"property": "Updated At", "direction": "descending"},),

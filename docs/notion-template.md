@@ -36,9 +36,9 @@ uv run xyz2notion notion-init --create-home --page-id YOUR_PAGE_ID
 - Podcast、Episode、周期统计和思维导图之间的 Relation；
 - 收听秒数、单集数量和小时数 Rollup/Formula；
 - 播放百分比和环形进度 Formula；
-- ASR Provider、模型、任务 ID、状态、精度、失败原因和内容版本；
-- 总时长、年/月/周/日、排行、Podcast Gallery、四个 Episode Gallery 和
-  思维导图视图；
+- ASR Provider、模型、任务 ID、状态、精度、失败原因、内容版本、转写完成时间和总结完成时间；
+- 总时长、年/月/周/日、排行、Podcast Gallery、五个 Episode Gallery，以及
+  “转写文本”和“AI总结与思维导图”两个 AI 输出视图；
 - 原创封面、页面图标、双栏入口和年度热力图占位块。
 
 ## 幂等与用户内容
@@ -55,3 +55,7 @@ uv run xyz2notion notion-init --create-home --page-id YOUR_PAGE_ID
 - 首页标记或稳定布局锚点已存在时不重复创建布局。
 
 因此重复执行不会生成第二套数据库或视图，用户添加的字段、块和视图会保留。
+
+“转写文本”和“AI总结与思维导图”与五个 Episode 状态标签分开，分别按
+`转写完成时间`、`总结完成时间`倒序展示。摘要、章节和思维导图是在保存文字稿后一次
+增强流程中的并列输出，打开关联 Episode 页面即可查看完整内容。

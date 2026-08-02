@@ -209,7 +209,7 @@ def test_schema_has_exactly_nine_databases_and_expected_views() -> None:
         "日",
         "思维导图",
     ]
-    assert len(VIEW_SPECS) == 18
+    assert len(VIEW_SPECS) == 19
     assert {
         "收听总览",
         "年度趋势",
@@ -222,7 +222,8 @@ def test_schema_has_exactly_nine_databases_and_expected_views() -> None:
         "Episode · 喜欢",
         "Episode · 待听",
         "Episode · 收藏",
-        "思维导图",
+        "转写文本",
+        "AI总结与思维导图",
     }.issubset({spec.name for spec in VIEW_SPECS})
 
 
@@ -310,6 +311,8 @@ def test_initializer_creates_complete_clean_room_template() -> None:
     assert episode_properties["Playlist Position"]["number"] == {"format": "number"}
     assert "ASR Provider" in episode_properties
     assert "Content Version" in episode_properties
+    assert "转写完成时间" in episode_properties
+    assert "总结完成时间" in episode_properties
 
     year_properties = fake.data_sources[result.resources["year"].data_source_id]["properties"]
     assert year_properties["Listening Seconds"]["rollup"]["function"] == "sum"
@@ -384,10 +387,23 @@ def test_initializer_creates_complete_clean_room_template() -> None:
         for view in fake.views.values()
         if view["data_source_id"] == result.resources["episode"].data_source_id
     ]
-    assert len(episode_views) == 5
-    assert len({view["parent"]["database_id"] for view in episode_views}) == 1
-    assert sum("create_database" in view for view in episode_views) == 1
-    assert sum("database_id" in view for view in episode_views) == 4
+    assert len(episode_views) == 6
+    native_episode_views = [view for view in episode_views if view["name"].startswith("Episode · ")]
+    assert len(native_episode_views) == 5
+    assert len({view["parent"]["database_id"] for view in native_episode_views}) == 1
+    ai_transcript_view = next(view for view in episode_views if view["name"] == "转写文本")
+    mindmap_view = next(view for view in fake.views.values() if view["name"] == "AI总结与思维导图")
+    assert ai_transcript_view["parent"]["database_id"] == mindmap_view["parent"]["database_id"]
+    assert sum("create_database" in view for view in native_episode_views) == 1
+    assert sum("database_id" in view for view in native_episode_views) == 4
+    assert ai_transcript_view["sorts"] == [{"property": "转写完成时间", "direction": "descending"}]
+    assert ai_transcript_view["filter"] == {
+        "or": [
+            {"property": "ASR Status", "select": {"equals": "已转写"}},
+            {"property": "ASR Status", "select": {"equals": "已增强"}},
+            {"property": "ASR Status", "select": {"equals": "已发布"}},
+        ]
+    }
 
 
 def test_initializer_is_idempotent_and_preserves_user_content() -> None:
@@ -419,6 +435,24 @@ def test_initializer_is_idempotent_and_preserves_user_content() -> None:
     assert user_block in fake.blocks["root"]
     marker_count = sum(HOME_MARKER_URL in str(block) for block in fake.blocks["root"])
     assert marker_count == 1
+
+
+def test_initializer_renames_legacy_mindmap_view_without_creating_duplicate() -> None:
+    fake = FakeNotion()
+    initializer = NotionInitializer(fake, "root")
+    first = initializer.initialize(create_home=True)
+    mindmap_view = next(view for view in fake.views.values() if view["name"] == "AI总结与思维导图")
+    mindmap_view["name"] = "思维导图"
+    ai_database_id = mindmap_view["parent"]["database_id"]
+
+    result = initializer.initialize()
+
+    assert result.created_views == 0
+    assert sum(view["name"] == "思维导图" for view in fake.views.values()) == 0
+    assert sum(view["name"] == "AI总结与思维导图" for view in fake.views.values()) == 1
+    transcript_view = next(view for view in fake.views.values() if view["name"] == "转写文本")
+    assert transcript_view["parent"]["database_id"] == ai_database_id
+    assert first.resources["mindmap"].data_source_id == mindmap_view["data_source_id"]
 
 
 def test_initializer_rebuilds_missing_view_in_existing_linked_database() -> None:
@@ -604,7 +638,7 @@ def test_home_layout_has_columns_and_heatmap_placeholder() -> None:
     assert "年度热力图每日更新" in rendered
     assert "'type': 'table_of_contents'" in rendered
     assert "待听 · 在听 · 听过 · 喜欢 · 收藏" in rendered
-    assert rendered.index("Podcast") < rendered.index("Episode") < rendered.index("思维导图")
+    assert rendered.index("Podcast") < rendered.index("Episode") < rendered.index("转写与总结")
     assert HOME_SUMMARY_MARKER_URL in rendered
     assert "总收听时长" not in rendered
     assert rendered.count("播客记录") == 1
@@ -702,7 +736,9 @@ def test_chart_configuration_rejects_incomplete_chart_specs() -> None:
 
 
 def test_episode_views_have_user_facing_cards_and_expected_filters() -> None:
-    ordered_episode_specs = [spec for spec in VIEW_SPECS if spec.source == "episode"]
+    ordered_episode_specs = [
+        spec for spec in VIEW_SPECS if spec.source == "episode" and spec.home_group is None
+    ]
     assert [spec.name for spec in ordered_episode_specs] == [
         "Episode · 待听",
         "Episode · 在听",
@@ -736,3 +772,14 @@ def test_episode_views_have_user_facing_cards_and_expected_filters() -> None:
         "property": "Favorited",
         "checkbox": {"equals": True},
     }
+
+
+def test_ai_views_are_separate_from_native_episode_status_tabs() -> None:
+    transcript = next(spec for spec in VIEW_SPECS if spec.key == "episodes_transcript")
+    mindmap = next(spec for spec in VIEW_SPECS if spec.key == "mindmaps")
+    assert transcript.home_group == "ai"
+    assert mindmap.home_group == "ai"
+    assert transcript.name == "转写文本"
+    assert mindmap.name == "AI总结与思维导图"
+    assert mindmap.aliases == ("思维导图",)
+    assert transcript.sorts == ({"property": "转写完成时间", "direction": "descending"},)
