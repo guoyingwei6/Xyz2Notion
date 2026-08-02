@@ -262,6 +262,16 @@ def test_candidate_extraction_skips_incomplete_rows() -> None:
                 "Favorited": {"checkbox": True},
             },
         },
+        {
+            "id": "liked",
+            "properties": {
+                "EID": {"rich_text": [{"plain_text": "liked"}]},
+                "Name": {"title": [{"plain_text": "喜欢单集"}]},
+                "Audio URL": {"url": "https://cdn.example/liked"},
+                "Played Seconds": {"number": 0},
+                "Liked": {"checkbox": True},
+            },
+        },
         {"id": "skip", "properties": {}},
         {"properties": {}},
     ]
@@ -273,6 +283,7 @@ def test_candidate_extraction_skips_incomplete_rows() -> None:
             "收藏单集",
             "https://cdn.example/favorite",
         ),
+        EpisodeCandidate("liked", "liked", "喜欢单集", "https://cdn.example/liked"),
     )
 
 

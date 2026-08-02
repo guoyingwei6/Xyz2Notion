@@ -66,9 +66,9 @@ asr:
 
 ## AI 处理门槛
 
-`Transcribe Episode Queue` 和 `Enrich Transcribed Episodes` 只处理已收听至少 120 秒或已收藏、存在音频链接、尚未发布
+`Transcribe Episode Queue` 和 `Enrich Transcribed Episodes` 只处理已收听至少 120 秒、已收藏或已标记为喜欢、存在音频链接、尚未发布
 文字稿且未被标记为最终失败的单集。收藏会绕过 120 秒门槛；仅加入待听播放列表
-不会自动转写。Notion 的 Episode 数据库包含 `Skip AI` 复选框，勾选后仍可排除
+不会自动转写。喜欢也会绕过 120 秒门槛。Notion 的 Episode 数据库包含 `Skip AI` 复选框，勾选后仍可排除
 任何单集。
 
 收听统计与 AI 门槛相互独立：待听或收藏但播放秒数为 0 的单集可以显示和转写，

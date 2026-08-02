@@ -104,8 +104,8 @@ def ai_category_priority(page: Mapping[str, Any]) -> int:
     """Return the user's preferred AI order for an eligible Episode page.
 
     The priority is separate from the candidate safety gate below: a row must
-    still have at least 120 played seconds (or be favorited) before it enters
-    the queue. Overlapping flags use the most important category.
+    still have at least 120 played seconds, be favorited, or be liked before it
+    enters the queue. Overlapping flags use the most important category.
     """
     properties = page.get("properties")
     if not isinstance(properties, Mapping):
@@ -136,13 +136,14 @@ def episode_candidates(pages: list[JsonObject]) -> tuple[EpisodeCandidate, ...]:
         audio_url = _property_url(properties, "Audio URL")
         asr_status = _property_selection(properties, "ASR Status")
         played_seconds = _property_number(properties, "Played Seconds")
+        liked = _property_checkbox(properties, "Liked")
         favorited = _property_checkbox(properties, "Favorited")
         skip_ai = _property_checkbox(properties, "Skip AI")
         if (
             eid
             and title
             and audio_url
-            and (played_seconds >= 120 or favorited)
+            and (played_seconds >= 120 or favorited or liked)
             and not skip_ai
             and asr_status not in {"已发布", "最终失败"}
         ):

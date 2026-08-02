@@ -116,6 +116,21 @@ def test_collect_metadata_drops_history_rows_without_playback_progress() -> None
 
 def test_collect_metadata_keeps_playlist_and_favorites_as_non_statistical_rows() -> None:
     class WithLibrary(FakeXiaoyuzhou):
+        def play_history(self, *, limit: int = 25) -> list[JsonObject]:
+            history = super().play_history(limit=limit)
+            history.append(
+                {
+                    "episode": {
+                        "eid": "liked-episode",
+                        "pid": "liked-podcast",
+                        "title": "Liked",
+                        "pubDate": "2026-01-04T00:00:00Z",
+                        "isPicked": True,
+                    }
+                }
+            )
+            return history
+
         def playlist_eids(self) -> list[str]:
             return ["playlist-episode"]
 
@@ -163,11 +178,14 @@ def test_collect_metadata_keeps_playlist_and_favorites_as_non_statistical_rows()
         "history-episode",
         "playlist-episode",
         "favorite-episode",
+        "liked-episode",
     }
     assert by_eid["playlist-episode"].in_playlist is True
     assert by_eid["playlist-episode"].played_seconds == 0
     assert by_eid["favorite-episode"].favorited is True
     assert by_eid["favorite-episode"].played_seconds == 0
+    assert by_eid["liked-episode"].liked is True
+    assert by_eid["liked-episode"].played_seconds == 0
 
 
 def test_collect_metadata_preserves_playlist_order() -> None:

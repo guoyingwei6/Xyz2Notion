@@ -191,12 +191,13 @@ def build_metadata_snapshot(
             played = 1
         played = min(played, duration) if duration else played
         favorited = bool(raw.get("_xyz_favorited") or raw.get("isFavorited"))
+        liked = bool(raw.get("isPicked"))
         in_playlist = bool(raw.get("_xyz_in_playlist"))
         playlist_position_raw = raw.get("_xyz_playlist_position")
         playlist_position = (
             _integer(playlist_position_raw) if playlist_position_raw is not None else None
         )
-        if played <= 0 and not favorited and not in_playlist:
+        if played <= 0 and not favorited and not liked and not in_playlist:
             continue
         published_at = _datetime(raw.get("pubDate"), fallback=current)
         played_at_value = progress_raw.get("playedAt") or raw.get("playedAt")
@@ -221,7 +222,7 @@ def build_metadata_snapshot(
                 is_played=is_played,
                 is_finished=is_finished,
             ),
-            liked=bool(raw.get("isPicked")),
+            liked=liked,
             favorited=favorited,
             in_playlist=in_playlist,
             playlist_position=playlist_position,
