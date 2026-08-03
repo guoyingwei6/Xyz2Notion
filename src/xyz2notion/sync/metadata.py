@@ -8,7 +8,14 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
-from xyz2notion.models import Author, Episode, ListeningPeriod, ListeningStatus, PeriodKind
+from xyz2notion.models import (
+    Author,
+    Episode,
+    ListeningPeriod,
+    ListeningStatus,
+    PeriodKind,
+    local_date,
+)
 from xyz2notion.notion.client import JsonObject, rich_text
 from xyz2notion.notion.schema import NotionResource
 from xyz2notion.sync.normalizer import MetadataSnapshot
@@ -74,7 +81,7 @@ def _periods(episodes: tuple[Episode, ...]) -> dict[tuple[PeriodKind, str], List
     for episode in episodes:
         if episode.played_seconds <= 0:
             continue
-        played_date = (episode.last_played_at or episode.published_at).date()
+        played_date = local_date(episode.last_played_at or episode.published_at)
         played_dates.append(played_date)
         year_start = date(played_date.year, 1, 1)
         year_end = date(played_date.year, 12, 31)
@@ -331,7 +338,7 @@ class MetadataSynchronizer:
         if podcast_page:
             properties["Podcast"] = _relation([podcast_page])
         if episode.played_seconds > 0:
-            played_date = (episode.last_played_at or episode.published_at).date()
+            played_date = local_date(episode.last_played_at or episode.published_at)
             iso_year, iso_week, _ = played_date.isocalendar()
             relation_keys = {
                 "All Period": (PeriodKind.ALL, "all"),

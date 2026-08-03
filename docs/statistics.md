@@ -15,6 +15,8 @@ Xyz2Notion 会把统计结果与数据来源一起写入 Notion，避免把不�
 
 - `新增秒数 = Played Seconds - Episode 基线 - 已记账增量`；
 - 新增秒数按 `Last Played At` 写入 Episode 自己的日期账本；
+- 日历日期按用户的 UTC+8 时区（Asia/Shanghai，与 Asia/Taipei 同为 UTC+8）解释，
+  不受 GitHub Runner 默认 UTC 时区影响；
 - 总时长、年/月/周/日、Podcast 排行和热力图都由“原基线 + 日期账本”确定性重算；
 - 重试不会重复累加，同一播放进度重复同步时新增秒数为 0；
 - 播放进度倒退时不扣减历史，也不会在重新超过已记账高水位前重复计数；

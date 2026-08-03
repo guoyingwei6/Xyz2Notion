@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Literal
 
-from xyz2notion.models import Episode, PeriodKind
+from xyz2notion.models import Episode, PeriodKind, local_date, local_today
 from xyz2notion.sync.normalizer import MetadataSnapshot
 
 StatisticsSource = Literal["mileage", "episodes", "monthly_wrapped", "mixed"]
@@ -77,7 +77,7 @@ class StatisticsSnapshot:
 def _played_episode_day(episode: Episode) -> date | None:
     if episode.played_seconds <= 0:
         return None
-    return (episode.last_played_at or episode.published_at).date()
+    return local_date(episode.last_played_at or episode.published_at)
 
 
 def _period_key(kind: PeriodKind, day: date) -> str:
@@ -138,7 +138,7 @@ def calculate_statistics(
     today: date | None = None,
 ) -> StatisticsSnapshot:
     """Calculate exact mileage totals and explicitly sourced period statistics."""
-    current_day = today or date.today()
+    current_day = today or local_today()
     day_stats = _episode_periods(snapshot.episodes, PeriodKind.DAY)
     week_stats = _episode_periods(snapshot.episodes, PeriodKind.WEEK)
     month_stats = _episode_periods(snapshot.episodes, PeriodKind.MONTH)

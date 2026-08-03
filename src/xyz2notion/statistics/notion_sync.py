@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Protocol
 
-from xyz2notion.models import PeriodKind
+from xyz2notion.models import PeriodKind, local_today
 from xyz2notion.notion.client import JsonObject, rich_text
 from xyz2notion.notion.initializer import HOME_SUMMARY_MARKER_URL
 from xyz2notion.notion.schema import NotionResource
@@ -149,7 +149,7 @@ class StatisticsSynchronizer:
         *,
         today: date | None = None,
     ) -> StatisticsSyncReport:
-        current_day = today or date.today()
+        current_day = today or local_today()
         actions: Counter[str] = Counter()
         fields: Counter[str] = Counter()
         period_tables = {

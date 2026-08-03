@@ -5,16 +5,36 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from enum import StrEnum
 from typing import Annotated, Self
+from zoneinfo import ZoneInfo
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 NonEmptyStr = Annotated[str, Field(min_length=1)]
 NonNegativeInt = Annotated[int, Field(ge=0)]
+LISTENING_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
 def utc_now() -> datetime:
     """Return an aware UTC timestamp."""
     return datetime.now(UTC)
+
+
+def local_today(now: datetime | None = None) -> date:
+    """Return the user's UTC+8 calendar date, independent of runner timezone."""
+    instant = now or datetime.now(UTC)
+    if instant.tzinfo is None:
+        instant = instant.replace(tzinfo=UTC)
+    return instant.astimezone(LISTENING_TIMEZONE).date()
+
+
+def local_date(value: date | datetime) -> date:
+    """Convert an aware timestamp to the user's calendar date."""
+    if isinstance(value, datetime):
+        instant = value
+        if instant.tzinfo is None:
+            instant = instant.replace(tzinfo=UTC)
+        return instant.astimezone(LISTENING_TIMEZONE).date()
+    return value
 
 
 class ContractModel(BaseModel):

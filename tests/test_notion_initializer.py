@@ -402,6 +402,7 @@ def test_initializer_creates_complete_clean_room_template() -> None:
             {"property": "ASR Status", "select": {"equals": "已转写"}},
             {"property": "ASR Status", "select": {"equals": "已增强"}},
             {"property": "ASR Status", "select": {"equals": "已发布"}},
+            {"property": "ASR Status", "select": {"equals": "可重试失败"}},
         ]
     }
 

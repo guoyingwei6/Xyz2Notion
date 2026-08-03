@@ -8,7 +8,6 @@ import time
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
-from datetime import date
 
 from pydantic import SecretStr
 
@@ -27,7 +26,7 @@ from xyz2notion.migration.schema import (
     detect_workspace_schema_version,
     migration_plan,
 )
-from xyz2notion.models import ProviderFailure
+from xyz2notion.models import ProviderFailure, local_today
 from xyz2notion.notion.client import JsonObject, NotionAPIError, NotionClient
 from xyz2notion.notion.cover_localizer import NotionCoverLocalizer
 from xyz2notion.notion.initializer import DATA_PAGE_TITLE, HOME_MARKER_URL, NotionInitializer
@@ -994,7 +993,7 @@ def _run_rebuild(args: argparse.Namespace, *, heatmap_only: bool) -> int:
                 heatmap_action = (
                     HeatmapPublisher(notion, page_id)
                     .publish(
-                        date.today().year,
+                        local_today().year,
                         report.daily,
                     )
                     .action
@@ -1516,7 +1515,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     heatmap_action = (
                         HeatmapPublisher(notion, page_id)
                         .publish(
-                            date.today().year,
+                            local_today().year,
                             statistics_report.daily,
                         )
                         .action

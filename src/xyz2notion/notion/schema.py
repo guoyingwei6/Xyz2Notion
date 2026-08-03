@@ -576,6 +576,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
                 {"property": "ASR Status", "select": {"equals": "已转写"}},
                 {"property": "ASR Status", "select": {"equals": "已增强"}},
                 {"property": "ASR Status", "select": {"equals": "已发布"}},
+                {"property": "ASR Status", "select": {"equals": "可重试失败"}},
             ]
         },
         sorts=({"property": "转写完成时间", "direction": "descending"},),

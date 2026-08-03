@@ -7,10 +7,10 @@ import json
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Literal
 
-from xyz2notion.models import PeriodKind
+from xyz2notion.models import PeriodKind, local_date, local_today
 from xyz2notion.notion.client import JsonObject, rich_text
 from xyz2notion.notion.initializer import HOME_SUMMARY_MARKER_URL
 from xyz2notion.notion.schema import NotionResource
@@ -86,6 +86,9 @@ def _day(properties: Mapping[str, Any], name: str) -> date | None:
     if not isinstance(start, str) or len(start) < 10:
         return None
     try:
+        if "T" in start:
+            parsed = datetime.fromisoformat(start.replace("Z", "+00:00"))
+            return local_date(parsed)
         return date.fromisoformat(start[:10])
     except ValueError:
         return None
@@ -614,7 +617,7 @@ class NotionIncrementalStatistics:
 
     def sync(self, *, today: date | None = None) -> IncrementalStatisticsReport:
         """Create the one-time baseline or deterministically apply new Episode deltas."""
-        current_day = today or date.today()
+        current_day = today or local_today()
         episodes = self._episodes()
         period_pages = self._period_pages()
         podcast_pages = self._podcast_pages()

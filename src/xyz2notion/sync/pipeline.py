@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from datetime import date
 from typing import Any, Protocol
 
+from xyz2notion.models import local_today
 from xyz2notion.statistics.calculator import MonthlyWrappedValue
 from xyz2notion.sync.normalizer import MetadataSnapshot, build_metadata_snapshot
 
@@ -124,7 +125,7 @@ def collect_monthly_wrapped(
     today: date | None = None,
 ) -> tuple[MonthlyWrappedValue, ...]:
     """Fetch only the previous complete month's official total."""
-    current_day = today or date.today()
+    current_day = today or local_today()
     if not any(episode.played_seconds > 0 for episode in snapshot.episodes):
         return ()
     profile = api.profile()

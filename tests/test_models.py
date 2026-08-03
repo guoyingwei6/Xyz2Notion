@@ -20,6 +20,8 @@ from xyz2notion.models import (
     TranscriptSegment,
     asr_task_key,
     episode_key,
+    local_date,
+    local_today,
     podcast_key,
 )
 
@@ -111,6 +113,12 @@ def test_idempotency_keys_are_stable() -> None:
     assert transcript.idempotency_key == "asr:siliconflow:task-1"
     with pytest.raises(ValueError, match="empty component"):
         episode_key(" ")
+
+
+def test_local_today_uses_user_utc_plus_8_calendar() -> None:
+    assert local_today(datetime(2026, 8, 2, 15, 59, tzinfo=UTC)) == date(2026, 8, 2)
+    assert local_today(datetime(2026, 8, 2, 16, 0, tzinfo=UTC)) == date(2026, 8, 3)
+    assert local_date(datetime(2026, 8, 2, 16, 0, tzinfo=UTC)) == date(2026, 8, 3)
 
 
 def test_episode_progress_cannot_exceed_duration() -> None:
