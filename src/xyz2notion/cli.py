@@ -8,6 +8,7 @@ import time
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
+from pathlib import Path
 
 from pydantic import SecretStr
 
@@ -31,6 +32,7 @@ from xyz2notion.notion.client import JsonObject, NotionAPIError, NotionClient
 from xyz2notion.notion.cover_localizer import NotionCoverLocalizer
 from xyz2notion.notion.initializer import DATA_PAGE_TITLE, HOME_MARKER_URL, NotionInitializer
 from xyz2notion.notion.published_ai import PublishedAIReconciler
+from xyz2notion.orchestration.manual_retry_queue import run_manual_retry_queue
 from xyz2notion.orchestration.processor import (
     EpisodeAIProcessor,
     ai_category_label,
@@ -181,6 +183,22 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("backlog", "incremental", "retry"),
         default="incremental",
         help="label this run as backlog, normal increment, or retry-only",
+    )
+    manual_retry = subparsers.add_parser(
+        "process-manual-retries",
+        help="process checked Episode retries from the persisted failed stage",
+    )
+    manual_retry.add_argument("--config", default="config.yaml", help="path to config.yaml")
+    manual_retry.add_argument(
+        "--page-id",
+        help="target root page ID; defaults to NOTION_PAGE_ID",
+    )
+    manual_retry.add_argument(
+        "--limit",
+        type=int,
+        choices=(1, 2),
+        default=2,
+        help="cap this manual-first run at one or two Episode candidates",
     )
     repair_covers = subparsers.add_parser(
         "repair-notion-covers",
@@ -451,6 +469,27 @@ def _run_asr_queue(args: argparse.Namespace) -> int:
         f"actions: {action_summary}; states: {state_summary}; categories: {category_summary}; "
         f"providers: {provider_summary})"
     )
+    return 0
+
+
+def _run_manual_retry_queue(args: argparse.Namespace) -> int:
+    """Run the user-requested, stage-aware retry queue with aggregate output."""
+    try:
+        config_path = args.config
+        if config_path == "config.yaml" and not Path(config_path).is_file():
+            config_path = "config.example.yaml"
+        result = run_manual_retry_queue(
+            config_path=config_path,
+            requested_limit=args.limit,
+            page_id_override=args.page_id,
+        )
+    except (ConfigurationError, MissingCredentialError) as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    except NotionAPIError as exc:
+        print(f"Notion error: {exc}", file=sys.stderr)
+        return 4
+    print(result.summary())
     return 0
 
 
@@ -1607,6 +1646,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "process-asr":
         return _run_asr_queue(args)
+    if args.command == "process-manual-retries":
+        return _run_manual_retry_queue(args)
     if args.command == "repair-notion-covers":
         return _run_cover_repair(args)
     if args.command == "reconcile-published-ai":

@@ -476,8 +476,20 @@ def test_initializer_preserves_manual_view_columns_and_order() -> None:
     result = initializer.initialize()
 
     assert result.updated_views == len(VIEW_SPECS) - 1
-    assert transcript_view["configuration"] == transcript_configuration
-    assert mindmap_view["configuration"] == mindmap_configuration
+    assert (
+        transcript_view["configuration"]["properties"][:2] == transcript_configuration["properties"]
+    )
+    assert transcript_view["configuration"]["properties"][2] == {
+        "property_id": "ds-3:人工请求重试",
+        "visible": True,
+    }
+    assert mindmap_view["configuration"]["properties"][:2] == mindmap_configuration["properties"]
+    assert mindmap_view["configuration"]["properties"][2] == {
+        "property_id": "ds-3:人工请求重试",
+        "visible": True,
+    }
+    assert transcript_view["configuration"]["wrap_cells"] is False
+    assert mindmap_view["configuration"]["wrap_cells"] is True
     # Filters and sorts remain code-managed while presentation settings stay
     # under the user's control.
     assert transcript_view["sorts"] == [{"property": "转写完成时间", "direction": "descending"}]
@@ -861,6 +873,7 @@ def test_ai_views_are_separate_from_native_episode_status_tabs() -> None:
     assert transcript.sorts == ({"property": "转写完成时间", "direction": "descending"},)
     assert mindmap.visible_properties == (
         "Name",
+        "人工请求重试",
         "Podcast",
         "增强状态",
         "增强 Provider",

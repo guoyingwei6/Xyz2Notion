@@ -199,6 +199,9 @@ DATABASE_SPECS: tuple[DatabaseSpec, ...] = (
             "In Playlist": {"checkbox": {}},
             "Playlist Position": number_property(),
             "Skip AI": {"checkbox": {}},
+            # One user-facing switch reopens either ASR or enrichment from the
+            # persisted checkpoint; the queue determines the failed stage.
+            "人工请求重试": {"checkbox": {}},
             "Last Played At": {"date": {}},
             "ASR Provider": text_property(),
             "ASR Model": text_property(),
@@ -587,7 +590,13 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         home_group="ai",
         name="转写文本",
         view_type="table",
-        visible_properties=("Name", "ASR Status", "ASR Provider", "转写完成时间"),
+        visible_properties=(
+            "Name",
+            "人工请求重试",
+            "ASR Status",
+            "ASR Provider",
+            "转写完成时间",
+        ),
         filter={
             "or": [
                 {"property": "ASR Status", "select": {"equals": "已转写"}},
@@ -610,6 +619,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         # storage layer for Mermaid/JSON and full-text search.
         visible_properties=(
             "Name",
+            "人工请求重试",
             "Podcast",
             "增强状态",
             "增强 Provider",

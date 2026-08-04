@@ -137,8 +137,16 @@ def ai_category_label(page: Mapping[str, Any]) -> str:
     return AI_CATEGORY_LABELS[ai_category_priority(page)]
 
 
-def episode_candidates(pages: list[JsonObject]) -> tuple[EpisodeCandidate, ...]:
-    """Extract processable rows without exposing titles in logs."""
+def episode_candidates(
+    pages: list[JsonObject],
+    *,
+    include_final: bool = False,
+) -> tuple[EpisodeCandidate, ...]:
+    """Extract processable rows without exposing titles in logs.
+
+    Final failures stay out of every ordinary queue.  The explicit manual
+    retry queue may opt in to them after reopening the persisted checkpoint.
+    """
     result: list[EpisodeCandidate] = []
     for page in pages:
         properties = page.get("properties")
@@ -158,7 +166,7 @@ def episode_candidates(pages: list[JsonObject]) -> tuple[EpisodeCandidate, ...]:
             and audio_url
             and (played_seconds >= 120 or favorited or liked)
             and not skip_ai
-            and asr_status not in {"已发布", "最终失败"}
+            and (include_final or asr_status not in {"已发布", "最终失败"})
         ):
             try:
                 validate_public_audio_url(audio_url)

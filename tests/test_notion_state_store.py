@@ -19,7 +19,7 @@ from xyz2notion.orchestration.state_store import (
     _file_url,
     _summary_provider_name,
 )
-from xyz2notion.state import PipelineRecord, PipelineState
+from xyz2notion.state import InvalidStateTransitionError, PipelineRecord, PipelineState
 
 
 class FakeAPI:
@@ -253,6 +253,38 @@ def test_save_uploads_private_json_then_switches_episode_property() -> None:
         state.summary.created_at.isoformat()  # type: ignore[union-attr]
     )
     assert payload["properties"]["AI State File"]["files"][0]["file_upload"]["id"] == ("upload-1")
+
+
+def test_clear_manual_retry_only_unchecks_the_request() -> None:
+    api = FakeAPI()
+    store = NotionEpisodeStateStore(
+        api,
+        http_client=httpx.Client(transport=httpx.MockTransport(lambda _request: None)),
+    )
+    store.clear_manual_retry("page")
+    assert api.updates == [("page", {"properties": {"人工请求重试": {"checkbox": False}}})]
+
+
+def test_manual_reopen_resets_final_failure_to_requested_checkpoint() -> None:
+    final = PipelineRecord(
+        eid="episode",
+        attempts=3,
+    ).transition(
+        PipelineState.FAILED_FINAL,
+        failure=ProviderFailure(
+            provider="siliconflow_summary",
+            category=ProviderErrorCategory.SCHEMA_CHANGED,
+            message="invalid",
+        ),
+    )
+    reopened = final.manual_reopen(PipelineState.TRANSCRIBED)
+    assert reopened.state is PipelineState.TRANSCRIBED
+    assert reopened.attempts == 0
+    assert reopened.failure is None
+    assert reopened.resume_state is None
+    assert reopened.history[-1].to_state is PipelineState.TRANSCRIBED
+    with pytest.raises(InvalidStateTransitionError, match="FAILED_FINAL"):
+        reopened.manual_reopen(PipelineState.DISCOVERED)
 
 
 def test_load_follows_safe_redirect_and_validates_episode() -> None:

@@ -178,6 +178,44 @@ class PipelineRecord(ContractModel):
             ),
         )
 
+    def manual_reopen(
+        self,
+        target: PipelineState,
+        *,
+        occurred_at: datetime | None = None,
+    ) -> PipelineRecord:
+        """Explicitly reopen a final failure with a fresh retry budget.
+
+        The target is chosen by the caller from the persisted transcript and
+        summary checkpoints: DISCOVERED restarts ASR, TRANSCRIBED restarts
+        enrichment, and ENRICHED retries only Notion publication.
+        """
+        if self.state is not PipelineState.FAILED_FINAL:
+            raise InvalidStateTransitionError("Only FAILED_FINAL records can be manually reopened")
+        if target not in {
+            PipelineState.DISCOVERED,
+            PipelineState.TRANSCRIBED,
+            PipelineState.ENRICHED,
+        }:
+            raise InvalidStateTransitionError(
+                "Manual reopen target must be DISCOVERED, TRANSCRIBED, or ENRICHED"
+            )
+        timestamp = occurred_at or utc_now()
+        return PipelineRecord(
+            eid=self.eid,
+            state=target,
+            attempts=0,
+            updated_at=timestamp,
+            history=(
+                *self.history,
+                TransitionEvent(
+                    from_state=self.state,
+                    to_state=target,
+                    occurred_at=timestamp,
+                ),
+            ),
+        )
+
 
 class PipelineStateStore:
     """Atomic JSON persistence for resumable GitHub Actions runs."""

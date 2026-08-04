@@ -387,7 +387,10 @@ def home_blocks() -> list[JsonObject]:
         _heading(2, "Episode"),
         _paragraph("待听 · 在听 · 听过 · 喜欢 · 收藏"),
         _heading(2, "转写与总结"),
-        _paragraph("转写文本, AI 总结与思维导图由同一次增强流程生成。"),
+        _paragraph(
+            "转写文本、AI 总结与思维导图由同一次增强流程生成; 需要重新处理时, "
+            "在 Episode 的 AI 表中勾选 `人工请求重试`, 系统会按失败阶段继续."
+        ),
         _home_marker(),
     ]
 
@@ -676,6 +679,7 @@ class NotionInitializer:
         *,
         creating: bool,
         preserve_configuration: bool = False,
+        existing_view: Mapping[str, Any] | None = None,
         database_id: str | None = None,
         after_block_id: str | None = None,
     ) -> JsonObject:
@@ -690,6 +694,26 @@ class NotionInitializer:
         # views still receive the complete code-defined default configuration.
         if creating or not preserve_configuration:
             payload["configuration"] = view_configuration(spec, source.property_ids)
+        elif spec.key in {"episodes_transcript", "mindmaps"} and existing_view is not None:
+            # Add the one manual retry switch to existing AI tables exactly once.
+            # The rest of the user's layout, column order, and visibility remain
+            # untouched.  If the user later hides the column, its property ID is
+            # already present and this migration will not re-add it.
+            configuration = existing_view.get("configuration")
+            manual_retry_id = source.property_ids.get("人工请求重试")
+            if isinstance(configuration, Mapping) and manual_retry_id:
+                properties = configuration.get("properties")
+                if isinstance(properties, list) and not any(
+                    isinstance(item, Mapping)
+                    and str(item.get("property_id") or "") == manual_retry_id
+                    for item in properties
+                ):
+                    migrated_configuration = dict(configuration)
+                    migrated_configuration["properties"] = [
+                        *properties,
+                        {"property_id": manual_retry_id, "visible": True},
+                    ]
+                    payload["configuration"] = migrated_configuration
         if spec.filter is not None or not creating:
             payload["filter"] = spec.filter
         if creating:
@@ -829,6 +853,7 @@ class NotionInitializer:
                         source,
                         creating=False,
                         preserve_configuration=True,
+                        existing_view=existing,
                     ),
                 )
                 updated += 1

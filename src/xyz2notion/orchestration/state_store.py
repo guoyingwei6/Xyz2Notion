@@ -227,3 +227,10 @@ class NotionEpisodeStateStore:
             properties["总结完成时间"] = {"date": {"start": revised.summary.created_at.isoformat()}}
         self.api.update_page(page_id, {"properties": properties})
         return revised
+
+    def clear_manual_retry(self, page_id: str) -> None:
+        """Consume the user request without changing any other Episode field."""
+        self.api.update_page(
+            page_id,
+            {"properties": {"人工请求重试": {"checkbox": False}}},
+        )

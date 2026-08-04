@@ -295,6 +295,21 @@ def test_candidate_extraction_skips_incomplete_rows() -> None:
     )
 
 
+def test_candidate_extraction_only_includes_final_failures_when_explicit() -> None:
+    page = {
+        "id": "final",
+        "properties": {
+            "EID": {"rich_text": [{"plain_text": "final"}]},
+            "Name": {"title": [{"plain_text": "最终失败"}]},
+            "Audio URL": {"url": "https://cdn.example/final"},
+            "Played Seconds": {"number": 120},
+            "ASR Status": {"select": {"name": "最终失败"}},
+        },
+    }
+    assert episode_candidates([page]) == ()
+    assert len(episode_candidates([page], include_final=True)) == 1
+
+
 def test_candidate_extraction_skips_invalid_audio_urls() -> None:
     pages = [
         {

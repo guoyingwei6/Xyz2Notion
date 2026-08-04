@@ -140,6 +140,11 @@ def test_retry_failed_ai_workflow_is_bounded_and_retry_only() -> None:
     assert "--mode retry" in text
     assert "Retry failed ASR checkpoints only" in text
     assert "Retry failed enrichment checkpoints only" in text
+    assert "Process manually requested retries first" in text
+    assert "process-manual-retries" in text
+    assert "github.event_name == 'schedule'" in text
+    assert "vars.ASR_QUEUE_ENABLED == 'true'" in text
+    assert "vars.XYZ2NOTION_ENRICHMENT_QUEUE_ENABLED == 'true'" in text
     assert "vars.ASR_QUEUE_ENABLED == 'true'" in text
     assert "XYZ2NOTION_ENRICHMENT_QUEUE_ENABLED" in text
     assert "group: xyz2notion-runtime" in text
