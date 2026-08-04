@@ -8,7 +8,14 @@ import pytest
 
 import xyz2notion.cli as cli_module
 from xyz2notion.cli import ASR_INTER_EPISODE_SECONDS, build_parser, main
-from xyz2notion.models import TranscriptResult, TranscriptSegment, TranscriptTimingQuality
+from xyz2notion.models import (
+    ProviderError,
+    ProviderErrorCategory,
+    ProviderFailure,
+    TranscriptResult,
+    TranscriptSegment,
+    TranscriptTimingQuality,
+)
 from xyz2notion.orchestration.processor import (
     EpisodeAIProcessor,
     EpisodeCandidate,
@@ -107,6 +114,53 @@ def test_asr_only_processor_pauses_without_any_provider() -> None:
     assert store.saved == []
 
 
+def test_asr_only_retry_resumes_only_the_failed_asr_checkpoint() -> None:
+    store = _StateStore(EpisodeAIState(record=PipelineRecord(eid="episode")))
+
+    class FlakyProcessor(_TranscriptProcessor):
+        calls = 0
+
+        def _siliconflow(self, _candidate: EpisodeCandidate) -> TranscriptResult:
+            self.calls += 1
+            if self.calls == 1:
+                raise ProviderError(
+                    ProviderFailure(
+                        provider="siliconflow",
+                        category=ProviderErrorCategory.RATE_LIMITED,
+                        message="retry",
+                    )
+                )
+            return super()._siliconflow(_candidate)
+
+    processor = FlakyProcessor(
+        object(),
+        store,  # type: ignore[arg-type]
+        siliconflow=object(),  # type: ignore[arg-type]
+    )
+    failed = processor.process_asr_only(CANDIDATE, {})
+    assert failed.state is PipelineState.FAILED_RETRYABLE
+    completed = processor.process_asr_only(CANDIDATE, {}, retry_failed=True)
+    assert completed.action == "transcribed"
+    assert completed.state is PipelineState.TRANSCRIBED
+
+    # A retryable enrichment failure must not be consumed by the ASR-only lane.
+    # Build that state explicitly and verify the row remains retryable.
+    failed_record = PipelineRecord(eid="episode").transition(PipelineState.TRANSCRIBED)
+    failed_record = failed_record.transition(
+        PipelineState.FAILED_RETRYABLE,
+        failure=ProviderFailure(
+            provider="siliconflow_summary",
+            category=ProviderErrorCategory.RATE_LIMITED,
+            message="retry",
+        ),
+    )
+    store.state = EpisodeAIState(record=failed_record)
+    skipped = processor.process_asr_only(CANDIDATE, {}, retry_failed=True)
+    assert skipped.action == "skipped"
+    assert skipped.state is PipelineState.FAILED_RETRYABLE
+    assert store.state.record.state is PipelineState.FAILED_RETRYABLE
+
+
 def test_process_asr_cli_enforces_bounded_modes_and_limits() -> None:
     parser = build_parser()
     args = parser.parse_args(["process-asr", "--mode", "backlog", "--limit", "2"])
@@ -154,8 +208,11 @@ def test_process_asr_cli_runs_two_sequential_candidates_with_safe_aggregate_outp
             self,
             candidate: EpisodeCandidate,
             candidate_page: object,
+            *,
+            retry_failed: bool = False,
         ) -> ProcessingOutcome:
             assert candidate_page in pages
+            assert retry_failed is False
             processed.append(candidate.page_id)
             if candidate.page_id == "page-running":
                 return ProcessingOutcome(candidate.eid, "pending", PipelineState.ASR_RUNNING)

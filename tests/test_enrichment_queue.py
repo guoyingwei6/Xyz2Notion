@@ -162,6 +162,40 @@ def test_enrichment_pass_is_bounded_and_reports_only_aggregates() -> None:
     assert "title-" not in result.summary()
 
 
+def test_enrichment_pass_retries_only_explicit_stage_safe_rows() -> None:
+    pages = [
+        episode("retryable", status="可重试失败"),
+        episode("fresh", status="已转写"),
+    ]
+
+    @dataclass
+    class RetryProcessor:
+        calls: list[tuple[str, bool]] = field(default_factory=list)
+
+        def process(
+            self,
+            candidate: EpisodeCandidate,
+            _page: object,
+            *,
+            retry_failed: bool = False,
+            only_failed: bool = False,
+        ) -> ProcessingOutcome:
+            assert only_failed is False
+            self.calls.append((candidate.page_id, retry_failed))
+            return ProcessingOutcome(candidate.eid, "updated", PipelineState.PUBLISHED)
+
+    processor = RetryProcessor()
+    result = process_enrichment_pass(
+        pages,
+        processor,
+        limit=1,
+        retryable_page_ids=("retryable",),
+    )
+    assert processor.calls == [("retryable", True)]
+    assert result.selected == 1
+    assert result.remaining == 1
+
+
 def test_queue_modes_apply_strict_caps() -> None:
     assert resolve_queue_limit("backlog") == BACKLOG_LIMIT == 2
     assert resolve_queue_limit("backlog", 99) == 2

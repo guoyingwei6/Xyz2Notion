@@ -34,11 +34,14 @@ from xyz2notion.orchestration.processor import (
     episode_candidates,
 )
 from xyz2notion.orchestration.state_store import NotionEpisodeStateStore
+from xyz2notion.state import PipelineState
 
 BACKLOG_LIMIT = 2
 NORMAL_LIMIT = 2
 ENRICHMENT_STATUSES = frozenset({"已转写", "已增强"})
-_STATUS_PRIORITY = {"已增强": 0, "已转写": 1}
+RETRYABLE_STATUS = "可重试失败"
+RETRYABLE_ENRICHMENT_STATES = frozenset({PipelineState.TRANSCRIBED, PipelineState.ENRICHED})
+_STATUS_PRIORITY = {RETRYABLE_STATUS: 0, "已增强": 1, "已转写": 2}
 
 
 class EnrichmentProcessor(Protocol):
@@ -109,13 +112,20 @@ def select_enrichment_work(
     pages: Sequence[JsonObject],
     *,
     limit: int,
+    retryable_page_ids: Sequence[str] = (),
 ) -> tuple[tuple[EpisodeCandidate, JsonObject], ...]:
-    """Select only persisted transcript/publish checkpoints, never ASR candidates."""
+    """Select persisted transcript/publish checkpoints and stage-safe retries."""
+    retryable_ids = set(retryable_page_ids)
     eligible = sorted(
-        (page for page in pages if _episode_status(page) in ENRICHMENT_STATUSES),
+        (
+            page
+            for page in pages
+            if _episode_status(page) in ENRICHMENT_STATUSES
+            or str(page.get("id") or "") in retryable_ids
+        ),
         key=lambda page: (
             ai_category_priority(page),
-            _STATUS_PRIORITY[_episode_status(page)],
+            _STATUS_PRIORITY.get(_episode_status(page), 3),
             str(page.get("id") or ""),
         ),
     )
@@ -136,11 +146,24 @@ def process_enrichment_pass(
     processor: EnrichmentProcessor,
     *,
     limit: int,
+    retryable_page_ids: Sequence[str] = (),
 ) -> EnrichmentQueueResult:
     """Advance a bounded transcript-only queue pass with aggregate-only output."""
-    all_work = select_enrichment_work(pages, limit=max(1, len(pages)))
+    retryable_ids = set(retryable_page_ids)
+    all_work = select_enrichment_work(
+        pages,
+        limit=max(1, len(pages)),
+        retryable_page_ids=tuple(retryable_ids),
+    )
     selected = all_work[:limit]
-    outcomes = [processor.process(candidate, page) for candidate, page in selected]
+    outcomes = [
+        processor.process(
+            candidate,
+            page,
+            retry_failed=str(page.get("id") or "") in retryable_ids,
+        )
+        for candidate, page in selected
+    ]
     return EnrichmentQueueResult(
         selected=len(selected),
         remaining=max(0, len(all_work) - len(selected)),
@@ -210,6 +233,21 @@ def run_enrichment_queue(
             _summary_client(config, credentials.siliconflow_api_key)
         )
         state_store = stack.enter_context(NotionEpisodeStateStore(notion))
+        retryable_page_ids: set[str] = set()
+        for page in pages:
+            if _episode_status(page) != RETRYABLE_STATUS or not page.get("id"):
+                continue
+            candidates = episode_candidates([page])
+            if not candidates:
+                continue
+            try:
+                state = state_store.load(page, candidates[0].eid)
+            except NotionAPIError:
+                # A stale/unavailable checkpoint must not block the rest of the
+                # bounded queue or turn a retry into an ASR restart.
+                continue
+            if state.record.resume_state in RETRYABLE_ENRICHMENT_STATES:
+                retryable_page_ids.add(str(page["id"]))
         processor = EpisodeAIProcessor(
             notion,
             state_store,
@@ -220,7 +258,12 @@ def run_enrichment_queue(
             summary_enabled=True,
             mindmap_data_source_id=initialization.resources["mindmap"].data_source_id,
         )
-        return process_enrichment_pass(pages, processor, limit=limit)
+        return process_enrichment_pass(
+            pages,
+            processor,
+            limit=limit,
+            retryable_page_ids=tuple(retryable_page_ids),
+        )
 
 
 def _parser() -> argparse.ArgumentParser:

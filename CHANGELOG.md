@@ -11,6 +11,7 @@
 ## 2026-08-04
 
 - 增强队列增加每两小时一次的遗留文字稿检查。它只消费 Notion 中已有的“已转写/已增强”检查点，不访问小宇宙，也不会重复 ASR。
+- `可重试失败` 按 `resume_state` 自动回到对应的 ASR 或增强队列；同一期最多累计重试 3 次，每次队列最多 2 期，不重复已完成阶段。
 - 修复增强队列在 ASR 成功但后续事件未触发时留下“已转写”记录的问题；已发布记录会被幂等跳过。
 - 五个 Episode 视图统一显示顺序：`Name → Podcast → Listening Status → ASR Status → Progress Ring → Published At`。
 - AI 总结与思维导图的 `Name` 直接使用 Episode 标题；隐藏重复的 `Episode` 关系列，但保留底层关系用于完整性检查和跳转。

@@ -306,6 +306,33 @@ def _asr_queue_pages[AIPage: Mapping[str, object]](
     return [page for page in pages if _episode_asr_status(page) in allowed]
 
 
+def _retryable_asr_page_ids(
+    pages: Sequence[JsonObject],
+    state_store: NotionEpisodeStateStore,
+) -> set[str]:
+    """Return only retryable rows whose checkpoint failed during ASR."""
+    asr_states = {
+        PipelineState.DISCOVERED,
+        PipelineState.ASR_SUBMITTED,
+        PipelineState.ASR_RUNNING,
+    }
+    result: set[str] = set()
+    for page in pages:
+        page_id = str(page.get("id") or "")
+        if not page_id or _episode_asr_status(page) != "可重试失败":
+            continue
+        candidates = episode_candidates([page])
+        if not candidates:
+            continue
+        try:
+            state = state_store.load(page, candidates[0].eid)
+        except NotionAPIError:
+            continue
+        if state.record.resume_state in asr_states:
+            result.add(page_id)
+    return result
+
+
 def _run_asr_queue(args: argparse.Namespace) -> int:
     """Advance a tightly bounded ASR-only queue without summary or publishing."""
     try:
@@ -342,7 +369,15 @@ def _run_asr_queue(args: argparse.Namespace) -> int:
                 initialization.resources["episode"].data_source_id,
                 {"page_size": 100},
             )
-            eligible_pages = sorted(_asr_queue_pages(pages), key=_ai_page_priority)
+            state_store = stack.enter_context(NotionEpisodeStateStore(notion))
+            retryable_asr_ids = _retryable_asr_page_ids(pages, state_store)
+            eligible_pages = sorted(
+                [
+                    *(_asr_queue_pages(pages)),
+                    *[page for page in pages if str(page.get("id") or "") in retryable_asr_ids],
+                ],
+                key=_ai_page_priority,
+            )
             all_candidates = episode_candidates(eligible_pages)
             candidates = all_candidates[: args.limit]
             dashscope, siliconflow, local_whisper, _summary_client = build_provider_clients(
@@ -358,7 +393,6 @@ def _run_asr_queue(args: argparse.Namespace) -> int:
             for client in (dashscope, siliconflow, local_whisper):
                 if client is not None:
                     stack.enter_context(client)
-            state_store = stack.enter_context(NotionEpisodeStateStore(notion))
             processor = EpisodeAIProcessor(
                 notion,
                 state_store,
@@ -376,6 +410,7 @@ def _run_asr_queue(args: argparse.Namespace) -> int:
                     processor.process_asr_only(
                         candidate,
                         page_by_id[candidate.page_id],
+                        retry_failed=candidate.page_id in retryable_asr_ids,
                     )
                 )
     except (ConfigurationError, MissingCredentialError) as exc:

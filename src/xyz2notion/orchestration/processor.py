@@ -433,14 +433,26 @@ class EpisodeAIProcessor:
         self,
         candidate: EpisodeCandidate,
         page: Mapping[str, Any],
+        *,
+        retry_failed: bool = False,
     ) -> ProcessingOutcome:
         """Advance only ASR checkpoints and stop permanently at TRANSCRIBED."""
         state = self.state_store.load(page, candidate.eid)
-        if state.record.state not in {
+        asr_states = {
             PipelineState.DISCOVERED,
             PipelineState.ASR_SUBMITTED,
             PipelineState.ASR_RUNNING,
-        }:
+        }
+        if state.record.state is PipelineState.FAILED_RETRYABLE:
+            if not retry_failed:
+                return ProcessingOutcome(candidate.eid, "waiting_retry", state.record.state)
+            # A summary/publish failure belongs to the enrichment queue.  Do not
+            # resume it here, otherwise an ASR-only pass could consume its retry.
+            if state.record.resume_state not in asr_states:
+                return ProcessingOutcome(candidate.eid, "skipped", state.record.state)
+            state = state.model_copy(update={"record": state.record.resume()})
+            state = self._save(candidate.page_id, state)
+        if state.record.state not in asr_states:
             return ProcessingOutcome(candidate.eid, "skipped", state.record.state)
         if self.dashscope is None and self.siliconflow is None and self.local_whisper is None:
             return ProcessingOutcome(candidate.eid, "paused", state.record.state)
