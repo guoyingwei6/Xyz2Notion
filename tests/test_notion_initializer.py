@@ -757,8 +757,14 @@ def test_episode_views_have_user_facing_cards_and_expected_filters() -> None:
     }
     for spec in episode_specs.values():
         assert "Skip AI" not in spec.visible_properties
-        assert "ASR Status" not in spec.visible_properties
-        assert {"Name", "Listening Status", "Progress Ring"}.issubset(spec.visible_properties)
+        assert spec.visible_properties == (
+            "Name",
+            "Podcast",
+            "Listening Status",
+            "ASR Status",
+            "Progress Ring",
+            "Published At",
+        )
 
     playlist = episode_specs["episodes_playlist"]
     assert playlist.filter == {
