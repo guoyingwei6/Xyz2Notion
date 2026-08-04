@@ -103,6 +103,8 @@ class NotionInitializerAPI(Protocol):
 
     def update_view(self, view_id: str, payload: Mapping[str, Any]) -> JsonObject: ...
 
+    def delete_view(self, view_id: str) -> JsonObject: ...
+
     def list_block_children(self, block_id: str) -> list[JsonObject]: ...
 
     def append_block_children(
@@ -128,6 +130,7 @@ class InitializationResult:
     created_views: int
     updated_views: int
     created_home: bool
+    deleted_views: int = 0
 
 
 def _title_text(value: object) -> str:
@@ -406,7 +409,7 @@ class NotionInitializer:
         resources, created_databases = self._ensure_databases(data_page_id)
         resources = self._ensure_relations(resources)
         created_home = self._ensure_home_blocks(create_if_missing=create_home)
-        created_views, updated_views = self._ensure_views(resources)
+        created_views, updated_views, deleted_views = self._ensure_views(resources)
         return InitializationResult(
             data_page_id=data_page_id,
             resources=resources,
@@ -414,6 +417,7 @@ class NotionInitializer:
             created_views=created_views,
             updated_views=updated_views,
             created_home=created_home,
+            deleted_views=deleted_views,
         )
 
     def discover_existing_resources(self) -> dict[str, NotionResource]:
@@ -736,10 +740,17 @@ class NotionInitializer:
                 pending_group = None
         return anchors
 
-    def _ensure_views(self, resources: dict[str, NotionResource]) -> tuple[int, int]:
+    def _ensure_views(self, resources: dict[str, NotionResource]) -> tuple[int, int, int]:
         created = 0
         updated = 0
+        deleted = 0
         managed_views = self._managed_views()
+        legacy_mindmap_views = [
+            view
+            for (data_source_id, view_name), view in managed_views.items()
+            if data_source_id == resources["mindmap"].data_source_id
+            and view_name in ("AI总结与思维导图", "思维导图")
+        ]
         linked_databases: dict[str, str] = {}
         for (data_source_id, _name), view in managed_views.items():
             parent = view.get("parent")
@@ -809,4 +820,13 @@ class NotionInitializer:
                     self._view_payload(spec, source, creating=False),
                 )
                 updated += 1
-        return created, updated
+        # The AI tab used to point at the standalone Mindmap data source.  The
+        # new tab points at Episode so its title opens the Episode page directly.
+        # Remove only the obsolete view; the Mindmap data source and all rows stay.
+        if any(spec.key == "mindmaps" and spec.source == "episode" for spec in VIEW_SPECS):
+            for view in legacy_mindmap_views:
+                view_id = str(view.get("id") or "")
+                if view_id:
+                    self.api.delete_view(view_id)
+                    deleted += 1
+        return created, updated, deleted

@@ -1320,7 +1320,8 @@ def _run_rebuild_dashboard(args: argparse.Namespace) -> int:
     print(
         "Dashboard rebuild OK "
         f"(archived={len(block_ids)}, databases created={result.created_databases}, "
-        f"views created={result.created_views}, views updated={result.updated_views})"
+        f"views created={result.created_views}, views updated={result.updated_views}, "
+        f"views deleted={getattr(result, 'deleted_views', 0)})"
     )
     return 0
 
@@ -1437,7 +1438,8 @@ def _run_rebuild_dashboard_layout(args: argparse.Namespace) -> int:
         "Dashboard layout rebuild OK "
         f"(managed blocks archived={len(block_ids)}, data pages preserved=1, "
         f"databases created={result.created_databases}, "
-        f"views created={result.created_views}, views updated={result.updated_views})"
+        f"views created={result.created_views}, views updated={result.updated_views}, "
+        f"views deleted={getattr(result, 'deleted_views', 0)})"
     )
     return 0
 
@@ -1489,7 +1491,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(
             "Notion initialization OK "
             f"(databases created: {result.created_databases}, "
-            f"views created: {result.created_views}, views updated: {result.updated_views})"
+            f"views created: {result.created_views}, views updated: {result.updated_views}, "
+            f"views deleted: {getattr(result, 'deleted_views', 0)})"
         )
         return 0
     if args.command == "audit-dashboard":

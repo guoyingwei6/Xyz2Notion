@@ -35,6 +35,7 @@ class FakeNotion:
         self.created_databases = 0
         self.created_views = 0
         self.updated_views = 0
+        self.deleted_view_ids: list[str] = []
 
     def retrieve_page(self, page_id: str) -> JsonObject:
         return self.pages[page_id]
@@ -169,6 +170,10 @@ class FakeNotion:
         self.updated_views += 1
         self.views[view_id].update(payload)
         return self.views[view_id]
+
+    def delete_view(self, view_id: str) -> JsonObject:
+        self.deleted_view_ids.append(view_id)
+        return self.views.pop(view_id)
 
     def list_block_children(self, block_id: str) -> list[JsonObject]:
         return list(self.blocks[block_id])
@@ -387,13 +392,20 @@ def test_initializer_creates_complete_clean_room_template() -> None:
         for view in fake.views.values()
         if view["data_source_id"] == result.resources["episode"].data_source_id
     ]
-    assert len(episode_views) == 6
+    assert len(episode_views) == 7
     native_episode_views = [view for view in episode_views if view["name"].startswith("Episode · ")]
     assert len(native_episode_views) == 5
     assert len({view["parent"]["database_id"] for view in native_episode_views}) == 1
     ai_transcript_view = next(view for view in episode_views if view["name"] == "转写文本")
     mindmap_view = next(view for view in fake.views.values() if view["name"] == "AI总结与思维导图")
     assert ai_transcript_view["parent"]["database_id"] == mindmap_view["parent"]["database_id"]
+    assert mindmap_view["data_source_id"] == result.resources["episode"].data_source_id
+    assert mindmap_view["filter"] == {
+        "or": [
+            {"property": "ASR Status", "select": {"equals": "已增强"}},
+            {"property": "ASR Status", "select": {"equals": "已发布"}},
+        ]
+    }
     assert sum("create_database" in view for view in native_episode_views) == 1
     assert sum("database_id" in view for view in native_episode_views) == 4
     assert ai_transcript_view["sorts"] == [{"property": "转写完成时间", "direction": "descending"}]
@@ -428,6 +440,7 @@ def test_initializer_is_idempotent_and_preserves_user_content() -> None:
     assert second.created_databases == 0
     assert second.created_views == 0
     assert second.updated_views == len(VIEW_SPECS) - 1
+    assert second.deleted_views == 0
     assert second.created_home is False
     assert fake.created_pages == 1
     assert fake.created_databases == 9
@@ -438,22 +451,45 @@ def test_initializer_is_idempotent_and_preserves_user_content() -> None:
     assert marker_count == 1
 
 
-def test_initializer_renames_legacy_mindmap_view_without_creating_duplicate() -> None:
+def test_initializer_migrates_legacy_mindmap_view_to_episode_source() -> None:
     fake = FakeNotion()
     initializer = NotionInitializer(fake, "root")
     first = initializer.initialize(create_home=True)
-    mindmap_view = next(view for view in fake.views.values() if view["name"] == "AI总结与思维导图")
-    mindmap_view["name"] = "思维导图"
-    ai_database_id = mindmap_view["parent"]["database_id"]
+    current_view_id = next(
+        view_id for view_id, view in fake.views.items() if view["name"] == "AI总结与思维导图"
+    )
+    ai_database_id = fake.views[current_view_id]["parent"]["database_id"]
+    del fake.views[current_view_id]
+    legacy_view = fake.create_view(
+        {
+            "data_source_id": first.resources["mindmap"].data_source_id,
+            "name": "AI总结与思维导图",
+            "view_type": "table",
+            "database_id": ai_database_id,
+            "filter": None,
+            "sorts": [],
+            "configuration": {"type": "table", "properties": []},
+        }
+    )
 
     result = initializer.initialize()
 
-    assert result.created_views == 0
-    assert sum(view["name"] == "思维导图" for view in fake.views.values()) == 0
+    assert result.created_views == 1
+    assert result.deleted_views == 1
+    assert legacy_view["id"] in fake.deleted_view_ids
+    assert (
+        sum(
+            view["name"] == "AI总结与思维导图"
+            and view["data_source_id"] == first.resources["mindmap"].data_source_id
+            for view in fake.views.values()
+        )
+        == 0
+    )
     assert sum(view["name"] == "AI总结与思维导图" for view in fake.views.values()) == 1
     transcript_view = next(view for view in fake.views.values() if view["name"] == "转写文本")
     assert transcript_view["parent"]["database_id"] == ai_database_id
-    assert first.resources["mindmap"].data_source_id == mindmap_view["data_source_id"]
+    migrated_view = next(view for view in fake.views.values() if view["name"] == "AI总结与思维导图")
+    assert migrated_view["data_source_id"] == first.resources["episode"].data_source_id
 
 
 def test_initializer_rebuilds_missing_view_in_existing_linked_database() -> None:
@@ -792,8 +828,16 @@ def test_ai_views_are_separate_from_native_episode_status_tabs() -> None:
     assert transcript.sorts == ({"property": "转写完成时间", "direction": "descending"},)
     assert mindmap.visible_properties == (
         "Name",
+        "Podcast",
+        "ASR Status",
         "总结完成时间",
-        "Updated At",
         "Content Version",
     )
+    assert mindmap.source == "episode"
+    assert mindmap.filter == {
+        "or": [
+            {"property": "ASR Status", "select": {"equals": "已增强"}},
+            {"property": "ASR Status", "select": {"equals": "已发布"}},
+        ]
+    }
     assert mindmap.sorts == ({"property": "总结完成时间", "direction": "descending"},)

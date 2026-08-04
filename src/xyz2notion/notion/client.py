@@ -426,6 +426,10 @@ class NotionClient:
     def update_view(self, view_id: str, payload: Mapping[str, Any]) -> JsonObject:
         return self.request("PATCH", f"/views/{view_id}", json_body=payload)
 
+    def delete_view(self, view_id: str) -> JsonObject:
+        """Delete one precisely identified managed view without touching its data source."""
+        return self.request("DELETE", f"/views/{view_id}")
+
     def list_block_children(self, block_id: str) -> list[JsonObject]:
         return list(self.paginate("GET", f"/blocks/{block_id}/children", params={"page_size": 100}))
 

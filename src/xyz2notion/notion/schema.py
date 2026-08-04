@@ -618,15 +618,21 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
     ),
     ViewSpec(
         key="mindmaps",
-        source="mindmap",
+        source="episode",
         home_group="ai",
         name="AI总结与思维导图",
         aliases=("思维导图",),
         view_type="table",
-        # Name is populated from the Episode title.  Keep the Episode relation
-        # in the schema for integrity/navigation, but do not show the same
-        # title twice in the user-facing view.
-        visible_properties=("Name", "总结完成时间", "Updated At", "Content Version"),
+        # Use Episode as the source so opening Name takes the user straight to
+        # the episode page.  The standalone Mindmap database remains the
+        # storage layer for Mermaid/JSON and full-text search.
+        visible_properties=("Name", "Podcast", "ASR Status", "总结完成时间", "Content Version"),
+        filter={
+            "or": [
+                {"property": "ASR Status", "select": {"equals": "已增强"}},
+                {"property": "ASR Status", "select": {"equals": "已发布"}},
+            ]
+        },
         sorts=({"property": "总结完成时间", "direction": "descending"},),
     ),
 )
