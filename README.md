@@ -4,6 +4,8 @@ Xyz2Notion 是一个完全自托管的播客工作流：用 GitHub Actions 从�
 
 项目不依赖作者服务器、NotionHub 插件或激活服务。所有任务运行在你自己的 GitHub Actions 中，凭证只通过 GitHub Secrets/Variables 注入。
 
+当前版本：**v0.2.0**
+
 ## Features
 
 - **小宇宙同步**：订阅、作者、播放历史、播放进度、待听、喜欢和收藏。
