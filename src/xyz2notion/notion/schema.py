@@ -623,7 +623,10 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         name="AI总结与思维导图",
         aliases=("思维导图",),
         view_type="table",
-        visible_properties=("Name", "Episode", "总结完成时间", "Updated At", "Content Version"),
+        # Name is populated from the Episode title.  Keep the Episode relation
+        # in the schema for integrity/navigation, but do not show the same
+        # title twice in the user-facing view.
+        visible_properties=("Name", "总结完成时间", "Updated At", "Content Version"),
         sorts=({"property": "总结完成时间", "direction": "descending"},),
     ),
 )

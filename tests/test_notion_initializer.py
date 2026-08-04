@@ -792,7 +792,6 @@ def test_ai_views_are_separate_from_native_episode_status_tabs() -> None:
     assert transcript.sorts == ({"property": "转写完成时间", "direction": "descending"},)
     assert mindmap.visible_properties == (
         "Name",
-        "Episode",
         "总结完成时间",
         "Updated At",
         "Content Version",
