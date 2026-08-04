@@ -129,6 +129,51 @@ def test_daily_levels_dates_and_iso_week_are_deterministic() -> None:
     assert {item.key for item in result.days} == {"2026-01-02", "2026-02-01"}
 
 
+def test_trend_zero_period_keys_cover_all_configured_windows() -> None:
+    zero_keys = incremental_module._trend_zero_period_keys(  # type: ignore[attr-defined]
+        {
+            PeriodKind.YEAR: {"2025": {}, "2026": {}},
+            PeriodKind.MONTH: {},
+            PeriodKind.WEEK: {},
+            PeriodKind.DAY: {},
+        },
+        today=date(2026, 2, 16),
+    )
+
+    assert zero_keys[PeriodKind.YEAR] == {"2025", "2026"}
+    assert zero_keys[PeriodKind.MONTH] == {
+        "2025-03",
+        "2025-04",
+        "2025-05",
+        "2025-06",
+        "2025-07",
+        "2025-08",
+        "2025-09",
+        "2025-10",
+        "2025-11",
+        "2025-12",
+        "2026-01",
+        "2026-02",
+    }
+    assert zero_keys[PeriodKind.DAY] == {
+        "2026-02-10",
+        "2026-02-11",
+        "2026-02-12",
+        "2026-02-13",
+        "2026-02-14",
+        "2026-02-15",
+        "2026-02-16",
+    }
+    assert zero_keys[PeriodKind.WEEK] == {
+        "2026-W03",
+        "2026-W04",
+        "2026-W05",
+        "2026-W06",
+        "2026-W07",
+        "2026-W08",
+    }
+
+
 def test_unplayed_playlist_and_favorite_do_not_affect_statistics() -> None:
     snapshot = statistics_snapshot()
     queued = Episode(
@@ -674,6 +719,16 @@ def test_notion_incremental_statistics_preserves_baseline_and_never_double_count
         == "2026-02-16"
     )
     assert new_day["properties"]["Exact Listening Seconds"]["number"] == 300
+    zero_day = next(
+        page
+        for page in fake.pages["ds-day"]
+        if (
+            page["properties"]["Period Key"]["rich_text"][0].get("plain_text")
+            or page["properties"]["Period Key"]["rich_text"][0]["text"]["content"]
+        )
+        == "2026-02-14"
+    )
+    assert zero_day["properties"]["Exact Listening Seconds"]["number"] == 0
     ledger = fake.pages["ds-episode"][0]["properties"]["Statistics Ledger"]
     assert "2026-02-16" in str(ledger)
     assert "累计收听" in str(fake.blocks["root"][0])

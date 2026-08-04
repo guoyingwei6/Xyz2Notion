@@ -357,10 +357,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         name="年度趋势",
         view_type="chart",
         visible_properties=(),
-        filter={
-            "property": "Exact Listening Seconds",
-            "number": {"greater_than": 0},
-        },
+        filter=None,
         chart_type="column",
         chart_x_property="Start Date",
         chart_y_property="收听小时",
@@ -388,15 +385,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         name="月度趋势",
         view_type="chart",
         visible_properties=(),
-        filter={
-            "and": [
-                {
-                    "property": "Exact Listening Seconds",
-                    "number": {"greater_than": 0},
-                },
-                {"property": "Start Date", "date": {"past_year": {}}},
-            ],
-        },
+        filter={"property": "Start Date", "date": {"past_year": {}}},
         chart_type="line",
         chart_x_property="Start Date",
         chart_y_property="收听小时",
@@ -424,15 +413,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         name="周趋势",
         view_type="chart",
         visible_properties=(),
-        filter={
-            "and": [
-                {
-                    "property": "Exact Listening Seconds",
-                    "number": {"greater_than": 0},
-                },
-                {"property": "Start Date", "date": {"past_month": {}}},
-            ],
-        },
+        filter={"property": "Start Date", "date": {"past_month": {}}},
         chart_type="line",
         chart_x_property="Start Date",
         chart_y_property="收听小时",
@@ -460,15 +441,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         name="每日趋势",
         view_type="chart",
         visible_properties=(),
-        filter={
-            "and": [
-                {
-                    "property": "Exact Listening Seconds",
-                    "number": {"greater_than": 0},
-                },
-                {"property": "Start Date", "date": {"past_week": {}}},
-            ],
-        },
+        filter={"property": "Start Date", "date": {"past_week": {}}},
         chart_type="line",
         chart_x_property="Start Date",
         chart_y_property="收听小时",

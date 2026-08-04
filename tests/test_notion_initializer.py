@@ -250,24 +250,13 @@ def test_statistics_charts_are_compact_primary_views() -> None:
         "week",
         "day",
     ]
-    assert chart_specs[1].filter == {
-        "property": "Exact Listening Seconds",
-        "number": {"greater_than": 0},
-    }
+    assert chart_specs[1].filter is None
     for spec, window in zip(
         chart_specs[2:],
         ("past_year", "past_month", "past_week"),
         strict=True,
     ):
-        assert spec.filter == {
-            "and": [
-                {
-                    "property": "Exact Listening Seconds",
-                    "number": {"greater_than": 0},
-                },
-                {"property": "Start Date", "date": {window: {}}},
-            ],
-        }
+        assert spec.filter == {"property": "Start Date", "date": {window: {}}}
 
 
 def test_statistics_tables_keep_complete_history() -> None:
@@ -452,6 +441,47 @@ def test_initializer_is_idempotent_and_preserves_user_content() -> None:
     assert user_block in fake.blocks["root"]
     marker_count = sum(HOME_MARKER_URL in str(block) for block in fake.blocks["root"])
     assert marker_count == 1
+
+
+def test_initializer_preserves_manual_view_columns_and_order() -> None:
+    fake = FakeNotion()
+    initializer = NotionInitializer(fake, "root")
+    initializer.initialize(create_home=True)
+
+    transcript_view = next(view for view in fake.views.values() if view["name"] == "转写文本")
+    mindmap_view = next(view for view in fake.views.values() if view["name"] == "AI总结与思维导图")
+    transcript_configuration = {
+        "type": "table",
+        "properties": [
+            {"property_id": "podcast", "visible": True},
+            {"property_id": "title", "visible": True},
+        ],
+        "wrap_cells": False,
+        "frozen_column_index": 1,
+        "show_vertical_lines": True,
+    }
+    mindmap_configuration = {
+        "type": "table",
+        "properties": [
+            {"property_id": "title", "visible": True},
+            {"property_id": "enhancement-status", "visible": True},
+        ],
+        "wrap_cells": True,
+        "frozen_column_index": 1,
+        "show_vertical_lines": False,
+    }
+    transcript_view["configuration"] = transcript_configuration
+    mindmap_view["configuration"] = mindmap_configuration
+
+    result = initializer.initialize()
+
+    assert result.updated_views == len(VIEW_SPECS) - 1
+    assert transcript_view["configuration"] == transcript_configuration
+    assert mindmap_view["configuration"] == mindmap_configuration
+    # Filters and sorts remain code-managed while presentation settings stay
+    # under the user's control.
+    assert transcript_view["sorts"] == [{"property": "转写完成时间", "direction": "descending"}]
+    assert mindmap_view["sorts"] == [{"property": "总结完成时间", "direction": "descending"}]
 
 
 def test_initializer_migrates_legacy_mindmap_view_to_episode_source() -> None:

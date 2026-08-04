@@ -190,6 +190,61 @@ def _period_bounds(kind: PeriodKind, key: str, fallback: date) -> tuple[date, da
     return day, day
 
 
+def _shift_month(day: date, offset: int) -> date:
+    """Return ``day`` shifted by whole calendar months."""
+    serial = day.year * 12 + day.month - 1 + offset
+    year, month_index = divmod(serial, 12)
+    month = month_index + 1
+    return date(year, month, min(day.day, calendar.monthrange(year, month)[1]))
+
+
+def _month_start(day: date, offset: int) -> date:
+    """Return the first day of the month offset from ``day``."""
+    return _shift_month(day, offset).replace(day=1)
+
+
+def _trend_zero_period_keys(
+    period_pages: Mapping[PeriodKind, Mapping[str, JsonObject]],
+    *,
+    today: date,
+) -> dict[PeriodKind, set[str]]:
+    """Return calendar periods needed to render zero-valued trend points.
+
+    Notion charts do not synthesize categories that have no row.  Keep the
+    statistics tables complete for the configured chart windows so a day,
+    week, or month without listening is drawn as an explicit zero instead of
+    disappearing from the chart.
+    """
+    years = {int(key) for key in period_pages.get(PeriodKind.YEAR, {}) if key.isdecimal()}
+    first_year = min(years, default=today.year)
+    last_year = max(today.year, max(years, default=today.year))
+    year_keys = {str(year) for year in range(first_year, last_year + 1)}
+
+    first_month = _month_start(today, -11)
+    month_keys = {
+        _period_key(
+            PeriodKind.MONTH,
+            _month_start(first_month, offset),
+        )
+        for offset in range(12)
+    }
+
+    week_start = _shift_month(today, -1)
+    week_start -= timedelta(days=week_start.weekday())
+    week_keys: set[str] = set()
+    while week_start <= today:
+        week_keys.add(_period_key(PeriodKind.WEEK, week_start))
+        week_start += timedelta(days=7)
+
+    day_keys = {(today - timedelta(days=offset)).isoformat() for offset in range(7)}
+    return {
+        PeriodKind.YEAR: year_keys,
+        PeriodKind.MONTH: month_keys,
+        PeriodKind.WEEK: week_keys,
+        PeriodKind.DAY: day_keys,
+    }
+
+
 def _page_map(pages: list[JsonObject], key_property: str) -> dict[str, JsonObject]:
     result: dict[str, JsonObject] = {}
     for page in pages:
@@ -433,6 +488,7 @@ class NotionIncrementalStatistics:
         ledger_episodes: int,
         delta_seconds: int,
     ) -> IncrementalStatisticsReport:
+        zero_period_keys = _trend_zero_period_keys(period_pages, today=today)
         additions: dict[PeriodKind, dict[str, int]] = {
             kind: defaultdict(int)
             for kind in (
@@ -488,6 +544,7 @@ class NotionIncrementalStatistics:
                 set(pages)
                 | set(additions[kind])
                 | set(period_episode_ids[kind])
+                | zero_period_keys.get(kind, set())
                 | ({"all"} if kind is PeriodKind.ALL else set())
             )
             for key in sorted(keys):

@@ -675,14 +675,21 @@ class NotionInitializer:
         source: NotionResource,
         *,
         creating: bool,
+        preserve_configuration: bool = False,
         database_id: str | None = None,
         after_block_id: str | None = None,
     ) -> JsonObject:
         payload: JsonObject = {
             "name": spec.name,
             "sorts": list(spec.sorts),
-            "configuration": view_configuration(spec, source.property_ids),
         }
+        # Existing views may contain deliberate user edits to visible columns,
+        # their order, gallery card layout, or chart presentation.  Do not send
+        # a replacement configuration during routine initialization; omitting
+        # it from PATCH preserves Notion's current view configuration.  New
+        # views still receive the complete code-defined default configuration.
+        if creating or not preserve_configuration:
+            payload["configuration"] = view_configuration(spec, source.property_ids)
         if spec.filter is not None or not creating:
             payload["filter"] = spec.filter
         if creating:
@@ -817,7 +824,12 @@ class NotionInitializer:
             else:
                 self.api.update_view(
                     str(existing["id"]),
-                    self._view_payload(spec, source, creating=False),
+                    self._view_payload(
+                        spec,
+                        source,
+                        creating=False,
+                        preserve_configuration=True,
+                    ),
                 )
                 updated += 1
         # The AI tab used to point at the standalone Mindmap data source.  The
