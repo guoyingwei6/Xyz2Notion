@@ -7,6 +7,9 @@
 ## Unreleased
 
 - 持续维护 README 的最近版本摘要和本文件的完整日期记录。
+- 百炼 ASR 增加固定的内部模型 fallback：`paraformer-v1 → paraformer-v2 → paraformer-mtl-v1`；
+  仅在提交前明确额度耗尽或模型不可用时切换，任务创建后不重复提交，三个模型均不可用
+  才降级到 SiliconFlow 和本地 Whisper。
 - AI 总结与思维导图视图新增独立的 `增强状态`、`增强 Provider`，不再把 `ASR Status`
   当作摘要状态；状态保存会记录实际使用的 SiliconFlow 或本地 Qwen 通道。
 

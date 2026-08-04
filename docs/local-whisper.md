@@ -2,7 +2,7 @@
 
 Xyz2Notion 当前默认 ASR 顺序是：
 
-1. 阿里云百炼 `paraformer-v1`；
+1. 阿里云百炼 `paraformer-v1`，额度/模型不可用时依次尝试 `paraformer-v2`、`paraformer-mtl-v1`；
 2. SiliconFlow 免费 ASR API；
 3. GitHub Actions CPU 上的本地 `faster-whisper small`。
 

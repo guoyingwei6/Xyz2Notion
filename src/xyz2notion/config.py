@@ -59,6 +59,10 @@ class AsrConfig(StrictConfigModel):
         AsrProvider.LOCAL_WHISPER,
     )
     dashscope_model: Literal["paraformer-v1"] = "paraformer-v1"
+    dashscope_fallback_models: tuple[Literal["paraformer-v2", "paraformer-mtl-v1"], ...] = (
+        "paraformer-v2",
+        "paraformer-mtl-v1",
+    )
     siliconflow_models: tuple[str, ...] = (
         "FunAudioLLM/SenseVoiceSmall",
         "TeleAI/TeleSpeechASR",
@@ -69,6 +73,8 @@ class AsrConfig(StrictConfigModel):
     def validate_provider_policy(self) -> Self:
         if len(set(self.provider_order)) != len(self.provider_order):
             raise ValueError("asr.provider_order cannot contain duplicates")
+        if len(set(self.dashscope_fallback_models)) != len(self.dashscope_fallback_models):
+            raise ValueError("asr.dashscope_fallback_models cannot contain duplicates")
         if not self.siliconflow_models or any(
             not model.strip() for model in self.siliconflow_models
         ):
@@ -81,6 +87,11 @@ class AsrConfig(StrictConfigModel):
                 f"{', '.join(sorted(unknown))}"
             )
         return self
+
+    @property
+    def dashscope_models(self) -> tuple[str, ...]:
+        """DashScope model order before the outer SiliconFlow/local fallback."""
+        return (self.dashscope_model, *self.dashscope_fallback_models)
 
 
 class LimitConfig(StrictConfigModel):

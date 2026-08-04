@@ -13,7 +13,8 @@ uv run xyz2notion config-check --config config.yaml
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `provider_order` | `dashscope`, `siliconflow`, `local_whisper` | ASR 优先级；空数组表示暂停新 ASR |
-| `dashscope_model` | `paraformer-v1` | 百炼录音文件识别模型；仅允许该免费模型 |
+| `dashscope_model` | `paraformer-v1` | 百炼首选录音文件识别模型 |
+| `dashscope_fallback_models` | `paraformer-v2`, `paraformer-mtl-v1` | 百炼额度/模型不可用时的内部 fallback 顺序 |
 | `siliconflow_models` | SenseVoiceSmall、TeleSpeechASR | 免费白名单模型 404 时依次尝试 |
 | `local_whisper_model` | `small` | 最终本地兜底；仅允许 `tiny`、`base`、`small` |
 
@@ -46,7 +47,8 @@ asr:
 | `chunk_minutes` | `30` | 单块最大时长 |
 | `max_output_tokens` | `8192` | 单次最大输出 |
 
-配置验证仅接受当前版本核对过的两个免费 ASR 模型和一个免费摘要模型。远程摘要
+配置验证仅接受当前版本核对过的三个百炼 Paraformer 模型、两个 SiliconFlow ASR 模型
+和一个免费摘要模型。远程摘要
 失败后只降级到本地 Qwen3-1.7B，不自动切换其他远程模型或付费模型。本地模型与
 运行时由 GitHub Actions 缓存，正常情况下不会每次下载。
 

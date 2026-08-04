@@ -16,7 +16,7 @@ Xyz2Notion 的任务只运行在用户自己 Fork 的 GitHub 仓库中。所有�
 | `NOTION_TOKEN` | 是 | 用户自己的 Notion Integration Token |
 | `NOTION_PAGE_ID` | 是 | 已授权给 Integration 的空白根页面 ID |
 | `NOTION_MIGRATION_PAGE_ID` | 否 | 旧模板副本页面；仅维护工作流迁移操作使用 |
-| `DASHSCOPE_API_KEY` | 建议 | 百炼 `paraformer-v1` 免费额度优先 ASR |
+| `DASHSCOPE_API_KEY` | 建议 | 百炼 Paraformer 优先 ASR；内部顺序为 v1 → v2 → mtl-v1 |
 | `SILICONFLOW_API_KEY` | 建议 | 免费 ASR 降级与免费结构化摘要 |
 
 在 **Repository variables** 可选添加：
@@ -49,8 +49,9 @@ OAuth 回调或作者生成的 Token。
 ### 阿里云百炼 Paraformer
 
 `DASHSCOPE_API_KEY` 来自用户自己的阿里云百炼账号，用于优先调用
-`paraformer-v1` 录音文件识别免费额度。项目只把该 Key 发送到
-`dashscope.aliyuncs.com`，并且只允许 `paraformer-v1` 作为自动 ASR 模型。
+Paraformer 录音文件识别额度。项目只把该 Key 发送到
+`dashscope.aliyuncs.com`，并且只允许 `paraformer-v1`、`paraformer-v2` 和
+`paraformer-mtl-v1` 作为自动 ASR 模型，顺序固定为 v1 → v2 → mtl-v1。
 请使用中国内地百炼的通用 API Key；不需要另设 URL、Workspace ID 或模型 Secret。
 当前代码使用 `POST /api/v1/services/audio/asr/transcription` 提交，使用
 `GET /api/v1/tasks/{task_id}` 查询异步任务。
@@ -82,7 +83,7 @@ ASR 降级模型和免费文本摘要模型。项目只接受代码已核对的�
 `xyz2notion-runtime` concurrency group，避免迁移、初始化、元数据和 AI 同时改页。
 AI 定时任务不包含 `XIAOYUZHOU_REFRESH_TOKEN`。转写队列只读取 Notion 已保存的
 音频地址并停在“已转写”。当前默认 ASR 队列按
-`DashScope paraformer-v1 -> SiliconFlow -> 本地 Whisper` 降级；增强队列不接收
+`DashScope paraformer-v1 -> paraformer-v2 -> paraformer-mtl-v1 -> SiliconFlow -> 本地 Whisper` 降级；增强队列不接收
 小宇宙或任何 ASR 凭证，只消费 Notion 已保存文字稿。存量模式两条队列均每两小时最多 2 期；转写队列两期之间
 固定等待 60 秒。存量清空后将两个 backlog Variable 改为 `false`，之后元数据同步
 成功才启动日常转写；增强队列在转写成功后立即启动，并每两小时额外检查一次遗留的“已转写”文字稿，

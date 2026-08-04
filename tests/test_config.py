@@ -30,6 +30,11 @@ def test_example_config_is_valid_and_secret_free() -> None:
         AsrProvider.LOCAL_WHISPER,
     )
     assert config.asr.dashscope_model == "paraformer-v1"
+    assert config.asr.dashscope_models == (
+        "paraformer-v1",
+        "paraformer-v2",
+        "paraformer-mtl-v1",
+    )
     assert config.summary.siliconflow_models == ("Qwen/Qwen3-8B",)
     assert config.summary.local_qwen_fallback is True
     assert config.summary.prompt_version == "summary-v1"
@@ -70,6 +75,7 @@ def test_missing_config_has_clear_error(tmp_path: Path) -> None:
     "values",
     [
         {"provider_order": ["siliconflow", "siliconflow"]},
+        {"dashscope_fallback_models": ["paraformer-v2", "paraformer-v2"]},
         {"siliconflow_models": []},
         {"siliconflow_models": ["model", "model"]},
         {"siliconflow_models": ["paid-or-unknown/model"]},

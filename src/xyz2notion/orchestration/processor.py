@@ -473,6 +473,7 @@ def build_provider_clients(
     *,
     dashscope_api_key: SecretStr | None = None,
     dashscope_model: str = "paraformer-v1",
+    dashscope_models: tuple[str, ...] | None = None,
     siliconflow_asr_api_key: SecretStr | None,
     siliconflow_summary_api_key: SecretStr | None,
     siliconflow_asr_models: tuple[str, ...],
@@ -503,7 +504,11 @@ def build_provider_clients(
     else:
         summary_client = remote_summary
     return (
-        DashScopeParaformerClient(dashscope_api_key, model=dashscope_model)
+        DashScopeParaformerClient(
+            dashscope_api_key,
+            model=dashscope_model,
+            models=dashscope_models,
+        )
         if dashscope_api_key is not None
         else None,
         SiliconFlowClient(siliconflow_asr_api_key, models=siliconflow_asr_models)

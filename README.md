@@ -32,7 +32,8 @@ Fork 本仓库，在 `Settings → Secrets and variables → Actions` 添加：
 
 启用完整 AI 链路还需要：
 
-- `DASHSCOPE_API_KEY`：阿里云百炼 `paraformer-v1` 的 API Key
+- `DASHSCOPE_API_KEY`：阿里云百炼 Paraformer 的 API Key（内部按
+  `paraformer-v1 → paraformer-v2 → paraformer-mtl-v1` 尝试）
 - `SILICONFLOW_API_KEY`：SiliconFlow 的免费 ASR/摘要 API Key
 
 可选 Repository Variable：
@@ -42,7 +43,7 @@ Fork 本仓库，在 `Settings → Secrets and variables → Actions` 添加：
 - `XYZ2NOTION_ENRICHMENT_QUEUE_ENABLED`：日常摘要/章节/脑图队列开关
 - `ASR_BACKFILL_ACTIVE`、`XYZ2NOTION_ENRICHMENT_BACKLOG`：一次性存量队列开关，默认应保持关闭
 
-当前版本不使用 `TINGWU_COOKIE`，也不需要为百炼额外配置 URL、模型名或 Workspace ID。百炼接口和模型由代码固定为中国内地通用端点与 `paraformer-v1`。详细配置见 [GitHub Actions 与 Secrets](docs/github-actions.md) 和 [百炼 ASR](docs/dashscope-asr.md)。
+当前版本不使用 `TINGWU_COOKIE`，也不需要为百炼额外配置 URL、模型名或 Workspace ID。百炼接口和模型顺序由代码固定为中国内地通用端点与三个 Paraformer 模型。详细配置见 [GitHub Actions 与 Secrets](docs/github-actions.md) 和 [百炼 ASR](docs/dashscope-asr.md)。
 
 ### 2. 初始化并同步
 
@@ -75,9 +76,11 @@ ASR 重试成功后会触发增强队列，立即继续摘要、章节和思维�
 
 ASR 固定按以下顺序降级：
 
-1. 阿里云百炼 `paraformer-v1`；
+1. 阿里云百炼 `paraformer-v1`；额度耗尽或模型不可用时依次尝试 `paraformer-v2`、`paraformer-mtl-v1`；
 2. SiliconFlow 免费 ASR；
 3. GitHub Actions 本地 `faster-whisper small`。
+
+百炼内部 fallback 只发生在提交任务前的明确额度/模型不可用错误；任务已经拿到 task ID 后不会再创建第二个任务，避免重复计费或重复转写。
 
 摘要、章节和思维导图固定使用：
 

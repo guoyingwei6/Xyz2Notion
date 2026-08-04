@@ -29,7 +29,17 @@ DASHSCOPE_TRANSCRIPTION_URL = (
 )
 DASHSCOPE_TASK_URL = "https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}"
 DEFAULT_MODEL = "paraformer-v1"
-FREE_MODELS = frozenset({DEFAULT_MODEL})
+SUPPORTED_MODELS = frozenset(
+    {
+        "paraformer-v1",
+        "paraformer-v2",
+        "paraformer-mtl-v1",
+    }
+)
+# Backwards-compatible name used by older integrations.  The account's actual
+# free quota remains controlled by the DashScope console; this is only the
+# project's safe model allowlist.
+FREE_MODELS = SUPPORTED_MODELS
 SUCCEEDED_STATUSES = frozenset({"SUCCEEDED"})
 RUNNING_STATUSES = frozenset({"PENDING", "RUNNING"})
 FAILED_STATUSES = frozenset({"FAILED", "UNKNOWN"})
@@ -70,12 +80,12 @@ def _json(response: httpx.Response) -> Mapping[str, Any]:
 
 def _status_category(status_code: int | None, code: str | None) -> ProviderErrorCategory:
     normalized = (code or "").lower()
+    if "quota" in normalized or "allocation" in normalized:
+        return ProviderErrorCategory.QUOTA_EXHAUSTED
     if status_code in {401, 403} or "invalidapikey" in normalized:
         return ProviderErrorCategory.AUTHENTICATION
     if status_code == 429 or "throttling" in normalized:
         return ProviderErrorCategory.RATE_LIMITED
-    if "quota" in normalized or "allocation" in normalized:
-        return ProviderErrorCategory.QUOTA_EXHAUSTED
     if status_code == 400:
         return ProviderErrorCategory.INVALID_INPUT
     if status_code in {500, 502, 503, 504}:
@@ -244,6 +254,7 @@ class DashScopeParaformerClient:
         api_key: str | SecretStr,
         *,
         model: str = DEFAULT_MODEL,
+        models: tuple[str, ...] | None = None,
         client: httpx.Client | None = None,
         max_retries: int = 3,
         poll_attempts: int = 60,
@@ -254,12 +265,22 @@ class DashScopeParaformerClient:
         key = api_key.get_secret_value() if isinstance(api_key, SecretStr) else api_key
         if not key:
             raise ValueError("DashScope API key cannot be empty")
-        if model not in FREE_MODELS:
-            raise ValueError("DashScope ASR model must be paraformer-v1")
+        selected_models = models if models is not None else (model,)
+        if not selected_models or any(not item.strip() for item in selected_models):
+            raise ValueError("DashScope ASR models cannot be empty")
+        if len(set(selected_models)) != len(selected_models):
+            raise ValueError("DashScope ASR models cannot contain duplicates")
+        if unknown := set(selected_models) - SUPPORTED_MODELS:
+            raise ValueError(
+                "DashScope ASR model is not in the safe allowlist: " + ", ".join(sorted(unknown))
+            )
         if max_retries < 0 or poll_attempts < 1 or poll_interval_seconds < 0:
             raise ValueError("DashScope retry and polling limits must be non-negative")
         validate_credential_destination(DASHSCOPE_TRANSCRIPTION_URL, CredentialKind.DASHSCOPE)
-        self.model = model
+        self.models = tuple(selected_models)
+        # Keep the historical attribute for callers that display the default
+        # model; each TranscriptResult records the actually used model.
+        self.model = self.models[0]
         self.max_retries = max_retries
         self.poll_attempts = poll_attempts
         self.poll_interval_seconds = poll_interval_seconds
@@ -325,8 +346,11 @@ class DashScopeParaformerClient:
             self._sleep(min(30.0, 2.0**attempt))
         raise AssertionError("DashScope retry loop exhausted unexpectedly")
 
-    def submit(self, audio_url: str) -> str:
+    def submit(self, audio_url: str, *, model: str | None = None) -> str:
         """Submit one public audio URL and return the async task id."""
+        active_model = model or self.model
+        if active_model not in SUPPORTED_MODELS:
+            raise ValueError("DashScope ASR model is not in the safe allowlist")
         try:
             safe_audio_url = validate_public_audio_url(audio_url)
         except AudioPreparationError as exc:
@@ -335,18 +359,34 @@ class DashScopeParaformerClient:
                 "Audio URL is not usable by DashScope",
                 code=type(exc).__name__,
             ) from exc
-        payload = self._request_json(
-            "POST",
-            DASHSCOPE_TRANSCRIPTION_URL,
-            json_body={
-                "model": self.model,
-                "input": {"file_urls": [safe_audio_url]},
-                "parameters": {
-                    "channel_id": [0],
-                    "disfluency_removal_enabled": False,
+        parameters: dict[str, Any] = {
+            "channel_id": [0],
+            "disfluency_removal_enabled": False,
+        }
+        # v2 exposes the most precise recorded-file alignment option.  Keep it
+        # model-specific because older Paraformer variants do not all accept
+        # the same parameter set.
+        if active_model == "paraformer-v2":
+            parameters["timestamp_alignment_enabled"] = True
+        try:
+            payload = self._request_json(
+                "POST",
+                DASHSCOPE_TRANSCRIPTION_URL,
+                json_body={
+                    "model": active_model,
+                    "input": {"file_urls": [safe_audio_url]},
+                    "parameters": parameters,
                 },
-            },
-        )
+            )
+        except DashScopeAPIError as exc:
+            raise ProviderError(
+                ProviderFailure(
+                    provider="dashscope",
+                    category=_status_category(exc.status_code, exc.code),
+                    message=str(exc),
+                    code=exc.code or (str(exc.status_code) if exc.status_code else None),
+                )
+            ) from exc
         try:
             return _extract_task_id(payload)
         except DashScopeAPIError as exc:
@@ -391,8 +431,15 @@ class DashScopeParaformerClient:
             code="poll_exhausted",
         )
 
-    def fetch_transcript(self, url: str, *, task_id: str) -> TranscriptResult:
+    def fetch_transcript(
+        self,
+        url: str,
+        *,
+        task_id: str,
+        model: str | None = None,
+    ) -> TranscriptResult:
         """Fetch the public result JSON and parse transcript text plus sentence timing."""
+        active_model = model or self.model
         try:
             safe_url = validate_public_audio_url(url)
         except AudioPreparationError as exc:
@@ -406,25 +453,41 @@ class DashScopeParaformerClient:
             return parse_transcription_result(
                 payload,
                 provider_task_id=task_id,
-                model=self.model,
+                model=active_model,
             )
         except DashScopeAPIError as exc:
             raise _failure(ProviderErrorCategory.SCHEMA_CHANGED, str(exc), code=exc.code) from exc
 
     def transcribe_url(self, audio_url: str) -> TranscriptResult:
         """Submit, poll, fetch, and normalize one public audio URL."""
-        try:
-            task_id = self.submit(audio_url)
+        last_failure: ProviderError | None = None
+        for index, model in enumerate(self.models):
+            try:
+                # Fallback is intentionally limited to submission.  Once a
+                # task id exists, retrying another model could create a
+                # duplicate billable task after an ambiguous network failure.
+                task_id = self.submit(audio_url, model=model)
+            except ProviderError as exc:
+                last_failure = exc
+                if index + 1 >= len(self.models) or not _can_fallback_to_next_model(exc):
+                    raise
+                continue
+            # Do not catch failures after submission: the task is already in
+            # DashScope and must be resumed/marked failed instead of creating
+            # another task for the same episode.
             result_url = self.wait_result_url(task_id)
-            return self.fetch_transcript(result_url, task_id=task_id)
-        except ProviderError:
-            raise
-        except DashScopeAPIError as exc:
-            raise ProviderError(
-                ProviderFailure(
-                    provider="dashscope",
-                    category=_status_category(exc.status_code, exc.code),
-                    message=str(exc),
-                    code=exc.code or (str(exc.status_code) if exc.status_code else None),
-                )
-            ) from exc
+            return self.fetch_transcript(result_url, task_id=task_id, model=model)
+        if last_failure is not None:
+            raise last_failure
+        raise AssertionError("DashScope model fallback loop had no models")
+
+
+def _can_fallback_to_next_model(error: ProviderError) -> bool:
+    """Return whether a failed submission is plausibly model-specific."""
+    if error.failure.category is ProviderErrorCategory.QUOTA_EXHAUSTED:
+        return True
+    code = (error.failure.code or "").lower().replace("_", "")
+    return any(
+        marker in code
+        for marker in ("modelnotfound", "modelnotavailable", "invalidmodel", "unsupportedmodel")
+    )

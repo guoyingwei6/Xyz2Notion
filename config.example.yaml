@@ -5,7 +5,12 @@ asr:
     - dashscope
     - siliconflow
     - local_whisper
+  # DashScope's internal model fallback order.  The API key is the same for
+  # all three; the account console decides which model still has free quota.
   dashscope_model: paraformer-v1
+  dashscope_fallback_models:
+    - paraformer-v2
+    - paraformer-mtl-v1
   siliconflow_models:
     - FunAudioLLM/SenseVoiceSmall
     - TeleAI/TeleSpeechASR

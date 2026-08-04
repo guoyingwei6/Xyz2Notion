@@ -389,6 +389,7 @@ def _run_asr_queue(args: argparse.Namespace) -> int:
             dashscope, siliconflow, local_whisper, _summary_client = build_provider_clients(
                 dashscope_api_key=dashscope_api_key,
                 dashscope_model=config.asr.dashscope_model,
+                dashscope_models=config.asr.dashscope_models,
                 siliconflow_asr_api_key=siliconflow_asr_api_key,
                 siliconflow_summary_api_key=None,
                 siliconflow_asr_models=config.asr.siliconflow_models,

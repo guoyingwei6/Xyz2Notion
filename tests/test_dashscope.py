@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 from pydantic import SecretStr
@@ -111,11 +113,22 @@ def test_dashscope_failures_are_safe_and_categorized() -> None:
     assert "fixture-secret" not in str(caught.value)
 
 
-def test_dashscope_rejects_non_free_model_and_unsafe_hosts() -> None:
+def test_dashscope_model_allowlist_and_unsafe_hosts() -> None:
     with pytest.raises(ValueError, match="cannot be empty"):
         DashScopeParaformerClient("")
-    with pytest.raises(ValueError, match="paraformer-v1"):
-        DashScopeParaformerClient("key", model="paraformer-v2")
+    client = DashScopeParaformerClient(
+        "key",
+        models=("paraformer-v1", "paraformer-v2", "paraformer-mtl-v1"),
+    )
+    assert client.models == ("paraformer-v1", "paraformer-v2", "paraformer-mtl-v1")
+    with pytest.raises(ValueError, match="safe allowlist"):
+        DashScopeParaformerClient("key", model="not-a-paraformer")
+    with pytest.raises(ValueError, match="cannot be empty"):
+        DashScopeParaformerClient("key", models=())
+    with pytest.raises(ValueError, match="cannot be empty"):
+        DashScopeParaformerClient("key", models=(" ",))
+    with pytest.raises(ValueError, match="duplicates"):
+        DashScopeParaformerClient("key", models=("paraformer-v1", "paraformer-v1"))
     with pytest.raises(ValueError, match="non-negative"):
         DashScopeParaformerClient("key", max_retries=-1)
     with pytest.raises(UnsafeCredentialDestinationError):
@@ -123,6 +136,96 @@ def test_dashscope_rejects_non_free_model_and_unsafe_hosts() -> None:
             "https://evil.example/api/v1/services/audio/asr/transcription",
             CredentialKind.DASHSCOPE,
         )
+
+
+def test_dashscope_model_quota_falls_back_before_task_submission() -> None:
+    submitted_models: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == DASHSCOPE_TRANSCRIPTION_URL:
+            payload = json.loads(request.content)
+            model = str(payload["model"])
+            submitted_models.append(model)
+            if model == "paraformer-v1":
+                return httpx.Response(
+                    403,
+                    json={
+                        "code": "AllocationQuota.FreeTierOnly",
+                        "message": "free quota exhausted",
+                    },
+                )
+            assert model == "paraformer-v2"
+            assert payload["parameters"]["timestamp_alignment_enabled"] is True
+            return httpx.Response(200, json={"output": {"task_id": "task-v2"}})
+        if str(request.url) == DASHSCOPE_TASK_URL.format(task_id="task-v2"):
+            return httpx.Response(
+                200,
+                json={
+                    "output": {
+                        "task_status": "SUCCEEDED",
+                        "results": [
+                            {
+                                "transcription_url": (
+                                    "https://dashscope.aliyuncs.com/result/task-v2.json"
+                                )
+                            }
+                        ],
+                    }
+                },
+            )
+        if str(request.url) == "https://dashscope.aliyuncs.com/result/task-v2.json":
+            return httpx.Response(
+                200,
+                json={"transcripts": [{"text": "v2 文本", "sentences": []}]},
+            )
+        raise AssertionError(str(request.url))
+
+    client = DashScopeParaformerClient(
+        "dashscope-fixture-secret",
+        models=("paraformer-v1", "paraformer-v2", "paraformer-mtl-v1"),
+        client=httpx.Client(transport=httpx.MockTransport(handle)),
+        max_retries=0,
+        sleep=lambda _seconds: None,
+    )
+
+    result = client.transcribe_url("https://example.com/audio.mp3")
+
+    assert submitted_models == ["paraformer-v1", "paraformer-v2"]
+    assert result.model == "paraformer-v2"
+
+
+def test_dashscope_does_not_create_second_task_after_submission_failure() -> None:
+    submitted_models: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == DASHSCOPE_TRANSCRIPTION_URL:
+            submitted_models.append(str(json.loads(request.content)["model"]))
+            return httpx.Response(200, json={"output": {"task_id": "task-running"}})
+        if str(request.url) == DASHSCOPE_TASK_URL.format(task_id="task-running"):
+            return httpx.Response(
+                200,
+                json={
+                    "output": {
+                        "task_status": "FAILED",
+                        "code": "AllocationQuota.FreeTierOnly",
+                        "message": "quota exhausted after task creation",
+                    }
+                },
+            )
+        raise AssertionError(str(request.url))
+
+    client = DashScopeParaformerClient(
+        "dashscope-fixture-secret",
+        models=("paraformer-v1", "paraformer-v2"),
+        client=httpx.Client(transport=httpx.MockTransport(handle)),
+        sleep=lambda _seconds: None,
+    )
+
+    with pytest.raises(ProviderError) as caught:
+        client.transcribe_url("https://example.com/audio.mp3")
+
+    assert caught.value.failure.category is ProviderErrorCategory.QUOTA_EXHAUSTED
+    assert submitted_models == ["paraformer-v1"]
 
 
 def test_parse_transcription_result_accepts_sentence_only_payload() -> None:
