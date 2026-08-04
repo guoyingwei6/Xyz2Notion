@@ -1,29 +1,52 @@
-# Changelog
+# 更新日志
 
-本项目遵循 [Semantic Versioning](https://semver.org/)。
+本文件记录 Xyz2Notion 的功能、工作流、数据结构和安全策略变更。日期使用项目维护时的本地日期；同一天的条目按从新到旧排列。
+
+项目遵循 [Semantic Versioning](https://semver.org/)。
 
 ## Unreleased
 
-- 新增只读权限的 `Xyz2Notion Maintenance` 手动工作流；
-- GitHub-only 支持迁移 dry-run/确认应用、单集重做、统计和热力图重建；
-- 所有 Notion 写工作流统一互斥，避免初始化、同步、AI 和维护并发修改页面。
-- ASR 默认改为用户自己的百炼 `paraformer-v1` 免费额度，失败后降级
-  SiliconFlow 免费 ASR 与本地 Whisper；
-- 文字稿摘要继续使用用户自己的 `SILICONFLOW_API_KEY`，失败后回退到缓存的本地
-  Qwen 模型；
-- 自动 ASR 队列不再读取通义听悟 Cookie，听悟仅保留旧兼容/手动诊断入口。
+- 持续维护 README 的最近版本摘要和本文件的完整日期记录。
 
-## 0.1.0 - 2026-07-29
+## 2026-08-04
 
-首个自主可控预览版：
+- 增强队列增加每两小时一次的遗留文字稿检查。它只消费 Notion 中已有的“已转写/已增强”检查点，不访问小宇宙，也不会重复 ASR。
+- 修复增强队列在 ASR 成功但后续事件未触发时留下“已转写”记录的问题；已发布记录会被幂等跳过。
+- 五个 Episode 视图统一显示顺序：`Name → Podcast → Listening Status → ASR Status → Progress Ring → Published At`。
+- AI 总结与思维导图的 `Name` 直接使用 Episode 标题；隐藏重复的 `Episode` 关系列，但保留底层关系用于完整性检查和跳转。
+- AI 候选与增强队列统一按“收藏 → 喜欢 → 听过 → 在听 → 待听”排序，并只输出安全的类别聚合计数。
 
-- 小宇宙 Refresh Token 认证、订阅、历史、进度、里程和月度统计；
-- 九个 Notion 数据库、12 个视图、首页统计、排行和年度热力图；
-- 通义听悟 Cookie 优先、SiliconFlow 免费 ASR 自动降级；
-- 千问结构化摘要、章节、重点、问答、术语、人物和脑图；
-- 单集播放器、文字稿、SVG/原生脑图与用户笔记保护；
-- Notion 私有检查点、GitHub Actions 定时推进和手动恢复；
-- 旧 Podcast2Notion 模板原地迁移、dry-run 和作者服务依赖清理；
-- 严格域名隔离、日志脱敏、Gitleaks 和 90% 测试覆盖率门。
+## 2026-08-03
 
-真实账户端到端验收仍需要用户自行配置服务凭证。
+- 统计日期、周期边界和热力图日期统一按 UTC+8（Asia/Shanghai/Asia/Taipei）解释。
+- 日、周、月、年趋势继续使用 Notion 已保存的 Episode 增量账本，不为统计重新查询小宇宙。
+
+## 2026-08-02
+
+- 为转写和摘要分别增加“转写完成时间”和“总结完成时间”，AI 输出视图按各自完成时间倒序。
+- “转写文本”视图纳入 `可重试失败`，方便查看文字稿已保存但摘要尚未发布的单集。
+- 完善 Notion-only 回填和发布检查，不重复调用 ASR、摘要模型或小宇宙。
+
+## 2026-07-31
+
+- AI 转写链路固定为：阿里云百炼 `paraformer-v1` → SiliconFlow 免费 ASR → GitHub Actions 本地 `faster-whisper small`。
+- 摘要、章节和思维导图固定使用 SiliconFlow 免费 `Qwen/Qwen3-8B`，失败后使用缓存的本地 `Qwen3-1.7B-Q4_K_M`。
+- 移除听悟网页 Cookie Provider、旧兼容路由和旧 AI 工作流入口。
+- 拆分“只转写”和“只增强”两条队列；每个阶段写回 Notion 检查点，失败恢复时不重复已经完成的 ASR 或摘要。
+- 日常 AI 链路改为事件驱动：元数据同步成功后触发转写，转写成功后触发增强；每两小时仅作为遗留文字稿的兜底检查。
+
+## 2026-07-29
+
+- 建立 Xyz2Notion 的自托管 GitHub Actions 工作流和 Notion 数据模型，支持 Refresh Token
+  认证、订阅、播放历史、进度和统计。
+- 建立 Episode、Podcast、Author、统计、文字稿、思维导图等数据库及主页展示视图，
+  并支持旧 Podcast2Notion 模板原地迁移。
+- 初始预览版曾使用通义听悟 Cookie 优先的 ASR 链路；该兼容链路已在 2026-07-31
+  移除，当前版本以百炼 Paraformer 为首选，详见后续条目和 README。
+- 增加小宇宙请求限速、数量上限、401/403/429 熔断、日志脱敏、检查点和 Notion
+  增量统计基线，降低账号风控与重复累计风险。
+
+## 维护约定
+
+- 新功能、工作流、数据结构或安全策略变更，先在本文件追加日期条目，再更新 README 中的最近版本摘要。
+- 只记录用户可感知的行为变化、迁移影响和安全边界，不记录 Token、Cookie、API Key、音频地址或节目正文。
