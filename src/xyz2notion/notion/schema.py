@@ -603,6 +603,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
                 {"property": "ASR Status", "select": {"equals": "已增强"}},
                 {"property": "ASR Status", "select": {"equals": "已发布"}},
                 {"property": "ASR Status", "select": {"equals": "可重试失败"}},
+                {"property": "ASR Status", "select": {"equals": "最终失败"}},
             ]
         },
         sorts=({"property": "转写完成时间", "direction": "descending"},),
@@ -629,10 +630,14 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         filter={
             "or": [
                 {"property": "增强状态", "select": {"equals": "已完成"}},
+                {"property": "增强状态", "select": {"equals": "可重试失败"}},
+                {"property": "增强状态", "select": {"equals": "最终失败"}},
                 # Keep already-published rows visible until the new property
                 # is backfilled by the Notion-only reconciliation pass.
                 {"property": "ASR Status", "select": {"equals": "已增强"}},
                 {"property": "ASR Status", "select": {"equals": "已发布"}},
+                {"property": "ASR Status", "select": {"equals": "可重试失败"}},
+                {"property": "ASR Status", "select": {"equals": "最终失败"}},
             ]
         },
         sorts=({"property": "总结完成时间", "direction": "descending"},),

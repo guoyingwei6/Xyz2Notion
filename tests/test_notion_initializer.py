@@ -394,8 +394,12 @@ def test_initializer_creates_complete_clean_room_template() -> None:
     assert mindmap_view["filter"] == {
         "or": [
             {"property": "增强状态", "select": {"equals": "已完成"}},
+            {"property": "增强状态", "select": {"equals": "可重试失败"}},
+            {"property": "增强状态", "select": {"equals": "最终失败"}},
             {"property": "ASR Status", "select": {"equals": "已增强"}},
             {"property": "ASR Status", "select": {"equals": "已发布"}},
+            {"property": "ASR Status", "select": {"equals": "可重试失败"}},
+            {"property": "ASR Status", "select": {"equals": "最终失败"}},
         ]
     }
     assert sum("create_database" in view for view in native_episode_views) == 1
@@ -407,6 +411,7 @@ def test_initializer_creates_complete_clean_room_template() -> None:
             {"property": "ASR Status", "select": {"equals": "已增强"}},
             {"property": "ASR Status", "select": {"equals": "已发布"}},
             {"property": "ASR Status", "select": {"equals": "可重试失败"}},
+            {"property": "ASR Status", "select": {"equals": "最终失败"}},
         ]
     }
 
@@ -884,8 +889,12 @@ def test_ai_views_are_separate_from_native_episode_status_tabs() -> None:
     assert mindmap.filter == {
         "or": [
             {"property": "增强状态", "select": {"equals": "已完成"}},
+            {"property": "增强状态", "select": {"equals": "可重试失败"}},
+            {"property": "增强状态", "select": {"equals": "最终失败"}},
             {"property": "ASR Status", "select": {"equals": "已增强"}},
             {"property": "ASR Status", "select": {"equals": "已发布"}},
+            {"property": "ASR Status", "select": {"equals": "可重试失败"}},
+            {"property": "ASR Status", "select": {"equals": "最终失败"}},
         ]
     }
     assert mindmap.sorts == ({"property": "总结完成时间", "direction": "descending"},)
