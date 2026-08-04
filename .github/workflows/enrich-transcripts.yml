@@ -21,7 +21,8 @@ on:
           - "2"
   schedule:
     - cron: "41 */2 * * *"
-  # Normal lane: start only after the ASR workflow completes successfully.
+  # Normal lane: start after ASR, with a periodic fallback for persisted transcripts
+  # that were left behind when the preceding ASR run consumed its bound.
   workflow_run:
     workflows: ["Transcribe Episode Queue"]
     types: [completed]
@@ -41,8 +42,7 @@ jobs:
         vars.XYZ2NOTION_ENRICHMENT_QUEUE_ENABLED == 'true' &&
         (
           (github.event_name == 'schedule' &&
-           github.event.schedule == '41 */2 * * *' &&
-           vars.XYZ2NOTION_ENRICHMENT_BACKLOG == 'true') ||
+           github.event.schedule == '41 */2 * * *') ||
           (github.event_name == 'workflow_run' &&
            github.event.workflow_run.conclusion == 'success' &&
            vars.XYZ2NOTION_ENRICHMENT_BACKLOG != 'true')
@@ -93,6 +93,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           SCHEDULE: ${{ github.event.schedule }}
+          BACKLOG_ENABLED: ${{ vars.XYZ2NOTION_ENRICHMENT_BACKLOG }}
           MANUAL_MODE: ${{ inputs.mode }}
           MANUAL_LIMIT: ${{ inputs.limit }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
@@ -107,7 +108,7 @@ jobs:
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             mode="${MANUAL_MODE:-backlog}"
             limit="${MANUAL_LIMIT:-2}"
-          elif [[ "$SCHEDULE" == "41 */2 * * *" ]]; then
+          elif [[ "$SCHEDULE" == "41 */2 * * *" && "$BACKLOG_ENABLED" == "true" ]]; then
             mode="backlog"
             limit="2"
           fi

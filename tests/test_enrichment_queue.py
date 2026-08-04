@@ -392,6 +392,8 @@ def test_enrichment_workflow_is_asr_free_cached_and_mode_gated() -> None:
     }
     assert "XYZ2NOTION_ENRICHMENT_QUEUE_ENABLED" in text
     assert "XYZ2NOTION_ENRICHMENT_BACKLOG" in text
+    assert "BACKLOG_ENABLED" in text
+    assert "github.event_name == 'schedule'" in text
     assert "TINGWU_COOKIE" not in text
     assert "XIAOYUZHOU_REFRESH_TOKEN" not in text
     assert "ffmpeg" not in text.lower()
