@@ -7,6 +7,8 @@
 ## Unreleased
 
 - 持续维护 README 的最近版本摘要和本文件的完整日期记录。
+- AI 总结与思维导图视图新增独立的 `增强状态`、`增强 Provider`，不再把 `ASR Status`
+  当作摘要状态；状态保存会记录实际使用的 SiliconFlow 或本地 Qwen 通道。
 
 ## 2026-08-04
 

@@ -528,6 +528,14 @@ def _run_published_ai_reconciliation(args: argparse.Namespace) -> int:
                                         "property": "总结完成时间",
                                         "date": {"is_empty": True},
                                     },
+                                    {
+                                        "property": "增强 Provider",
+                                        "rich_text": {"is_empty": True},
+                                    },
+                                    {
+                                        "property": "增强状态",
+                                        "select": {"is_empty": True},
+                                    },
                                 ]
                             },
                         ]

@@ -18,6 +18,7 @@ class StructuredSummaryClient(Protocol):
 
     models: tuple[str, ...]
     active_model: str | None
+    active_provider: str | None
 
     def close(self) -> None: ...
 
@@ -51,6 +52,7 @@ class FallbackSummaryClient:
             *fallback.models,
         )
         self.active_model: str | None = None
+        self.active_provider: str | None = None
 
     def close(self) -> None:
         for client in (self.primary, self.fallback):
@@ -86,6 +88,9 @@ class FallbackSummaryClient:
                 pass
             else:
                 self.active_model = self.primary.active_model or self.primary.models[0]
+                self.active_provider = (
+                    getattr(self.primary, "active_provider", None) or "siliconflow_summary"
+                )
                 return result
         result = self.fallback.generate_structured(
             model_type,
@@ -95,4 +100,7 @@ class FallbackSummaryClient:
             validator=validator,
         )
         self.active_model = self.fallback.active_model or self.fallback.models[0]
+        self.active_provider = (
+            getattr(self.fallback, "active_provider", None) or "local_qwen_summary"
+        )
         return result

@@ -10,7 +10,11 @@ from typing import Any, Protocol
 from xyz2notion.notion.client import JsonObject
 from xyz2notion.notion.episode_page import MANAGED_PREFIX
 from xyz2notion.notion.mindmap_database import MindmapDatabaseSynchronizer
-from xyz2notion.orchestration.state_store import EpisodeAIState
+from xyz2notion.orchestration.state_store import (
+    EpisodeAIState,
+    _enrichment_provider,
+    _enrichment_status,
+)
 
 
 class PublishedStateStore(Protocol):
@@ -117,6 +121,16 @@ class PublishedAIReconciler:
                 timestamps["总结完成时间"] = {
                     "date": {"start": state.summary.created_at.isoformat()}
                 }
+            # Backfill the independent enrichment metadata while reconciling
+            # legacy published pages.  ASR status remains an ASR-only field.
+            timestamps["增强 Provider"] = {
+                "rich_text": (
+                    [{"type": "text", "text": {"content": _enrichment_provider(state)}}]
+                    if _enrichment_provider(state)
+                    else []
+                )
+            }
+            timestamps["增强状态"] = {"select": {"name": _enrichment_status(state.record)}}
             if timestamps:
                 self.api.update_page(page_id, {"properties": timestamps})
             roots = self.api.list_block_children(page_id)

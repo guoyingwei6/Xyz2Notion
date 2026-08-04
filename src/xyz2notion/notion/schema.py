@@ -138,6 +138,13 @@ ASR_STATUS_OPTIONS = (
     ("可重试失败", "orange"),
     ("最终失败", "red"),
 )
+ENRICHMENT_STATUS_OPTIONS = (
+    ("未开始", "gray"),
+    ("待增强", "blue"),
+    ("已完成", "green"),
+    ("可重试失败", "orange"),
+    ("最终失败", "red"),
+)
 
 
 DATABASE_SPECS: tuple[DatabaseSpec, ...] = (
@@ -200,6 +207,8 @@ DATABASE_SPECS: tuple[DatabaseSpec, ...] = (
             "ASR Status": select_property(ASR_STATUS_OPTIONS),
             "ASR Quality": text_property(),
             "ASR Accuracy": number_property("percent"),
+            "增强 Provider": text_property(),
+            "增强状态": select_property(ENRICHMENT_STATUS_OPTIONS),
             "Failure Reason": text_property(),
             "Content Version": text_property(),
             "转写完成时间": {"date": {}},
@@ -626,9 +635,19 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         # Use Episode as the source so opening Name takes the user straight to
         # the episode page.  The standalone Mindmap database remains the
         # storage layer for Mermaid/JSON and full-text search.
-        visible_properties=("Name", "Podcast", "ASR Status", "总结完成时间", "Content Version"),
+        visible_properties=(
+            "Name",
+            "Podcast",
+            "增强状态",
+            "增强 Provider",
+            "总结完成时间",
+            "Content Version",
+        ),
         filter={
             "or": [
+                {"property": "增强状态", "select": {"equals": "已完成"}},
+                # Keep already-published rows visible until the new property
+                # is backfilled by the Notion-only reconciliation pass.
                 {"property": "ASR Status", "select": {"equals": "已增强"}},
                 {"property": "ASR Status", "select": {"equals": "已发布"}},
             ]

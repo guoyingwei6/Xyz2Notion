@@ -97,6 +97,7 @@ class LocalQwenSummaryClient:
     ) -> None:
         self.model_path = Path(model_path) if model_path is not None else _default_model_path()
         self.active_model: str | None = None
+        self.active_provider: str | None = "local_qwen_summary"
         self._model_factory = model_factory
         self._model: Any | None = None
         self._owns_client = client is None

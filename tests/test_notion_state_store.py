@@ -5,6 +5,8 @@ import pytest
 
 from xyz2notion.models import (
     MindmapNode,
+    ProviderErrorCategory,
+    ProviderFailure,
     SummaryResult,
     TranscriptResult,
 )
@@ -12,6 +14,10 @@ from xyz2notion.notion.client import NotionAPIError
 from xyz2notion.orchestration.state_store import (
     EpisodeAIState,
     NotionEpisodeStateStore,
+    _enrichment_provider,
+    _enrichment_status,
+    _file_url,
+    _summary_provider_name,
 )
 from xyz2notion.state import PipelineRecord, PipelineState
 
@@ -37,14 +43,20 @@ def full_state() -> EpisodeAIState:
         model="model",
         duration_ms=1,
         text="文字稿",
+        accuracy_hint=0.9,
     )
     summary = SummaryResult(
         summary="摘要",
         mindmap=MindmapNode(node_id="root", title="主题"),
         prompt_version="summary-v1",
         model="Qwen/Qwen3-8B",
+        provider="siliconflow_summary",
     )
-    record = PipelineRecord(eid="episode").transition(PipelineState.TRANSCRIBED)
+    record = (
+        PipelineRecord(eid="episode")
+        .transition(PipelineState.TRANSCRIBED)
+        .transition(PipelineState.ENRICHED)
+    )
     return EpisodeAIState(
         record=record,
         provider="siliconflow",
@@ -63,6 +75,139 @@ def page_with_state(url: str) -> dict[str, object]:
             }
         }
     }
+
+
+def test_enrichment_metadata_tracks_the_independent_pipeline() -> None:
+    assert _summary_provider_name(None) == ""
+    assert _enrichment_status(PipelineRecord(eid="discovered")) == "未开始"
+    transcribed = PipelineRecord(eid="transcribed").transition(PipelineState.TRANSCRIBED)
+    assert _enrichment_status(transcribed) == "待增强"
+    enriched = transcribed.transition(PipelineState.ENRICHED)
+    assert _enrichment_status(enriched) == "已完成"
+    assert _enrichment_status(enriched.transition(PipelineState.PUBLISHED)) == "已完成"
+
+    asr_retry = (
+        PipelineRecord(eid="asr-retry")
+        .transition(PipelineState.ASR_SUBMITTED)
+        .transition(PipelineState.ASR_RUNNING)
+        .transition(
+            PipelineState.FAILED_RETRYABLE,
+            failure=ProviderFailure(
+                provider="dashscope",
+                category=ProviderErrorCategory.TIMEOUT,
+                message="retry",
+            ),
+        )
+    )
+    assert _enrichment_status(asr_retry) == "未开始"
+
+    summary_retry = transcribed.transition(
+        PipelineState.FAILED_RETRYABLE,
+        failure=ProviderFailure(
+            provider="siliconflow_summary",
+            category=ProviderErrorCategory.TIMEOUT,
+            message="retry",
+        ),
+    )
+    assert _enrichment_status(summary_retry) == "可重试失败"
+    summary_final = transcribed.transition(
+        PipelineState.FAILED_FINAL,
+        failure=ProviderFailure(
+            provider="siliconflow_summary",
+            category=ProviderErrorCategory.SCHEMA_CHANGED,
+            message="invalid",
+        ),
+    )
+    assert _enrichment_status(summary_final) == "最终失败"
+    assert _enrichment_provider(EpisodeAIState(record=summary_final)) == ("siliconflow_summary")
+    assert _enrichment_provider(EpisodeAIState(record=asr_retry)) == ""
+    old_local = SummaryResult(
+        summary="摘要",
+        mindmap=MindmapNode(node_id="root", title="主题"),
+        prompt_version="v1",
+        model="local/Qwen3-1.7B-Q4_K_M",
+    )
+    assert _enrichment_provider(EpisodeAIState(record=enriched, summary=old_local)) == (
+        "local_qwen_summary"
+    )
+
+
+def test_state_file_url_parser_rejects_malformed_properties_and_accepts_external() -> None:
+    assert _file_url({}) is None
+    assert _file_url({"properties": {"AI State File": {}}}) is None
+    assert _file_url({"properties": {"AI State File": {"files": []}}}) is None
+    assert _file_url({"properties": {"AI State File": {"files": [{}]}}}) is None
+    assert _file_url({"properties": {"AI State File": {"files": [{"file": {}}]}}}) is None
+    assert (
+        _file_url(
+            {
+                "properties": {
+                    "AI State File": {
+                        "files": [{"external": {"url": "https://files.example/state.json"}}]
+                    }
+                }
+            }
+        )
+        == "https://files.example/state.json"
+    )
+    assert _file_url({"properties": {"AI State File": {"files": ["not-a-file"]}}}) is None
+
+
+def test_state_store_context_manager_closes_owned_client() -> None:
+    with NotionEpisodeStateStore(FakeAPI()):
+        pass
+
+
+def test_state_store_rejects_missing_redirect_location() -> None:
+    http = httpx.Client(transport=httpx.MockTransport(lambda _request: httpx.Response(302)))
+    with pytest.raises(NotionAPIError, match="no Location"):
+        NotionEpisodeStateStore(FakeAPI(), http_client=http).load(
+            page_with_state("https://files.example/state.json"),
+            "episode",
+        )
+
+
+def test_state_store_rejects_oversized_response_and_redirect_loop() -> None:
+    oversized = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(200, content=b"x" * (20 * 1024 * 1024 + 1))
+        )
+    )
+    with pytest.raises(NotionAPIError, match="exceeds 20 MiB"):
+        NotionEpisodeStateStore(FakeAPI(), http_client=oversized).load(
+            page_with_state("https://files.example/state.json"),
+            "episode",
+        )
+
+    loop = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                302,
+                headers={"Location": "https://files.example/state.json"},
+            )
+        )
+    )
+    with pytest.raises(NotionAPIError, match="redirect limit"):
+        NotionEpisodeStateStore(FakeAPI(), http_client=loop).load(
+            page_with_state("https://files.example/state.json"),
+            "episode",
+        )
+
+
+def test_state_store_save_handles_no_transcript_and_size_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    api = FakeAPI()
+    store = NotionEpisodeStateStore(
+        api,
+        http_client=httpx.Client(transport=httpx.MockTransport(lambda _request: None)),
+    )
+    saved = store.save("page", EpisodeAIState(record=PipelineRecord(eid="empty")))
+    assert saved.record.state is PipelineState.DISCOVERED
+    assert api.updates[-1][1]["properties"]["增强状态"]["select"]["name"] == "未开始"
+    monkeypatch.setattr("xyz2notion.orchestration.state_store.MAX_STATE_BYTES", 1)
+    with pytest.raises(NotionAPIError, match="exceeds 20 MiB"):
+        store.save("page", EpisodeAIState(record=PipelineRecord(eid="too-large")))
 
 
 def test_missing_state_file_initializes_discovered_record() -> None:
@@ -93,10 +238,14 @@ def test_save_uploads_private_json_then_switches_episode_property() -> None:
     page_id, raw_payload = api.updates[0]
     payload = raw_payload  # type: ignore[assignment]
     assert page_id == "page"
-    assert payload["properties"]["ASR Status"]["select"]["name"] == "已转写"
+    assert payload["properties"]["ASR Status"]["select"]["name"] == "已增强"
     assert payload["properties"]["ASR Provider"]["rich_text"][0]["text"]["content"] == (
         "siliconflow"
     )
+    assert payload["properties"]["增强 Provider"]["rich_text"][0]["text"]["content"] == (
+        "siliconflow_summary"
+    )
+    assert payload["properties"]["增强状态"]["select"]["name"] == "已完成"
     assert payload["properties"]["转写完成时间"]["date"]["start"] == (
         state.transcript.created_at.isoformat()  # type: ignore[union-attr]
     )

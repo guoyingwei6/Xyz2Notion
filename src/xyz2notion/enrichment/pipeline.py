@@ -104,6 +104,15 @@ def _provider_error(message: str) -> ProviderError:
     )
 
 
+def _active_summary_provider(client: StructuredSummaryClient, model: str) -> str:
+    """Return a stable provider label for the combined AI enrichment pass."""
+    provider = getattr(client, "active_provider", None)
+    if isinstance(provider, str) and provider.strip():
+        return provider.strip()
+    # Keep fakes and legacy clients useful while making old snapshots readable.
+    return "local_qwen_summary" if model.startswith("local/") else "siliconflow_summary"
+
+
 class TranscriptEnricher:
     """Generate a unified SummaryResult from any provider's transcript."""
 
@@ -191,6 +200,7 @@ class TranscriptEnricher:
                 transcript.duration_ms,
             )
             usage += call_usage
+        model = self.client.active_model or self.client.models[0]
         return SummaryResult(
             summary=payload.summary,
             chapters=payload.chapters,
@@ -201,7 +211,8 @@ class TranscriptEnricher:
             questions=payload.questions,
             mindmap=payload.mindmap,
             prompt_version=self.policy.prompt_version,
-            model=self.client.active_model or self.client.models[0],
+            model=model,
+            provider=_active_summary_provider(self.client, model),
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
             estimated_cost_cny=0,

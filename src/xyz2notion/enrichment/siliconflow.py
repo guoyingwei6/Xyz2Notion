@@ -112,6 +112,7 @@ class SiliconFlowSummaryClient:
         validate_credential_destination(SILICONFLOW_CHAT_URL, CredentialKind.SILICONFLOW)
         self.models = normalized_models
         self.active_model: str | None = None
+        self.active_provider: str | None = "siliconflow_summary"
         self.max_retries = max_retries
         self._sleep = sleep
         self._jitter = jitter

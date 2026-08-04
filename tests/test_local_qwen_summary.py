@@ -90,6 +90,7 @@ def test_local_qwen_generates_schema_constrained_json(
     assert value.summary == "本地摘要"
     assert usage == CompletionUsage(20, 10)
     assert client.active_model == LOCAL_QWEN_MODEL
+    assert client.active_provider == "local_qwen_summary"
     assert model.requests[0]["max_tokens"] == 8_192
     assert model.requests[0]["response_format"] == {
         "type": "json_object",
@@ -386,6 +387,7 @@ def test_fallback_client_uses_local_after_any_remote_provider_failure() -> None:
     )
     assert value.summary == "本地摘要"
     assert client.active_model == LOCAL_QWEN_MODEL
+    assert client.active_provider == "local_qwen_summary"
 
 
 def test_fallback_client_keeps_remote_success() -> None:
@@ -411,6 +413,7 @@ def test_fallback_client_keeps_remote_success() -> None:
     )
     assert value.summary == "远程成功"
     assert client.active_model == "Qwen/Qwen3-8B"
+    assert client.active_provider == "siliconflow_summary"
 
 
 def test_fallback_client_without_remote_and_context_cleanup() -> None:
@@ -433,4 +436,5 @@ def test_fallback_client_without_remote_and_context_cleanup() -> None:
         )
     assert value.summary == "本地摘要"
     assert client.active_model == LOCAL_QWEN_MODEL
+    assert client.active_provider == "local_qwen_summary"
     assert closed == [True]

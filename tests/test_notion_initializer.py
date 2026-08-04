@@ -315,6 +315,8 @@ def test_initializer_creates_complete_clean_room_template() -> None:
     assert episode_properties["Progress Ring"]["rich_text"] == {}
     assert episode_properties["Playlist Position"]["number"] == {"format": "number"}
     assert "ASR Provider" in episode_properties
+    assert "增强 Provider" in episode_properties
+    assert "增强状态" in episode_properties
     assert "Content Version" in episode_properties
     assert "转写完成时间" in episode_properties
     assert "总结完成时间" in episode_properties
@@ -402,6 +404,7 @@ def test_initializer_creates_complete_clean_room_template() -> None:
     assert mindmap_view["data_source_id"] == result.resources["episode"].data_source_id
     assert mindmap_view["filter"] == {
         "or": [
+            {"property": "增强状态", "select": {"equals": "已完成"}},
             {"property": "ASR Status", "select": {"equals": "已增强"}},
             {"property": "ASR Status", "select": {"equals": "已发布"}},
         ]
@@ -829,13 +832,15 @@ def test_ai_views_are_separate_from_native_episode_status_tabs() -> None:
     assert mindmap.visible_properties == (
         "Name",
         "Podcast",
-        "ASR Status",
+        "增强状态",
+        "增强 Provider",
         "总结完成时间",
         "Content Version",
     )
     assert mindmap.source == "episode"
     assert mindmap.filter == {
         "or": [
+            {"property": "增强状态", "select": {"equals": "已完成"}},
             {"property": "ASR Status", "select": {"equals": "已增强"}},
             {"property": "ASR Status", "select": {"equals": "已发布"}},
         ]

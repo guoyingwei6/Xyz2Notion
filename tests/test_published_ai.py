@@ -7,7 +7,7 @@ from xyz2notion.models import MindmapNode, SummaryResult, TranscriptResult
 from xyz2notion.notion.client import JsonObject
 from xyz2notion.notion.published_ai import PublishedAIReconciler
 from xyz2notion.orchestration.state_store import EpisodeAIState
-from xyz2notion.state import PipelineRecord
+from xyz2notion.state import PipelineRecord, PipelineState
 
 
 class FakeAPI:
@@ -51,7 +51,10 @@ class FakeAPI:
 class FakeStore:
     def load(self, _page: Mapping[str, Any], eid: str) -> EpisodeAIState:
         return EpisodeAIState(
-            record=PipelineRecord(eid=eid),
+            record=PipelineRecord(eid=eid)
+            .transition(PipelineState.TRANSCRIBED)
+            .transition(PipelineState.ENRICHED)
+            .transition(PipelineState.PUBLISHED),
             transcript=TranscriptResult(
                 provider="fixture",
                 provider_task_id="task",
@@ -64,6 +67,7 @@ class FakeStore:
                 mindmap=MindmapNode(node_id="root", title="主题"),
                 prompt_version="v1",
                 model="model",
+                provider="siliconflow_summary",
             ),
             content_version="hash",
         )
@@ -96,6 +100,11 @@ def test_published_ai_reconciliation_audits_and_backfills_one_row() -> None:
     timestamp_properties = api.updates[0][1]["properties"]
     assert "转写完成时间" in timestamp_properties
     assert "总结完成时间" in timestamp_properties
+    assert "增强 Provider" in timestamp_properties
+    assert timestamp_properties["增强 Provider"]["rich_text"][0]["text"]["content"] == (
+        "siliconflow_summary"
+    )
+    assert timestamp_properties["增强状态"]["select"]["name"] == "已完成"
 
 
 def test_published_ai_reconciliation_counts_invalid_and_incomplete_rows() -> None:

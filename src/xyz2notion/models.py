@@ -265,6 +265,9 @@ class SummaryResult(ContractModel):
     mindmap: MindmapNode
     prompt_version: NonEmptyStr
     model: NonEmptyStr
+    # Provider for the combined summary/chapters/mind-map enrichment pass.
+    # Keep a default so older Notion state snapshots remain readable.
+    provider: str = ""
     input_tokens: NonNegativeInt = 0
     output_tokens: NonNegativeInt = 0
     estimated_cost_cny: float = Field(default=0, ge=0)

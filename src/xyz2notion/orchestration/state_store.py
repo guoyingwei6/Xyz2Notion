@@ -58,6 +58,54 @@ _STATUS_NAMES = {
     PipelineState.FAILED_FINAL: "最终失败",
 }
 
+_ENRICHMENT_STATUS_NAMES = {
+    "not_started": "未开始",
+    "pending": "待增强",
+    "complete": "已完成",
+    "retryable": "可重试失败",
+    "final": "最终失败",
+}
+_SUMMARY_PROVIDER_NAMES = frozenset({"siliconflow_summary", "local_qwen_summary"})
+
+
+def _summary_provider_name(summary: SummaryResult | None) -> str:
+    """Return the persisted provider for summary, chapters, and mind-map output."""
+    if summary is None:
+        return ""
+    if summary.provider.strip():
+        return summary.provider.strip()
+    # Old snapshots predate the provider field; infer only from their model.
+    return "local_qwen_summary" if summary.model.startswith("local/") else "siliconflow_summary"
+
+
+def _enrichment_status(record: PipelineRecord) -> str:
+    """Map the pipeline checkpoint to the independent AI enrichment status."""
+    if record.state in {PipelineState.ENRICHED, PipelineState.PUBLISHED}:
+        return _ENRICHMENT_STATUS_NAMES["complete"]
+    if record.state is PipelineState.TRANSCRIBED:
+        return _ENRICHMENT_STATUS_NAMES["pending"]
+    if record.state is PipelineState.FAILED_RETRYABLE:
+        if record.resume_state in {PipelineState.TRANSCRIBED, PipelineState.ENRICHED}:
+            return _ENRICHMENT_STATUS_NAMES["retryable"]
+        return _ENRICHMENT_STATUS_NAMES["not_started"]
+    if (
+        record.state is PipelineState.FAILED_FINAL
+        and record.failure is not None
+        and record.failure.provider in _SUMMARY_PROVIDER_NAMES | {"notion_publish"}
+    ):
+        return _ENRICHMENT_STATUS_NAMES["final"]
+    return _ENRICHMENT_STATUS_NAMES["not_started"]
+
+
+def _enrichment_provider(state: EpisodeAIState) -> str:
+    provider = _summary_provider_name(state.summary)
+    if provider:
+        return provider
+    failure = state.record.failure
+    if failure is not None and failure.provider in _SUMMARY_PROVIDER_NAMES:
+        return failure.provider
+    return ""
+
 
 def _file_url(page: Mapping[str, Any]) -> str | None:
     properties = page.get("properties")
@@ -162,6 +210,8 @@ class NotionEpisodeStateStore:
                 "rich_text": rich_text(failure.message[:2000] if failure is not None else "")
             },
             "Content Version": {"rich_text": rich_text(revised.content_version or "")},
+            "增强 Provider": {"rich_text": rich_text(_enrichment_provider(revised))},
+            "增强状态": {"select": {"name": _enrichment_status(revised.record)}},
         }
         if revised.transcript is not None:
             properties["ASR Model"] = {"rich_text": rich_text(revised.transcript.model)}

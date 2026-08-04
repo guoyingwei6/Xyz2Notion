@@ -80,6 +80,7 @@ def test_single_chunk_generates_complete_result_and_cost() -> None:
     assert result.output_tokens == 20
     assert result.estimated_cost_cny == 0
     assert result.model == "Qwen/Qwen3-8B"
+    assert result.provider == "siliconflow_summary"
     assert result.prompt_version == "summary-v1"
 
 

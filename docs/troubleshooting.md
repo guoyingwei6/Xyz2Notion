@@ -2,9 +2,9 @@
 
 ## 先看哪里
 
-Actions 摘要只显示聚合数量。具体单集状态在 Notion Episode 的 `ASR Status`、
-`ASR Provider`、`Failure Reason` 和 `AI State File`。不要为了排错打印 Secret、
-完整请求头或服务商响应正文。
+Actions 摘要只显示聚合数量。转写状态在 Notion Episode 的 `ASR Status`、`ASR Provider`，
+摘要/章节/思维导图状态在 `增强状态`、`增强 Provider`；检查点仍在 `Failure Reason` 和
+`AI State File`。不要为了排错打印 Secret、完整请求头或服务商响应正文。
 
 ## 常见问题
 

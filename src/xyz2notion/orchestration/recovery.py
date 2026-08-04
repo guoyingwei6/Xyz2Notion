@@ -61,6 +61,8 @@ def reset_episode_ai(
                 "ASR Status": {"select": {"name": "待处理"}},
                 "ASR Quality": {"rich_text": []},
                 "ASR Accuracy": {"number": None},
+                "增强 Provider": {"rich_text": []},
+                "增强状态": {"select": {"name": "未开始"}},
                 "Failure Reason": {"rich_text": []},
                 "Content Version": {"rich_text": []},
             }
