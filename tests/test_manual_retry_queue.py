@@ -58,6 +58,57 @@ def episode(
     }
 
 
+def normal_state(eid: str, target: PipelineState) -> EpisodeAIState:
+    record = PipelineRecord(eid=eid)
+    path = {
+        PipelineState.DISCOVERED: (),
+        PipelineState.ASR_SUBMITTED: (PipelineState.ASR_SUBMITTED,),
+        PipelineState.ASR_RUNNING: (
+            PipelineState.ASR_SUBMITTED,
+            PipelineState.ASR_RUNNING,
+        ),
+        PipelineState.TRANSCRIBED: (
+            PipelineState.ASR_SUBMITTED,
+            PipelineState.ASR_RUNNING,
+            PipelineState.TRANSCRIBED,
+        ),
+        PipelineState.ENRICHED: (
+            PipelineState.ASR_SUBMITTED,
+            PipelineState.ASR_RUNNING,
+            PipelineState.TRANSCRIBED,
+            PipelineState.ENRICHED,
+        ),
+    }[target]
+    for state in path:
+        record = record.transition(state)
+    transcript_result = (
+        TranscriptResult(
+            provider="siliconflow",
+            provider_task_id="task",
+            model="model",
+            duration_ms=1,
+            text="text",
+        )
+        if target
+        in {
+            PipelineState.TRANSCRIBED,
+            PipelineState.ENRICHED,
+        }
+        else None
+    )
+    summary = (
+        SummaryResult(
+            summary="summary",
+            mindmap=MindmapNode(node_id="root", title="root"),
+            prompt_version="v1",
+            model="model",
+        )
+        if target is PipelineState.ENRICHED
+        else None
+    )
+    return EpisodeAIState(record=record, transcript=transcript_result, summary=summary)
+
+
 class Store:
     def __init__(self, states: Mapping[str, EpisodeAIState]) -> None:
         self.states = states
@@ -116,6 +167,45 @@ def test_manual_retry_selection_is_checked_and_category_ordered() -> None:
     assert all(manual_retry_requested(item.page) for item in selected)
 
 
+def test_manual_retry_selection_includes_normal_checkpoints_and_unplayed_rows() -> None:
+    pages = [
+        episode("to-listen"),
+        episode("heard", played_seconds=120),
+        episode("liked", liked=True),
+        episode("favorite", favorite=True),
+        episode("published"),
+    ]
+    states = {
+        "to-listen": normal_state("to-listen", PipelineState.DISCOVERED),
+        "heard": normal_state("heard", PipelineState.ENRICHED),
+        "liked": normal_state("liked", PipelineState.TRANSCRIBED),
+        "favorite": normal_state("favorite", PipelineState.ASR_RUNNING),
+        "published": EpisodeAIState(
+            record=PipelineRecord(eid="published")
+            .transition(PipelineState.ASR_SUBMITTED)
+            .transition(PipelineState.ASR_RUNNING)
+            .transition(PipelineState.TRANSCRIBED)
+            .transition(PipelineState.ENRICHED)
+            .transition(PipelineState.PUBLISHED),
+        ),
+    }
+    selected = select_manual_retry_work(pages, Store(states))
+    assert [item.candidate.page_id for item in selected] == [
+        "favorite",
+        "liked",
+        "heard",
+        "to-listen",
+        "published",
+    ]
+    assert [item.state.record.state for item in selected] == [
+        PipelineState.ASR_RUNNING,
+        PipelineState.TRANSCRIBED,
+        PipelineState.ENRICHED,
+        PipelineState.DISCOVERED,
+        PipelineState.PUBLISHED,
+    ]
+
+
 def test_manual_retry_target_uses_existing_checkpoints() -> None:
     assert manual_reopen_target(final_state("asr")) is PipelineState.DISCOVERED
     assert (
@@ -154,12 +244,14 @@ def test_manual_retry_selection_skips_unsafe_or_incomplete_rows() -> None:
     no_id = episode("no-id")
     no_id.pop("id")
     no_candidate = episode("no-candidate", played_seconds=0)
+    no_candidate["properties"]["Skip AI"] = {"checkbox": True}  # type: ignore[index]
     retry_without_resume = episode("retry-without-resume", played_seconds=120)
     retry_without_resume["properties"]["ASR Status"] = {  # type: ignore[index]
         "select": {"name": "可重试失败"}
     }
     final_without_failure = episode("final-without-failure", played_seconds=120)
     published = episode("published", played_seconds=120)
+    published["properties"]["Skip AI"] = {"checkbox": True}  # type: ignore[index]
 
     class StoreWithGaps(Store):
         def load(self, page: Mapping[str, object], eid: str) -> EpisodeAIState:
@@ -346,6 +438,8 @@ def test_run_manual_retry_queue_is_manual_first_and_stage_aware(
             retry_failed: bool = False,
         ) -> ProcessingOutcome:
             calls.append((candidate.page_id, retry_failed))
+            if candidate.page_id == "retry-liked":
+                return ProcessingOutcome(candidate.eid, "pending", PipelineState.ASR_RUNNING)
             return ProcessingOutcome(candidate.eid, "published", PipelineState.PUBLISHED)
 
     monkeypatch.setattr(queue_module, "load_config", lambda _path: AppConfig())
@@ -378,11 +472,11 @@ def test_run_manual_retry_queue_is_manual_first_and_stage_aware(
     assert calls == [("final-favorite", False), ("retry-liked", True)]
     assert notion.retrieved == ["final-favorite"]
     assert state_context.saved == ["final-favorite"]
-    assert state_context.cleared == ["final-favorite", "retry-liked"]
+    assert state_context.cleared == ["final-favorite"]
     assert sleeps == [MANUAL_RETRY_INTER_EPISODE_SECONDS]
     assert built_kwargs["provider_kwargs"]
     assert result.selected == 2
     assert result.remaining == 0
-    assert result.actions == {"published": 2}
-    assert result.states == {"PUBLISHED": 2}
+    assert result.actions == {"pending": 1, "published": 1}
+    assert result.states == {"ASR_RUNNING": 1, "PUBLISHED": 1}
     assert result.categories == {"favorite": 1, "liked": 1}

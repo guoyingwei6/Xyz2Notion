@@ -141,11 +141,14 @@ def episode_candidates(
     pages: list[JsonObject],
     *,
     include_final: bool = False,
+    manual_override: bool = False,
 ) -> tuple[EpisodeCandidate, ...]:
     """Extract processable rows without exposing titles in logs.
 
     Final failures stay out of every ordinary queue.  The explicit manual
-    retry queue may opt in to them after reopening the persisted checkpoint.
+    queue may opt in to them after reopening the persisted checkpoint. A
+    checked manual request can also bypass the automatic 120-second/favorite/
+    liked candidate gate while keeping the explicit ``Skip AI`` opt-out.
     """
     result: list[EpisodeCandidate] = []
     for page in pages:
@@ -164,7 +167,7 @@ def episode_candidates(
             eid
             and title
             and audio_url
-            and (played_seconds >= 120 or favorited or liked)
+            and (manual_override or played_seconds >= 120 or favorited or liked)
             and not skip_ai
             and (include_final or asr_status not in {"已发布", "最终失败"})
         ):
@@ -289,6 +292,40 @@ class EpisodeAIProcessor:
         state: EpisodeAIState,
     ) -> tuple[EpisodeAIState, bool]:
         """Return updated state and whether the task is still asynchronous."""
+        if state.record.state in {
+            PipelineState.ASR_SUBMITTED,
+            PipelineState.ASR_RUNNING,
+        }:
+            # A persisted remote task is already billable.  Only poll that
+            # exact task; never create a second submission for a manual
+            # priority request or a retry queue run.  Legacy checkpoints that
+            # lack a task id remain pending until an explicit repair can
+            # establish a safe resume point.
+            if (
+                state.provider == "dashscope"
+                and state.provider_task_id
+                and self.dashscope is not None
+            ):
+                result_url = self.dashscope.wait_result_url(state.provider_task_id)
+                transcript = self.dashscope.fetch_transcript(
+                    result_url,
+                    task_id=state.provider_task_id,
+                )
+                record = state.record.transition(PipelineState.TRANSCRIBED)
+                return (
+                    state.model_copy(
+                        update={
+                            "record": record,
+                            "provider": transcript.provider,
+                            "provider_task_id": transcript.provider_task_id,
+                            "transcript": transcript,
+                            "summary": None,
+                        }
+                    ),
+                    False,
+                )
+            return state, True
+
         if state.provider in {None, "dashscope"} and self.dashscope is not None:
             try:
                 transcript = self._dashscope(candidate)

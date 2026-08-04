@@ -35,6 +35,9 @@ from xyz2notion.state import PipelineState
 MANUAL_RETRY_PROPERTY = "人工请求重试"
 MANUAL_RETRY_LIMIT = 2
 MANUAL_RETRY_INTER_EPISODE_SECONDS = 60
+_MANUAL_REQUEST_INCOMPLETE_ACTIONS = frozenset(
+    {"pending", "paused", "waiting_summary_key", "summary_paused"}
+)
 
 
 class ManualRetryStateStore(Protocol):
@@ -103,6 +106,7 @@ def _manual_item_sort_key(item: ManualRetryItem) -> tuple[int, int, str]:
     stage_priority = {
         PipelineState.FAILED_RETRYABLE: 0,
         PipelineState.FAILED_FINAL: 1,
+        PipelineState.PUBLISHED: 3,
     }
     return (
         ai_category_priority(item.page),
@@ -117,12 +121,22 @@ def select_manual_retry_work(
     *,
     limit: int | None = None,
 ) -> tuple[ManualRetryItem, ...]:
-    """Select checked failed rows in favorite→liked→heard→listening→to-listen order."""
+    """Select checked rows in favorite→liked→heard→listening→to-listen order.
+
+    The checkbox is an explicit priority request, not merely a way to reopen
+    failures. Normal checkpoints go through the same processor unchanged;
+    failed checkpoints resume from their persisted stage, and published rows
+    are selected only so a stale checkbox can be cleared safely.
+    """
     found: list[ManualRetryItem] = []
     for page in pages:
         if not manual_retry_requested(page) or not page.get("id"):
             continue
-        candidates = episode_candidates([page], include_final=True)
+        candidates = episode_candidates(
+            [page],
+            include_final=True,
+            manual_override=True,
+        )
         if not candidates:
             continue
         candidate = candidates[0]
@@ -132,15 +146,10 @@ def select_manual_retry_work(
             # A broken state file is not safe to reopen; leave the checkbox for
             # a later audit instead of silently restarting ASR.
             continue
-        if state.record.state not in {
-            PipelineState.FAILED_RETRYABLE,
-            PipelineState.FAILED_FINAL,
-        }:
-            continue
         if state.record.state is PipelineState.FAILED_RETRYABLE:
             if state.record.resume_state is None:
                 continue
-        elif state.record.failure is None:
+        elif state.record.state is PipelineState.FAILED_FINAL and state.record.failure is None:
             continue
         found.append(ManualRetryItem(candidate, page, state))
     found.sort(key=_manual_item_sort_key)
@@ -170,7 +179,7 @@ def run_manual_retry_queue(
     requested_limit: int | None = None,
     page_id_override: str | None = None,
 ) -> ManualRetryQueueResult:
-    """Process checked rows, reopening final failures from the exact stage."""
+    """Process checked rows, reopening failures from the exact stage."""
     config = load_config(config_path)
     if not config.summary.enabled:
         raise ConfigurationError("summary.enabled must be true for manual retries")
@@ -250,9 +259,11 @@ def run_manual_retry_queue(
                 page,
                 retry_failed=item.retry_failed,
             )
-            # Consume the request even when the retry fails again; the regular
-            # retry queue will then handle its new FAILED_RETRYABLE checkpoint.
-            state_store.clear_manual_retry(item.candidate.page_id)
+            # Keep the request while an asynchronous/incomplete checkpoint is
+            # still waiting. Once a processing attempt finishes (including a
+            # new retryable failure), the ordinary queue owns the next retry.
+            if outcome.action not in _MANUAL_REQUEST_INCOMPLETE_ACTIONS:
+                state_store.clear_manual_retry(item.candidate.page_id)
             outcomes.append(outcome)
 
     actions = Counter(outcome.action for outcome in outcomes)

@@ -114,6 +114,53 @@ def test_asr_only_processor_pauses_without_any_provider() -> None:
     assert store.saved == []
 
 
+def test_inflight_dashscope_checkpoint_is_polled_without_resubmission() -> None:
+    record = (
+        PipelineRecord(eid="episode")
+        .transition(PipelineState.ASR_SUBMITTED)
+        .transition(PipelineState.ASR_RUNNING)
+    )
+    store = _StateStore(
+        EpisodeAIState(
+            record=record,
+            provider="dashscope",
+            provider_task_id="existing-task",
+        )
+    )
+    calls: list[str] = []
+
+    class ExistingTask:
+        def wait_result_url(self, task_id: str) -> str:
+            calls.append(f"poll:{task_id}")
+            return "https://dashscope.example/result.json"
+
+        def fetch_transcript(self, url: str, *, task_id: str) -> TranscriptResult:
+            calls.append(f"fetch:{task_id}:{url}")
+            return TranscriptResult(
+                provider="dashscope",
+                provider_task_id=task_id,
+                model="paraformer-v1",
+                duration_ms=1_000,
+                text="文字稿",
+                segments=(TranscriptSegment(start_ms=0, end_ms=1_000, text="文字稿"),),
+                timing_quality=TranscriptTimingQuality.EXACT,
+            )
+
+    outcome = EpisodeAIProcessor(
+        object(),
+        store,
+        dashscope=ExistingTask(),  # type: ignore[arg-type]
+    ).process(CANDIDATE, {})
+
+    assert outcome.action == "waiting_summary_key"
+    assert outcome.state is PipelineState.TRANSCRIBED
+    assert calls == [
+        "poll:existing-task",
+        "fetch:existing-task:https://dashscope.example/result.json",
+    ]
+    assert store.state.record.state is PipelineState.TRANSCRIBED
+
+
 def test_asr_only_retry_resumes_only_the_failed_asr_checkpoint() -> None:
     store = _StateStore(EpisodeAIState(record=PipelineRecord(eid="episode")))
 
