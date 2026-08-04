@@ -12,6 +12,34 @@ Xyz2Notion 是一个完全自托管的播客工作流：用 GitHub Actions 从�
 - **事件驱动队列**：元数据同步成功后接续转写，转写完成后立即接续摘要与思维导图；失败任务按检查点恢复，Notion 可勾选 `人工请求重试` 提升单集优先级。
 - **安全与自主可控**：全部运行在自己的 GitHub Actions 和 Notion 中，不依赖作者服务器、NotionHub 插件或付费激活服务；小宇宙请求具有限速、数量上限和 401/403/429 熔断保护。
 
+## 预览
+
+下面是当前 Notion 页面和主要视图的实际效果：
+
+### Notion 主页
+
+<img src="docs/images/preview/notion-home.png" alt="Notion 主页预览" width="100%">
+
+### 收听统计
+
+<img src="docs/images/preview/listening-overview.png" alt="收听统计预览" width="100%">
+
+### Podcast 排行
+
+<img src="docs/images/preview/podcast-ranking.png" alt="Podcast 排行预览" width="100%">
+
+### Episode 状态视图
+
+<img src="docs/images/preview/episode-to-listen.png" alt="Episode 待听视图预览" width="100%">
+
+<img src="docs/images/preview/episode-favorites.png" alt="Episode 收藏视图预览" width="100%">
+
+### 转写与 AI 增强
+
+<img src="docs/images/preview/transcripts.png" alt="转写文本视图预览" width="100%">
+
+<img src="docs/images/preview/ai-summary-mindmap.png" alt="AI 总结与思维导图视图预览" width="100%">
+
 ## 三步开始
 
 ### 1. Fork 并配置凭证
