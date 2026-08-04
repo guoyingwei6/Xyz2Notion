@@ -1,18 +1,10 @@
-name: Enrich Transcribed Episodes
+name: Retry Failed Episode AI
 
 on:
   workflow_dispatch:
     inputs:
-      mode:
-        description: "backlog: at most 2; normal: at most 2"
-        required: true
-        default: "backlog"
-        type: choice
-        options:
-          - backlog
-          - normal
       limit:
-        description: "Requested bound; the selected mode applies its stricter cap"
+        description: "Maximum failed items per stage"
         required: true
         default: "2"
         type: choice
@@ -20,12 +12,8 @@ on:
           - "1"
           - "2"
   schedule:
-    - cron: "41 */2 * * *"
-  # Normal lane: start after ASR, with a periodic fallback for persisted transcripts
-  # that were left behind when the preceding ASR run consumed its bound.
-  workflow_run:
-    workflows: ["Transcribe Episode Queue", "Retry Failed Episode AI"]
-    types: [completed]
+    # Retry only persisted `可重试失败` checkpoints; never select normal work.
+    - cron: "53 */2 * * *"
 
 permissions:
   contents: read
@@ -35,18 +23,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  enrich:
+  retry:
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (
-        vars.XYZ2NOTION_ENRICHMENT_QUEUE_ENABLED == 'true' &&
-        (
-          (github.event_name == 'schedule' &&
-           github.event.schedule == '41 */2 * * *') ||
-          (github.event_name == 'workflow_run' &&
-           github.event.workflow_run.conclusion == 'success')
-        )
-      )
+      vars.ASR_QUEUE_ENABLED == 'true' ||
+      vars.XYZ2NOTION_ENRICHMENT_QUEUE_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
@@ -58,18 +39,21 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Cache local summary runtime and model
+      - name: Cache AI dependencies and local fallback models
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cache/uv
+            ~/.cache/huggingface
             ~/.cache/xyz2notion
-          key: local-summary-${{ runner.os }}-py312-qwen3-1.7b-q4km-${{ hashFiles('uv.lock') }}
+          key: retry-ai-${{ runner.os }}-py312-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            local-summary-${{ runner.os }}-py312-qwen3-1.7b-q4km-
+            retry-ai-${{ runner.os }}-py312-
 
-      - name: Install locked application and cached local summary runtime
+      - name: Install FFmpeg, locked application, and cached summary runtime
         run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
           python -m pip install uv==0.9.28
           uv sync --locked
           runtime_dir="$HOME/.cache/xyz2notion/runtime"
@@ -88,40 +72,40 @@ jobs:
           fi
           uv pip install --python .venv/bin/python "$runtime_wheel"
 
-      - name: Enrich persisted transcripts only
+      - name: Retry failed ASR checkpoints only
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          SCHEDULE: ${{ github.event.schedule }}
-          BACKLOG_ENABLED: ${{ vars.XYZ2NOTION_ENRICHMENT_BACKLOG }}
-          MANUAL_MODE: ${{ inputs.mode }}
-          MANUAL_LIMIT: ${{ inputs.limit }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
+          RETRY_LIMIT: ${{ inputs.limit }}
         run: |
           set -euo pipefail
           config_path="config.yaml"
           if [[ ! -f "$config_path" ]]; then config_path="config.example.yaml"; fi
-          mode="normal"
-          limit="2"
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            mode="${MANUAL_MODE:-backlog}"
-            limit="${MANUAL_LIMIT:-2}"
-          elif [[ "$SCHEDULE" == "41 */2 * * *" && "$BACKLOG_ENABLED" == "true" ]]; then
-            mode="backlog"
-            limit="2"
-          elif [[ "$EVENT_NAME" == "workflow_run" && "$BACKLOG_ENABLED" == "true" ]]; then
-            mode="backlog"
-            limit="2"
-          fi
-          result="$(
-            uv run python -m xyz2notion.orchestration.enrichment_queue \
-              --config "$config_path" \
-              --mode "$mode" \
-              --limit "$limit"
-          )"
+          result="$(uv run xyz2notion process-asr \
+            --config "$config_path" --mode retry --limit "${RETRY_LIMIT:-2}")"
           printf '%s\n' "$result"
           {
-            printf '## Xyz2Notion transcript enrichment\n\n'
+            printf '## Xyz2Notion failed ASR retry\n\n'
+            printf '```text\n%s\n```\n' "$result"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Retry failed enrichment checkpoints only
+        if: vars.XYZ2NOTION_ENRICHMENT_QUEUE_ENABLED == 'true'
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
+          SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
+          RETRY_LIMIT: ${{ inputs.limit }}
+        run: |
+          set -euo pipefail
+          config_path="config.yaml"
+          if [[ ! -f "$config_path" ]]; then config_path="config.example.yaml"; fi
+          result="$(uv run python -m xyz2notion.orchestration.enrichment_queue \
+            --config "$config_path" --mode retry --limit "${RETRY_LIMIT:-2}")"
+          printf '%s\n' "$result"
+          {
+            printf '## Xyz2Notion failed enrichment retry\n\n'
             printf '```text\n%s\n```\n' "$result"
           } >> "$GITHUB_STEP_SUMMARY"

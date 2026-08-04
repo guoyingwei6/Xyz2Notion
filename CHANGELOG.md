@@ -18,6 +18,10 @@
 - 五个 Episode 视图统一显示顺序：`Name → Podcast → Listening Status → ASR Status → Progress Ring → Published At`。
 - AI 总结与思维导图的 `Name` 直接使用 Episode 标题；隐藏重复的 `Episode` 关系列，但保留底层关系用于完整性检查和跳转。
 - AI 候选与增强队列统一按“收藏 → 喜欢 → 听过 → 在听 → 待听”排序，并只输出安全的类别聚合计数。
+- 新增 `Retry Failed Episode AI` 独立失败队列：每两小时只选择 `可重试失败`，按保存的
+  `resume_state` 分流到 ASR 或增强阶段，每阶段最多 2 期，不会抢占普通候选。
+- `Enrich Transcribed Episodes` 现在同时监听转写队列和失败队列成功事件；ASR 成功后立即
+  接续摘要、章节、思维导图和 Notion 发布，不再依赖下一次固定时间窗口。
 
 ## 2026-08-03
 

@@ -166,6 +166,8 @@ def test_process_asr_cli_enforces_bounded_modes_and_limits() -> None:
     args = parser.parse_args(["process-asr", "--mode", "backlog", "--limit", "2"])
     assert args.mode == "backlog"
     assert args.limit == 2
+    retry_args = parser.parse_args(["process-asr", "--mode", "retry", "--limit", "2"])
+    assert retry_args.mode == "retry"
     assert ASR_INTER_EPISODE_SECONDS == 60
     with pytest.raises(SystemExit):
         parser.parse_args(["process-asr", "--limit", "3"])

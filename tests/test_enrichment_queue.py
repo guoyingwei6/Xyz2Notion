@@ -19,6 +19,7 @@ from xyz2notion.orchestration import enrichment_queue as queue_module
 from xyz2notion.orchestration.enrichment_queue import (
     BACKLOG_LIMIT,
     NORMAL_LIMIT,
+    RETRY_LIMIT,
     EnrichmentQueueResult,
     process_enrichment_pass,
     resolve_queue_limit,
@@ -194,6 +195,25 @@ def test_enrichment_pass_retries_only_explicit_stage_safe_rows() -> None:
     assert processor.calls == [("retryable", True)]
     assert result.selected == 1
     assert result.remaining == 1
+
+
+def test_retry_mode_excludes_normal_transcripts() -> None:
+    pages = [
+        episode("retryable", status="可重试失败"),
+        episode("fresh", status="已转写"),
+    ]
+    selected = select_enrichment_work(
+        pages,
+        limit=10,
+        retryable_page_ids=("retryable",),
+        only_retryable=True,
+    )
+    assert [candidate.page_id for candidate, _page in selected] == ["retryable"]
+
+
+def test_retry_queue_mode_has_same_safe_cap() -> None:
+    assert resolve_queue_limit("retry") == RETRY_LIMIT == 2
+    assert resolve_queue_limit("retry", 99) == RETRY_LIMIT
 
 
 def test_queue_modes_apply_strict_caps() -> None:
@@ -421,7 +441,7 @@ def test_enrichment_workflow_is_asr_free_cached_and_mode_gated() -> None:
         {"cron": "41 */2 * * *"},
     ]
     assert workflow[True]["workflow_run"] == {
-        "workflows": ["Transcribe Episode Queue"],
+        "workflows": ["Transcribe Episode Queue", "Retry Failed Episode AI"],
         "types": ["completed"],
     }
     assert "XYZ2NOTION_ENRICHMENT_QUEUE_ENABLED" in text

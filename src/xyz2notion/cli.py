@@ -178,9 +178,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     process_asr.add_argument(
         "--mode",
-        choices=("backlog", "incremental"),
+        choices=("backlog", "incremental", "retry"),
         default="incremental",
-        help="label this run as one-time backlog drain or normal daily increment",
+        help="label this run as backlog, normal increment, or retry-only",
     )
     repair_covers = subparsers.add_parser(
         "repair-notion-covers",
@@ -371,13 +371,19 @@ def _run_asr_queue(args: argparse.Namespace) -> int:
             )
             state_store = stack.enter_context(NotionEpisodeStateStore(notion))
             retryable_asr_ids = _retryable_asr_page_ids(pages, state_store)
-            eligible_pages = sorted(
-                [
-                    *(_asr_queue_pages(pages)),
-                    *[page for page in pages if str(page.get("id") or "") in retryable_asr_ids],
-                ],
-                key=_ai_page_priority,
-            )
+            if args.mode == "retry":
+                eligible_pages = sorted(
+                    [page for page in pages if str(page.get("id") or "") in retryable_asr_ids],
+                    key=_ai_page_priority,
+                )
+            else:
+                eligible_pages = sorted(
+                    [
+                        *(_asr_queue_pages(pages)),
+                        *[page for page in pages if str(page.get("id") or "") in retryable_asr_ids],
+                    ],
+                    key=_ai_page_priority,
+                )
             all_candidates = episode_candidates(eligible_pages)
             candidates = all_candidates[: args.limit]
             dashscope, siliconflow, local_whisper, _summary_client = build_provider_clients(

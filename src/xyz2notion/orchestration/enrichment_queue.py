@@ -38,6 +38,7 @@ from xyz2notion.state import PipelineState
 
 BACKLOG_LIMIT = 2
 NORMAL_LIMIT = 2
+RETRY_LIMIT = 2
 ENRICHMENT_STATUSES = frozenset({"已转写", "已增强"})
 RETRYABLE_STATUS = "可重试失败"
 RETRYABLE_ENRICHMENT_STATES = frozenset({PipelineState.TRANSCRIBED, PipelineState.ENRICHED})
@@ -99,8 +100,14 @@ def _episode_status(page: Mapping[str, object]) -> str:
 
 
 def resolve_queue_limit(mode: str, requested: int | None = None) -> int:
-    """Keep backlog and normal passes deliberately small."""
-    maximum = BACKLOG_LIMIT if mode == "backlog" else NORMAL_LIMIT
+    """Keep backlog, normal, and retry passes deliberately small."""
+    maximum = {
+        "backlog": BACKLOG_LIMIT,
+        "normal": NORMAL_LIMIT,
+        "retry": RETRY_LIMIT,
+    }.get(mode)
+    if maximum is None:
+        raise ValueError(f"unknown enrichment queue mode: {mode}")
     if requested is None:
         return maximum
     if requested < 1:
@@ -113,6 +120,7 @@ def select_enrichment_work(
     *,
     limit: int,
     retryable_page_ids: Sequence[str] = (),
+    only_retryable: bool = False,
 ) -> tuple[tuple[EpisodeCandidate, JsonObject], ...]:
     """Select persisted transcript/publish checkpoints and stage-safe retries."""
     retryable_ids = set(retryable_page_ids)
@@ -120,8 +128,12 @@ def select_enrichment_work(
         (
             page
             for page in pages
-            if _episode_status(page) in ENRICHMENT_STATUSES
-            or str(page.get("id") or "") in retryable_ids
+            if (
+                str(page.get("id") or "") in retryable_ids
+                if only_retryable
+                else _episode_status(page) in ENRICHMENT_STATUSES
+                or str(page.get("id") or "") in retryable_ids
+            )
         ),
         key=lambda page: (
             ai_category_priority(page),
@@ -147,6 +159,7 @@ def process_enrichment_pass(
     *,
     limit: int,
     retryable_page_ids: Sequence[str] = (),
+    only_retryable: bool = False,
 ) -> EnrichmentQueueResult:
     """Advance a bounded transcript-only queue pass with aggregate-only output."""
     retryable_ids = set(retryable_page_ids)
@@ -154,6 +167,7 @@ def process_enrichment_pass(
         pages,
         limit=max(1, len(pages)),
         retryable_page_ids=tuple(retryable_ids),
+        only_retryable=only_retryable,
     )
     selected = all_work[:limit]
     outcomes = [
@@ -263,6 +277,7 @@ def run_enrichment_queue(
             processor,
             limit=limit,
             retryable_page_ids=tuple(retryable_page_ids),
+            only_retryable=mode == "retry",
         )
 
 
@@ -272,7 +287,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--page-id")
-    parser.add_argument("--mode", choices=("backlog", "normal"), default="normal")
+    parser.add_argument("--mode", choices=("backlog", "normal", "retry"), default="normal")
     parser.add_argument("--limit", type=int)
     return parser
 

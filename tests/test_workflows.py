@@ -32,6 +32,7 @@ def test_runtime_workflows_use_concurrency_and_private_safe_summaries() -> None:
         "sync-metadata.yml",
         "transcribe-asr.yml",
         "enrich-transcripts.yml",
+        "retry-failed-ai.yml",
         "maintenance.yml",
     ):
         text, workflow = _workflow(name)
@@ -121,7 +122,7 @@ def test_enrichment_workflow_uses_only_summary_credentials() -> None:
         {"cron": "41 */2 * * *"},
     ]
     assert workflow[True]["workflow_run"] == {  # type: ignore[index]
-        "workflows": ["Transcribe Episode Queue"],
+        "workflows": ["Transcribe Episode Queue", "Retry Failed Episode AI"],
         "types": ["completed"],
     }
     assert "SILICONFLOW_API_KEY" in text
@@ -131,6 +132,19 @@ def test_enrichment_workflow_uses_only_summary_credentials() -> None:
     assert "github.event.workflow_run.conclusion == 'success'" in text
     assert "github.event_name == 'workflow_run'" in text
     assert "37 22 * * *" not in text
+
+
+def test_retry_failed_ai_workflow_is_bounded_and_retry_only() -> None:
+    text, workflow = _workflow("retry-failed-ai.yml")
+    assert workflow[True]["schedule"] == [{"cron": "53 */2 * * *"}]  # type: ignore[index]
+    assert "--mode retry" in text
+    assert "Retry failed ASR checkpoints only" in text
+    assert "Retry failed enrichment checkpoints only" in text
+    assert "vars.ASR_QUEUE_ENABLED == 'true'" in text
+    assert "XYZ2NOTION_ENRICHMENT_QUEUE_ENABLED" in text
+    assert "group: xyz2notion-runtime" in text
+    assert "TINGWU_COOKIE" not in text
+    assert "XIAOYUZHOU_REFRESH_TOKEN" not in text
 
 
 def test_maintenance_workflow_has_safe_dispatch_guards() -> None:
