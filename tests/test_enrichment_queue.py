@@ -34,6 +34,8 @@ def episode(
     status: str,
     played_seconds: int = 120,
     favorited: bool = False,
+    liked: bool = False,
+    listening_status: str | None = None,
 ) -> dict[str, object]:
     return {
         "id": page_id,
@@ -44,6 +46,10 @@ def episode(
             "ASR Status": {"select": {"name": status}},
             "Played Seconds": {"number": played_seconds},
             "Favorited": {"checkbox": favorited},
+            "Liked": {"checkbox": liked},
+            "Listening Status": {
+                "select": {"name": listening_status or "听过"},
+            },
             "Skip AI": {"checkbox": False},
         },
     }
@@ -124,6 +130,20 @@ def test_queue_keeps_episode_candidate_safety_gates() -> None:
     assert [candidate.page_id for candidate, _page in selected] == ["favorite"]
 
 
+def test_enrichment_queue_applies_user_category_priority() -> None:
+    pages = [
+        episode("heard", status="已转写", listening_status="听过"),
+        episode("liked", status="已转写", liked=True),
+        episode("favorite", status="已增强", favorited=True),
+    ]
+    selected = select_enrichment_work(pages, limit=10)
+    assert [candidate.page_id for candidate, _page in selected] == [
+        "favorite",
+        "liked",
+        "heard",
+    ]
+
+
 def test_enrichment_pass_is_bounded_and_reports_only_aggregates() -> None:
     pages = [
         episode("b", status="已转写"),
@@ -137,6 +157,7 @@ def test_enrichment_pass_is_bounded_and_reports_only_aggregates() -> None:
     assert result.remaining == 1
     assert result.actions == {"updated": 2}
     assert result.states == {"PUBLISHED": 2}
+    assert result.categories == {"heard": 2}
     assert "eid-" not in result.summary()
     assert "title-" not in result.summary()
 

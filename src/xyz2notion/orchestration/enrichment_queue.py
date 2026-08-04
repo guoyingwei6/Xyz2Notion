@@ -7,7 +7,7 @@ import sys
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from pydantic import SecretStr
@@ -29,6 +29,8 @@ from xyz2notion.orchestration.processor import (
     EpisodeAIProcessor,
     EpisodeCandidate,
     ProcessingOutcome,
+    ai_category_label,
+    ai_category_priority,
     episode_candidates,
 )
 from xyz2notion.orchestration.state_store import NotionEpisodeStateStore
@@ -60,6 +62,7 @@ class EnrichmentQueueResult:
     remaining: int
     actions: Mapping[str, int]
     states: Mapping[str, int]
+    categories: Mapping[str, int] = field(default_factory=dict)
 
     def summary(self) -> str:
         action_summary = (
@@ -68,9 +71,14 @@ class EnrichmentQueueResult:
         state_summary = (
             ", ".join(f"{name}={self.states[name]}" for name in sorted(self.states)) or "none=0"
         )
+        category_summary = (
+            ", ".join(f"{name}={self.categories[name]}" for name in sorted(self.categories))
+            or "none=0"
+        )
         return (
             f"Transcript enrichment OK (selected={self.selected}; remaining={self.remaining}; "
-            f"actions: {action_summary}; states: {state_summary})"
+            f"actions: {action_summary}; states: {state_summary}; "
+            f"categories: {category_summary})"
         )
 
 
@@ -106,6 +114,7 @@ def select_enrichment_work(
     eligible = sorted(
         (page for page in pages if _episode_status(page) in ENRICHMENT_STATUSES),
         key=lambda page: (
+            ai_category_priority(page),
             _STATUS_PRIORITY[_episode_status(page)],
             str(page.get("id") or ""),
         ),
@@ -137,6 +146,7 @@ def process_enrichment_pass(
         remaining=max(0, len(all_work) - len(selected)),
         actions=Counter(outcome.action for outcome in outcomes),
         states=Counter(outcome.state.value for outcome in outcomes),
+        categories=Counter(ai_category_label(page) for _candidate, page in selected),
     )
 
 

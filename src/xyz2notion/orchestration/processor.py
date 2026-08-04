@@ -37,6 +37,14 @@ from xyz2notion.orchestration.state_store import (
 from xyz2notion.state import PipelineState
 
 MAX_RETRY_ATTEMPTS = 3
+AI_CATEGORY_LABELS = (
+    "favorite",
+    "liked",
+    "heard",
+    "listening",
+    "to_listen",
+    "other",
+)
 
 
 @dataclass(frozen=True)
@@ -122,6 +130,11 @@ def ai_category_priority(page: Mapping[str, Any]) -> int:
     if listening_status == "未听" or _property_checkbox(properties, "In Playlist"):
         return 4
     return 5
+
+
+def ai_category_label(page: Mapping[str, Any]) -> str:
+    """Return a private-safe label for queue telemetry and ordering audits."""
+    return AI_CATEGORY_LABELS[ai_category_priority(page)]
 
 
 def episode_candidates(pages: list[JsonObject]) -> tuple[EpisodeCandidate, ...]:

@@ -33,6 +33,7 @@ from xyz2notion.notion.initializer import DATA_PAGE_TITLE, HOME_MARKER_URL, Noti
 from xyz2notion.notion.published_ai import PublishedAIReconciler
 from xyz2notion.orchestration.processor import (
     EpisodeAIProcessor,
+    ai_category_label,
     ai_category_priority,
     build_provider_clients,
     episode_candidates,
@@ -392,6 +393,12 @@ def _run_asr_queue(args: argparse.Namespace) -> int:
     provider_summary = (
         ", ".join(f"{name}={providers[name]}" for name in sorted(providers)) or "none=0"
     )
+    category_counts = Counter(
+        ai_category_label(page_by_id[candidate.page_id]) for candidate in candidates
+    )
+    category_summary = (
+        ", ".join(f"{name}={category_counts[name]}" for name in sorted(category_counts)) or "none=0"
+    )
     remaining = max(0, len(all_candidates) - len(candidates)) + sum(
         outcome.state in {PipelineState.ASR_SUBMITTED, PipelineState.ASR_RUNNING}
         for outcome in outcomes
@@ -399,7 +406,8 @@ def _run_asr_queue(args: argparse.Namespace) -> int:
     print(
         f"Episode ASR queue OK (mode={args.mode}; selected={len(candidates)}; "
         f"remaining={remaining}; interval_seconds={ASR_INTER_EPISODE_SECONDS}; "
-        f"actions: {action_summary}; states: {state_summary}; providers: {provider_summary})"
+        f"actions: {action_summary}; states: {state_summary}; categories: {category_summary}; "
+        f"providers: {provider_summary})"
     )
     return 0
 

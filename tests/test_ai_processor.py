@@ -20,6 +20,7 @@ from xyz2notion.orchestration.processor import (
     MAX_RETRY_ATTEMPTS,
     EpisodeAIProcessor,
     EpisodeCandidate,
+    ai_category_label,
     ai_category_priority,
     build_provider_clients,
     episode_candidates,
@@ -210,6 +211,13 @@ def test_ai_category_priority_is_favorite_then_like_then_listening_state() -> No
         {"properties": {"In Playlist": {"checkbox": True}}},
     ]
     assert [ai_category_priority(page) for page in pages] == [0, 1, 2, 3, 4]
+    assert [ai_category_label(page) for page in pages] == [
+        "favorite",
+        "liked",
+        "heard",
+        "listening",
+        "to_listen",
+    ]
 
 
 def test_candidate_extraction_skips_incomplete_rows() -> None:
