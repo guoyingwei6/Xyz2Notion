@@ -346,7 +346,10 @@ def test_audit_view_configurations_reports_counts(
         def __init__(self, _api: object, page_id: str) -> None:
             assert page_id == "fixture-page"
 
-        def view_configuration_counts(self) -> list[dict[str, object]]:
+        def view_configuration_counts(
+            self, *, include_properties: bool = False
+        ) -> list[dict[str, object]]:
+            assert include_properties is False
             return [
                 {
                     "data_source_id": "private-source-id",
@@ -372,6 +375,42 @@ def test_audit_view_configurations_reports_counts(
     assert "View configuration audit OK" in output
     assert "- 转写文本: configuration.properties=100" in output
     assert "- AI总结与思维导图: configuration.properties=5" in output
+    assert "private-" not in output
+
+
+def test_audit_view_configurations_details_reports_names_not_ids(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionClient", FakeContextClient)  # type: ignore[attr-defined]
+
+    class FakeInitializer:
+        def __init__(self, _api: object, page_id: str) -> None:
+            assert page_id == "fixture-page"
+
+        def view_configuration_counts(
+            self, *, include_properties: bool = False
+        ) -> list[dict[str, object]]:
+            assert include_properties is True
+            return [
+                {
+                    "data_source_id": "private-source-id",
+                    "view_id": "private-view-id",
+                    "name": "转写文本",
+                    "properties_count": 2,
+                    "properties": ["Name", "人工请求重试"],
+                }
+            ]
+
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+
+    assert main(["audit-view-configurations", "--details"]) == 0
+    output = capsys.readouterr().out  # type: ignore[attr-defined]
+    assert "- 转写文本: configuration.properties=2" in output
+    assert "  1. Name" in output
+    assert "  2. 人工请求重试" in output
     assert "private-" not in output
 
 

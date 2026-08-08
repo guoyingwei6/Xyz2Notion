@@ -69,7 +69,7 @@ def test_init_workflow_requires_exact_dashboard_rebuild_confirmation() -> None:
     assert 'OPERATION" == "audit-dashboard"' in text
     assert "uv run xyz2notion audit-dashboard" in text
     assert 'OPERATION" == "audit-view-configurations"' in text
-    assert "uv run xyz2notion audit-view-configurations" in text
+    assert "uv run xyz2notion audit-view-configurations --details" in text
     assert 'OPERATION" == "cleanup-dashboard-layout"' in text
     assert "ARCHIVE_${EXPECTED_COUNT}_BUNDLES_${expected_blocks}_LAYOUT_BLOCKS" in text
     assert "uv run xyz2notion cleanup-dashboard-layout" in text

@@ -71,7 +71,7 @@ jobs:
           elif [[ "$OPERATION" == "audit-dashboard" ]]; then
             result="$(uv run xyz2notion audit-dashboard)"
           elif [[ "$OPERATION" == "audit-view-configurations" ]]; then
-            result="$(uv run xyz2notion audit-view-configurations)"
+            result="$(uv run xyz2notion audit-view-configurations --details)"
           elif [[ "$OPERATION" == "cleanup-dashboard-layout" ]]; then
             if [[ ! "$EXPECTED_COUNT" =~ ^[1-9][0-9]*$ ]] || \
                [[ ! "$EXPECTED_TOTAL" =~ ^[1-9][0-9]*$ ]]; then

@@ -95,6 +95,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--page-id",
         help="target root page ID; defaults to NOTION_PAGE_ID",
     )
+    audit_view_configurations.add_argument(
+        "--details",
+        action="store_true",
+        help="include configured property names for each managed view",
+    )
     cleanup_dashboard = subparsers.add_parser(
         "cleanup-dashboard-layout",
         help="archive an exact set of duplicate managed dashboard layout bundles",
@@ -1218,7 +1223,9 @@ def _run_audit_view_configurations(args: argparse.Namespace) -> int:
             raise AssertionError("credential requirement did not narrow notion_token")
 
         with NotionClient(credentials.notion_token) as notion:
-            rows = NotionInitializer(notion, page_id).view_configuration_counts()
+            rows = NotionInitializer(notion, page_id).view_configuration_counts(
+                include_properties=args.details
+            )
     except (ConfigurationError, MissingCredentialError) as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
@@ -1231,6 +1238,11 @@ def _run_audit_view_configurations(args: argparse.Namespace) -> int:
         count = row["properties_count"]
         count_label = "unknown" if count is None else str(count)
         print(f"- {row['name']}: configuration.properties={count_label}")
+        if args.details:
+            properties = row.get("properties")
+            if isinstance(properties, list) and properties:
+                for index, property_name in enumerate(properties, start=1):
+                    print(f"  {index}. {property_name}")
     return 0
 
 

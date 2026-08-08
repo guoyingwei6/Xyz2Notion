@@ -673,22 +673,43 @@ class NotionInitializer:
                 result.setdefault((str(data_source_id), str(name)), view)
         return result
 
-    def view_configuration_counts(self) -> list[JsonObject]:
+    def view_configuration_counts(self, *, include_properties: bool = False) -> list[JsonObject]:
         """Return safe diagnostics for managed view configuration sizes."""
         rows: list[JsonObject] = []
+        property_names_by_source: dict[str, dict[str, str]] = {}
         for (data_source_id, name), view in sorted(self._managed_views().items()):
             configuration = view.get("configuration")
             properties_count: int | None = None
+            configured_properties: list[str] = []
             if isinstance(configuration, Mapping):
                 properties = configuration.get("properties")
                 if isinstance(properties, list):
                     properties_count = len(properties)
+                    if include_properties:
+                        property_names = property_names_by_source.get(data_source_id)
+                        if property_names is None:
+                            data_source = self.api.retrieve_data_source(data_source_id)
+                            property_names = {
+                                property_id: property_name
+                                for property_name, property_id in _property_ids(data_source).items()
+                            }
+                            property_names_by_source[data_source_id] = property_names
+                        for item in properties:
+                            property_id = (
+                                str(item.get("property_id") or "")
+                                if isinstance(item, Mapping)
+                                else ""
+                            )
+                            configured_properties.append(
+                                property_names.get(property_id, f"<unknown:{property_id}>")
+                            )
             rows.append(
                 {
                     "data_source_id": data_source_id,
                     "view_id": str(view.get("id") or ""),
                     "name": name,
                     "properties_count": properties_count,
+                    "properties": configured_properties,
                 }
             )
         return rows
