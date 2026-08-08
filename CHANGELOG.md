@@ -19,6 +19,8 @@
   系统默认字段；清理后若仍超过 Notion 100 项上限，会在请求前明确停止。后续只重置有问题的 view，
   不再反复改变 view ID；Episode 数据库的 41 个数据字段、页面和 AI 内容不受影响。
 - `audit-view-configurations --details` 现在同时输出 view ID 和父 linked database ID，便于在执行精确维护前核对目标。
+- 修复 Notion 属性 ID 在 data source 与 view 响应中分别使用 URL 编码和解码形式时的误判；
+  现在清理、去重和审计均按规范化 ID 比较，不会把实际存在的字段误报为历史残留并反复重置 view。
 
 ## 0.2.0 - 2026-08-04
 

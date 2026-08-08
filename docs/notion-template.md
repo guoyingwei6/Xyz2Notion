@@ -91,6 +91,8 @@ uv run xyz2notion notion-init --create-home --page-id YOUR_PAGE_ID
 两个 AI 输出视图会由代码做安全协调：例行初始化发现 Notion 中已经不存在的历史属性 ID 或重复项时，
 会先显式清空 `configuration.properties`，再写入清理后的配置；没有问题的 view 不会重置，也不会反复
 改变 view ID。清理后的配置会保留仍存在于 Episode 数据库中的合法字段，并补齐系统需要的默认字段。
+Notion 有时会在 data source 响应中返回 URL 编码的属性 ID、在 view 响应中返回解码后的同一 ID；程序会先
+规范化后再判断是否为残留，避免把合法字段误删或每次初始化都重复重置 view。
 默认字段如下：
 
 - **转写文本**：`Name`、`人工请求重试`、`ASR Status`、`ASR Provider`、`转写完成时间`；

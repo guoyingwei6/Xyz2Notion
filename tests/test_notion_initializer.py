@@ -634,6 +634,12 @@ def test_view_configuration_reset_detection_rejects_malformed_shapes() -> None:
             }
         },
     )
+    source.property_ids["Name"] = "%5Bfoo"
+    assert not initializer._view_configuration_needs_reset(
+        spec,
+        source,
+        {"configuration": {"type": "table", "properties": [{"property_id": "[foo"}]}},
+    )
 
 
 def test_view_configuration_rejects_more_than_notion_limit() -> None:
@@ -711,10 +717,11 @@ def test_view_configuration_count_details_maps_property_ids_to_names() -> None:
 
     transcript_view = next(view for view in fake.views.values() if view["name"] == "转写文本")
     episode_properties = fake.data_sources[result.resources["episode"].data_source_id]["properties"]
+    episode_properties["Name"]["id"] = "%5Bfoo"
     transcript_view["configuration"] = {
         "type": "table",
         "properties": [
-            {"property_id": episode_properties["Name"]["id"], "visible": True},
+            {"property_id": "[foo", "visible": True},
             {"property_id": "removed-property-id", "visible": False},
             "malformed-entry",
         ],

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
+from urllib.parse import unquote
 
 from xyz2notion.notion.client import JsonObject, NotionAPIError, rich_text
 from xyz2notion.notion.schema import (
@@ -181,6 +182,11 @@ def _property_ids(data_source: Mapping[str, Any]) -> dict[str, str]:
         for name, value in properties.items()
         if isinstance(value, dict) and value.get("id") is not None
     }
+
+
+def _canonical_property_id(value: object) -> str:
+    """Compare Notion property IDs independent of URL-encoding differences."""
+    return unquote(str(value or ""))
 
 
 def _block_text(block: Mapping[str, Any]) -> str:
@@ -697,7 +703,7 @@ class NotionInitializer:
                         if property_names is None:
                             data_source = self.api.retrieve_data_source(data_source_id)
                             property_names = {
-                                property_id: property_name
+                                _canonical_property_id(property_id): property_name
                                 for property_name, property_id in _property_ids(data_source).items()
                             }
                             property_names_by_source[data_source_id] = property_names
@@ -705,7 +711,7 @@ class NotionInitializer:
                         unknown_properties_count = 0
                         for item in properties:
                             property_id = (
-                                str(item.get("property_id") or "")
+                                _canonical_property_id(item.get("property_id"))
                                 if isinstance(item, Mapping)
                                 else ""
                             )
@@ -814,12 +820,14 @@ class NotionInitializer:
         if not isinstance(properties, list):
             return True
 
-        valid_property_ids = set(source.property_ids.values())
+        valid_property_ids = {
+            _canonical_property_id(property_id) for property_id in source.property_ids.values()
+        }
         seen_property_ids: set[str] = set()
         for item in properties:
             if not isinstance(item, Mapping):
                 return True
-            property_id = str(item.get("property_id") or "")
+            property_id = _canonical_property_id(item.get("property_id"))
             if (
                 not property_id
                 or property_id not in valid_property_ids
@@ -844,13 +852,15 @@ class NotionInitializer:
         if not isinstance(properties, list):
             return desired
 
-        valid_property_ids = set(source.property_ids.values())
+        valid_property_ids = {
+            _canonical_property_id(property_id) for property_id in source.property_ids.values()
+        }
         seen_property_ids: set[str] = set()
         sanitized_properties: list[JsonObject] = []
         for item in properties:
             if not isinstance(item, Mapping):
                 continue
-            property_id = str(item.get("property_id") or "")
+            property_id = _canonical_property_id(item.get("property_id"))
             if not property_id or property_id not in valid_property_ids:
                 continue
             if property_id in seen_property_ids:
@@ -863,7 +873,7 @@ class NotionInitializer:
             for item in desired_properties:
                 if not isinstance(item, Mapping):
                     continue
-                property_id = str(item.get("property_id") or "")
+                property_id = _canonical_property_id(item.get("property_id"))
                 if not property_id or property_id in seen_property_ids:
                     continue
                 sanitized_properties.append(dict(item))
