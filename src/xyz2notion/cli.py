@@ -1239,6 +1239,8 @@ def _run_audit_view_configurations(args: argparse.Namespace) -> int:
         count_label = "unknown" if count is None else str(count)
         visible_count = row.get("visible_properties_count")
         visible_label = "unknown" if visible_count is None else str(visible_count)
+        view_id = str(row.get("view_id") or "")
+        parent_database_id = str(row.get("parent_database_id") or "")
         line = f"- {row['name']}: configuration.properties={count_label}, visible={visible_label}"
         if args.details:
             known_count = row.get("known_properties_count")
@@ -1246,6 +1248,7 @@ def _run_audit_view_configurations(args: argparse.Namespace) -> int:
             known_label = "unknown" if known_count is None else str(known_count)
             unknown_label = "unknown" if unknown_count is None else str(unknown_count)
             line += f", known={known_label}, unknown={unknown_label}"
+        line += f", view_id={view_id}, parent_database_id={parent_database_id}"
         print(line)
         if args.details:
             properties = row.get("properties")

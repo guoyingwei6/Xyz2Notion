@@ -14,9 +14,11 @@
 
 - 下一版本的变更记录会继续放在这里，发布时再归入对应版本。
 - 修复 Notion AI 视图沿用历史 `configuration.properties` 导致配置条目累积到 100 条的问题；
-  `转写文本` 和 `AI总结与思维导图` 会清除残留/重复属性 ID、补齐 5/7 个系统默认字段，同时
-  保留用户新增的合法 Episode 字段；清理后若仍超过 Notion 100 项上限，会在请求前明确停止。
-  Episode 数据库的 41 个数据字段不受影响。
+  发现残留/重复属性 ID 时，会在同一个 linked database 中先创建清理后的替代 view，再删除旧 view，
+  从而真正清除服务端无法通过普通 PATCH 移除的历史配置。替代 view 保留仍存在于 Episode 数据库中的
+  合法用户字段，并补齐 5/7 个系统默认字段；清理后若仍超过 Notion 100 项上限，会在请求前明确停止。
+  没有残留问题的 view 不会重建，Episode 数据库的 41 个数据字段、页面和 AI 内容不受影响。
+- `audit-view-configurations --details` 现在同时输出 view ID 和父 linked database ID，便于在执行精确维护前核对目标。
 
 ## 0.2.0 - 2026-08-04
 

@@ -719,6 +719,11 @@ class NotionInitializer:
             rows.append(
                 {
                     "data_source_id": data_source_id,
+                    "parent_database_id": str(
+                        view.get("parent", {}).get("database_id")
+                        if isinstance(view.get("parent"), Mapping)
+                        else ""
+                    ),
                     "view_id": str(view.get("id") or ""),
                     "name": name,
                     "properties_count": properties_count,
@@ -752,14 +757,18 @@ class NotionInitializer:
         # user-added fields remain part of the view.  The system-defined fields
         # are appended if missing so each managed view keeps its documented
         # columns available.  Chart configuration is preserved as-is.
-        if creating or not preserve_configuration:
-            payload["configuration"] = view_configuration(spec, source.property_ids)
-        elif existing_view is not None and spec.view_type in {"table", "gallery"}:
+        if (
+            preserve_configuration
+            and existing_view is not None
+            and spec.view_type in {"table", "gallery"}
+        ):
             payload["configuration"] = self._sanitize_view_configuration(
                 spec,
                 source,
                 existing_view,
             )
+        elif creating or not preserve_configuration:
+            payload["configuration"] = view_configuration(spec, source.property_ids)
         if spec.filter is not None or not creating:
             payload["filter"] = spec.filter
         if creating:
@@ -786,6 +795,39 @@ class NotionInitializer:
                 payload["database_id"] = database_id
                 payload["position"] = {"type": spec.position}
         return payload
+
+    @staticmethod
+    def _view_configuration_needs_rebuild(
+        spec: ViewSpec,
+        source: NotionResource,
+        existing_view: Mapping[str, Any],
+    ) -> bool:
+        """Return whether PATCH cannot safely remove the view's old entries."""
+        if spec.view_type not in {"table", "gallery"}:
+            return False
+        configuration = existing_view.get("configuration")
+        if not isinstance(configuration, Mapping):
+            return True
+        if configuration.get("type") != spec.view_type:
+            return True
+        properties = configuration.get("properties")
+        if not isinstance(properties, list):
+            return True
+
+        valid_property_ids = set(source.property_ids.values())
+        seen_property_ids: set[str] = set()
+        for item in properties:
+            if not isinstance(item, Mapping):
+                return True
+            property_id = str(item.get("property_id") or "")
+            if (
+                not property_id
+                or property_id not in valid_property_ids
+                or property_id in seen_property_ids
+            ):
+                return True
+            seen_property_ids.add(property_id)
+        return False
 
     @staticmethod
     def _sanitize_view_configuration(
@@ -835,6 +877,7 @@ class NotionInitializer:
             )
 
         sanitized = dict(configuration)
+        sanitized["type"] = spec.view_type
         sanitized["properties"] = sanitized_properties
         return sanitized
 
@@ -867,6 +910,53 @@ class NotionInitializer:
                 anchors[pending_group] = str(block["id"])
                 pending_group = None
         return anchors
+
+    def _rebuild_view(
+        self,
+        spec: ViewSpec,
+        source: NotionResource,
+        existing: Mapping[str, Any],
+    ) -> JsonObject:
+        """Create a clean replacement in the same linked database, then delete the old view."""
+        view_id = str(existing.get("id") or "")
+        parent = existing.get("parent")
+        database_id = (
+            str(parent.get("database_id"))
+            if isinstance(parent, Mapping) and parent.get("database_id")
+            else ""
+        )
+        if not view_id or not database_id:
+            raise ValueError(
+                f"Cannot rebuild managed view {spec.name!r}: missing view or parent database ID"
+            )
+
+        replacement = self.api.create_view(
+            self._view_payload(
+                spec,
+                source,
+                creating=True,
+                preserve_configuration=True,
+                existing_view=existing,
+                database_id=database_id,
+            )
+        )
+        replacement_id = str(replacement.get("id") or "")
+        replacement_parent = replacement.get("parent")
+        replacement_database_id = (
+            str(replacement_parent.get("database_id"))
+            if isinstance(replacement_parent, Mapping) and replacement_parent.get("database_id")
+            else ""
+        )
+        if not replacement_id or replacement_database_id != database_id:
+            raise ValueError(
+                f"Notion replacement for view {spec.name!r} was not created in the same database"
+            )
+
+        # Create first so a failed POST leaves the user's original view intact.
+        # The delete is scoped to this exact view object; the linked database,
+        # data source, properties, and pages are not touched.
+        self.api.delete_view(view_id)
+        return replacement
 
     def _ensure_views(self, resources: dict[str, NotionResource]) -> tuple[int, int, int]:
         created = 0
@@ -942,6 +1032,11 @@ class NotionInitializer:
                 group_tail[group] = database_id
                 managed_views[(source.data_source_id, spec.name)] = view
                 created += 1
+            elif self._view_configuration_needs_rebuild(spec, source, existing):
+                view = self._rebuild_view(spec, source, existing)
+                managed_views[(source.data_source_id, spec.name)] = view
+                created += 1
+                deleted += 1
             else:
                 self.api.update_view(
                     str(existing["id"]),

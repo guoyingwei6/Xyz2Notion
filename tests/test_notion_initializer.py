@@ -455,6 +455,7 @@ def test_initializer_sanitizes_stale_ai_view_configurations_and_keeps_valid_addi
 
     transcript_view = next(view for view in fake.views.values() if view["name"] == "转写文本")
     mindmap_view = next(view for view in fake.views.values() if view["name"] == "AI总结与思维导图")
+    old_view_ids = {str(transcript_view["id"]), str(mindmap_view["id"])}
     episode_property_ids = first.resources["episode"].property_ids
     oversized_configuration = {
         "type": "table",
@@ -476,9 +477,15 @@ def test_initializer_sanitizes_stale_ai_view_configurations_and_keeps_valid_addi
 
     result = initializer.initialize()
 
-    assert result.updated_views == len(VIEW_SPECS) - 1
+    managed_view_count = len(VIEW_SPECS) - 1
+    assert result.created_views == 2
+    assert result.updated_views == managed_view_count - 2
+    assert result.deleted_views == 2
+    assert old_view_ids.issubset(set(fake.deleted_view_ids))
     transcript_spec = next(spec for spec in VIEW_SPECS if spec.key == "episodes_transcript")
     mindmap_spec = next(spec for spec in VIEW_SPECS if spec.key == "mindmaps")
+    transcript_view = next(view for view in fake.views.values() if view["name"] == "转写文本")
+    mindmap_view = next(view for view in fake.views.values() if view["name"] == "AI总结与思维导图")
     for view, spec, expected_count in (
         (transcript_view, transcript_spec, 6),
         (mindmap_view, mindmap_spec, 8),
@@ -521,9 +528,12 @@ def test_initializer_sanitizes_non_ai_view_and_preserves_valid_additions() -> No
     }
     statistics_view["configuration"] = custom_configuration
 
-    initializer.initialize()
+    result = initializer.initialize()
 
     desired_spec = next(spec for spec in VIEW_SPECS if spec.name == "总收听时长")
+    assert result.created_views == 1
+    assert result.deleted_views == 1
+    statistics_view = next(view for view in fake.views.values() if view["name"] == "总收听时长")
     actual_properties = statistics_view["configuration"]["properties"]
     actual_ids = {item["property_id"] for item in actual_properties}
     desired_ids = {
@@ -534,6 +544,81 @@ def test_initializer_sanitizes_non_ai_view_and_preserves_valid_additions() -> No
     assert all_property_ids["Period Key"] in actual_ids
     assert "removed-property" not in actual_ids
     assert statistics_view["configuration"]["wrap_cells"] is False
+
+
+def test_initializer_preserves_valid_custom_column_without_rebuilding_view() -> None:
+    fake = FakeNotion()
+    initializer = NotionInitializer(fake, "root")
+    first = initializer.initialize(create_home=True)
+
+    episode_source_id = first.resources["episode"].data_source_id
+    fake.data_sources[episode_source_id]["properties"]["My Custom Column"] = {
+        "id": "custom-column",
+        "rich_text": {},
+    }
+    transcript_view = next(view for view in fake.views.values() if view["name"] == "转写文本")
+    original_view_id = str(transcript_view["id"])
+    transcript_view["configuration"]["properties"].append(
+        {"property_id": "custom-column", "visible": False}
+    )
+
+    result = initializer.initialize()
+
+    assert result.created_views == 0
+    assert result.deleted_views == 0
+    assert str(transcript_view["id"]) == original_view_id
+    assert "custom-column" in {
+        item["property_id"] for item in transcript_view["configuration"]["properties"]
+    }
+
+
+def test_view_configuration_rebuild_detection_rejects_malformed_shapes() -> None:
+    fake = FakeNotion()
+    initializer = NotionInitializer(fake, "root")
+    first = initializer.initialize(create_home=True)
+    spec = next(spec for spec in VIEW_SPECS if spec.key == "episodes_transcript")
+    source = first.resources["episode"]
+    valid_property_id = source.property_ids["Name"]
+
+    assert not initializer._view_configuration_needs_rebuild(
+        spec,
+        source,
+        {"configuration": {"type": "table", "properties": []}},
+    )
+    assert initializer._view_configuration_needs_rebuild(spec, source, {})
+    assert initializer._view_configuration_needs_rebuild(
+        spec,
+        source,
+        {"configuration": {"type": "gallery", "properties": []}},
+    )
+    assert initializer._view_configuration_needs_rebuild(
+        spec,
+        source,
+        {"configuration": {"type": "table", "properties": {}}},
+    )
+    assert initializer._view_configuration_needs_rebuild(
+        spec,
+        source,
+        {
+            "configuration": {
+                "type": "table",
+                "properties": [{"property_id": valid_property_id}, "malformed"],
+            }
+        },
+    )
+    assert initializer._view_configuration_needs_rebuild(
+        spec,
+        source,
+        {
+            "configuration": {
+                "type": "table",
+                "properties": [
+                    {"property_id": valid_property_id},
+                    {"property_id": valid_property_id},
+                ],
+            }
+        },
+    )
 
 
 def test_view_configuration_rejects_more_than_notion_limit() -> None:
@@ -584,6 +669,24 @@ def test_sanitize_view_configuration_rebuilds_malformed_configuration() -> None:
         )
         == expected
     )
+    sanitized = initializer._sanitize_view_configuration(
+        spec,
+        source,
+        {
+            "configuration": {
+                "type": "table",
+                "properties": [
+                    {"property_id": source.property_ids["Name"], "visible": False},
+                    {"property_id": source.property_ids["Name"], "visible": True},
+                    "malformed",
+                    {"property_id": "removed-property"},
+                ],
+            }
+        },
+    )
+    sanitized_ids = [item["property_id"] for item in sanitized["properties"]]
+    assert sanitized_ids.count(source.property_ids["Name"]) == 1
+    assert "removed-property" not in sanitized_ids
 
 
 def test_view_configuration_count_details_maps_property_ids_to_names() -> None:
@@ -608,6 +711,8 @@ def test_view_configuration_count_details_maps_property_ids_to_names() -> None:
     transcript_row = next(row for row in rows if row["name"] == "转写文本")
 
     assert count_transcript_row["properties_count"] == 3
+    assert count_transcript_row["view_id"] == transcript_view["id"]
+    assert count_transcript_row["parent_database_id"] == transcript_view["parent"]["database_id"]
     assert count_transcript_row["visible_properties_count"] == 1
     assert count_transcript_row["known_properties_count"] is None
     assert count_transcript_row["unknown_properties_count"] is None
