@@ -334,6 +334,47 @@ def test_audit_dashboard_reports_missing_token(
     assert "Configuration error" in capsys.readouterr().err  # type: ignore[attr-defined]
 
 
+def test_audit_view_configurations_reports_counts(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionClient", FakeContextClient)  # type: ignore[attr-defined]
+
+    class FakeInitializer:
+        def __init__(self, _api: object, page_id: str) -> None:
+            assert page_id == "fixture-page"
+
+        def view_configuration_counts(self) -> list[dict[str, object]]:
+            return [
+                {
+                    "data_source_id": "private-source-id",
+                    "view_id": "private-view-id",
+                    "name": "转写文本",
+                    "properties_count": 100,
+                },
+                {
+                    "data_source_id": "private-source-id",
+                    "view_id": "private-view-id-2",
+                    "name": "AI总结与思维导图",
+                    "properties_count": 5,
+                },
+            ]
+
+        def initialize(self, **_kwargs: object) -> object:
+            raise AssertionError("audit must not initialize Notion")
+
+    monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
+
+    assert main(["audit-view-configurations"]) == 0
+    output = capsys.readouterr().out  # type: ignore[attr-defined]
+    assert "View configuration audit OK" in output
+    assert "- 转写文本: configuration.properties=100" in output
+    assert "- AI总结与思维导图: configuration.properties=5" in output
+    assert "private-" not in output
+
+
 def test_audit_dashboard_reports_notion_error(
     capsys: object,
     monkeypatch: object,

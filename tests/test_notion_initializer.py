@@ -10,6 +10,7 @@ from xyz2notion.notion.initializer import (
     HOME_MARKER,
     HOME_MARKER_URL,
     HOME_SUMMARY_MARKER_URL,
+    MAX_VIEW_CONFIGURATION_PROPERTIES,
     NotionInitializer,
     home_blocks,
 )
@@ -499,6 +500,36 @@ def test_initializer_preserves_manual_view_columns_and_order() -> None:
     # under the user's control.
     assert transcript_view["sorts"] == [{"property": "转写完成时间", "direction": "descending"}]
     assert mindmap_view["sorts"] == [{"property": "总结完成时间", "direction": "descending"}]
+
+
+def test_initializer_skips_manual_retry_view_migration_at_notion_limit() -> None:
+    fake = FakeNotion()
+    initializer = NotionInitializer(fake, "root")
+    initializer.initialize(create_home=True)
+
+    transcript_view = next(view for view in fake.views.values() if view["name"] == "转写文本")
+    existing_properties = [
+        {"property_id": f"custom-{index}", "visible": True}
+        for index in range(MAX_VIEW_CONFIGURATION_PROPERTIES)
+    ]
+    transcript_view["configuration"] = {
+        "type": "table",
+        "properties": existing_properties,
+        "wrap_cells": False,
+        "frozen_column_index": 1,
+        "show_vertical_lines": True,
+    }
+
+    result = initializer.initialize()
+
+    assert result.updated_views == len(VIEW_SPECS) - 1
+    assert transcript_view["configuration"]["properties"] == existing_properties
+    assert len(transcript_view["configuration"]["properties"]) == MAX_VIEW_CONFIGURATION_PROPERTIES
+    assert all(
+        item["property_id"] != "ds-3:人工请求重试"
+        for item in transcript_view["configuration"]["properties"]
+    )
+    assert transcript_view["sorts"] == [{"property": "转写完成时间", "direction": "descending"}]
 
 
 def test_initializer_migrates_legacy_mindmap_view_to_episode_source() -> None:

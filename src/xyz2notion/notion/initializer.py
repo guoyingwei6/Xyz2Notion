@@ -23,6 +23,7 @@ HOME_MARKER_URL = "https://xyz2notion.local/managed-home-v2"
 HOME_SUMMARY_MARKER_URL = "https://xyz2notion.local/listening-summary-v3"
 DEFAULT_COVER_URL = "https://raw.githubusercontent.com/guoyingwei6/Xyz2Notion/main/assets/cover.svg"
 MANAGED_COVER_PATH = "guoyingwei6/Xyz2Notion/main/assets/cover.svg"
+MAX_VIEW_CONFIGURATION_PROPERTIES = 100
 LEGACY_DATABASE_TITLES: dict[str, tuple[str, ...]] = {
     "author": ("Author", "作者"),
     "podcast": ("Podcast",),
@@ -672,6 +673,26 @@ class NotionInitializer:
                 result.setdefault((str(data_source_id), str(name)), view)
         return result
 
+    def view_configuration_counts(self) -> list[JsonObject]:
+        """Return safe diagnostics for managed view configuration sizes."""
+        rows: list[JsonObject] = []
+        for (data_source_id, name), view in sorted(self._managed_views().items()):
+            configuration = view.get("configuration")
+            properties_count: int | None = None
+            if isinstance(configuration, Mapping):
+                properties = configuration.get("properties")
+                if isinstance(properties, list):
+                    properties_count = len(properties)
+            rows.append(
+                {
+                    "data_source_id": data_source_id,
+                    "view_id": str(view.get("id") or ""),
+                    "name": name,
+                    "properties_count": properties_count,
+                }
+            )
+        return rows
+
     def _view_payload(
         self,
         spec: ViewSpec,
@@ -703,10 +724,14 @@ class NotionInitializer:
             manual_retry_id = source.property_ids.get("人工请求重试")
             if isinstance(configuration, Mapping) and manual_retry_id:
                 properties = configuration.get("properties")
-                if isinstance(properties, list) and not any(
-                    isinstance(item, Mapping)
-                    and str(item.get("property_id") or "") == manual_retry_id
-                    for item in properties
+                if (
+                    isinstance(properties, list)
+                    and not any(
+                        isinstance(item, Mapping)
+                        and str(item.get("property_id") or "") == manual_retry_id
+                        for item in properties
+                    )
+                    and len(properties) < MAX_VIEW_CONFIGURATION_PROPERTIES
                 ):
                     migrated_configuration = dict(configuration)
                     migrated_configuration["properties"] = [

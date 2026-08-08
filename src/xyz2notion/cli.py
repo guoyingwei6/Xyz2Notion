@@ -87,6 +87,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--page-id",
         help="target root page ID; defaults to NOTION_PAGE_ID",
     )
+    audit_view_configurations = subparsers.add_parser(
+        "audit-view-configurations",
+        help="report managed Notion view configuration property counts without changing Notion",
+    )
+    audit_view_configurations.add_argument(
+        "--page-id",
+        help="target root page ID; defaults to NOTION_PAGE_ID",
+    )
     cleanup_dashboard = subparsers.add_parser(
         "cleanup-dashboard-layout",
         help="archive an exact set of duplicate managed dashboard layout bundles",
@@ -1197,6 +1205,35 @@ def _run_audit_dashboard(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_audit_view_configurations(args: argparse.Namespace) -> int:
+    try:
+        credentials = load_runtime_credentials()
+        credentials.require("notion_token")
+        page_id = args.page_id or credentials.notion_page_id
+        if not page_id:
+            raise MissingCredentialError(
+                "Missing target page: set NOTION_PAGE_ID or pass --page-id"
+            )
+        if credentials.notion_token is None:
+            raise AssertionError("credential requirement did not narrow notion_token")
+
+        with NotionClient(credentials.notion_token) as notion:
+            rows = NotionInitializer(notion, page_id).view_configuration_counts()
+    except (ConfigurationError, MissingCredentialError) as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    except NotionAPIError as exc:
+        print(f"Notion error: {exc}", file=sys.stderr)
+        return 4
+
+    print("View configuration audit OK")
+    for row in rows:
+        count = row["properties_count"]
+        count_label = "unknown" if count is None else str(count)
+        print(f"- {row['name']}: configuration.properties={count_label}")
+    return 0
+
+
 def _run_cleanup_dashboard_layout(args: argparse.Namespace) -> int:
     expected_blocks = args.expected_bundles * len(_MANAGED_LAYOUT_BUNDLE_SHAPE)
     expected_confirmation = (
@@ -1551,6 +1588,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "audit-dashboard":
         return _run_audit_dashboard(args)
+    if args.command == "audit-view-configurations":
+        return _run_audit_view_configurations(args)
     if args.command == "cleanup-dashboard-layout":
         return _run_cleanup_dashboard_layout(args)
     if args.command == "rebuild-dashboard":
