@@ -88,12 +88,15 @@ uv run xyz2notion notion-init --create-home --page-id YOUR_PAGE_ID
 章节和思维导图共用的增强流程。独立的“思维导图”数据库是 JSON、Mermaid 和 Episode
 关系的内容存储层，不是另一条任务队列。
 
-两个 AI 输出视图是代码托管视图，例行初始化会把它们的 `configuration.properties` 重建为当前
-白名单，自动删除 Notion 中残留的历史属性 ID，并保证不会超过 Notion API 的 100 项上限：
+两个 AI 输出视图会由代码做安全协调：例行初始化会删除 Notion 中已经不存在的历史属性 ID 和
+重复项，保留仍存在于 Episode 数据库中的合法字段，并补齐系统需要的默认字段。默认字段如下：
 
 - **转写文本**：`Name`、`人工请求重试`、`ASR Status`、`ASR Provider`、`转写完成时间`；
 - **AI总结与思维导图**：`Name`、`人工请求重试`、`Podcast`、`增强状态`、`增强 Provider`、
   `总结完成时间`、`Content Version`。
 
-这只改变两个视图显示哪些列，不删除 Episode 数据库中的字段、页面或 AI 内容。其他普通 Episode、
-Podcast、统计视图仍保留用户手动调整的属性显示、列顺序、画廊卡片布局或图表展示配置。
+你可以直接在 Notion 的 Episode 数据库和这两个视图中增加合法属性；下一次初始化会保留它们。
+清理后的配置如果确实超过 Notion API 的 100 项上限，程序会在发出更新请求前明确停止并提示减少
+视图列，不会静默丢掉你新增的字段。这只改变视图显示配置，不删除 Episode 数据库中的字段、页面
+或 AI 内容。其他普通 Episode、Podcast、统计视图仍保留用户手动调整的属性显示、列顺序、画廊
+卡片布局或图表展示配置。

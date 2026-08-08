@@ -9,6 +9,7 @@ from typing import Any, Protocol
 from xyz2notion.notion.client import JsonObject, NotionAPIError, rich_text
 from xyz2notion.notion.schema import (
     DATABASE_SPECS,
+    MAX_VIEW_CONFIGURATION_PROPERTIES,
     VIEW_SPECS,
     DatabaseSpec,
     NotionResource,
@@ -23,7 +24,7 @@ HOME_MARKER_URL = "https://xyz2notion.local/managed-home-v2"
 HOME_SUMMARY_MARKER_URL = "https://xyz2notion.local/listening-summary-v3"
 DEFAULT_COVER_URL = "https://raw.githubusercontent.com/guoyingwei6/Xyz2Notion/main/assets/cover.svg"
 MANAGED_COVER_PATH = "guoyingwei6/Xyz2Notion/main/assets/cover.svg"
-AUTHORITATIVE_VIEW_CONFIGURATION_KEYS = frozenset({"episodes_transcript", "mindmaps"})
+SANITIZED_VIEW_CONFIGURATION_KEYS = frozenset({"episodes_transcript", "mindmaps"})
 LEGACY_DATABASE_TITLES: dict[str, tuple[str, ...]] = {
     "author": ("Author", "作者"),
     "podcast": ("Podcast",),
@@ -737,6 +738,7 @@ class NotionInitializer:
         *,
         creating: bool,
         preserve_configuration: bool = False,
+        existing_view: Mapping[str, Any] | None = None,
         database_id: str | None = None,
         after_block_id: str | None = None,
     ) -> JsonObject:
@@ -746,17 +748,22 @@ class NotionInitializer:
         }
         # Existing non-AI views may contain deliberate user edits to visible
         # columns, their order, gallery card layout, or chart presentation.
-        # The two AI views are different: their columns are the public control
-        # surface for the ASR/enrichment queues, so their configuration is
-        # code-owned and must be rebuilt from the current whitelist on every
-        # reconciliation.  Replacing it also removes historical/deleted
-        # property IDs that Notion can retain in the view configuration.
+        # The two AI views need sanitization because their configuration may
+        # contain historical/deleted property IDs, but valid user-added fields
+        # remain part of the view.  The system-defined fields are appended if
+        # missing so the queue controls always stay available.
         if (
             creating
             or not preserve_configuration
-            or spec.key in AUTHORITATIVE_VIEW_CONFIGURATION_KEYS
+            or (spec.key in SANITIZED_VIEW_CONFIGURATION_KEYS and existing_view is None)
         ):
             payload["configuration"] = view_configuration(spec, source.property_ids)
+        elif spec.key in SANITIZED_VIEW_CONFIGURATION_KEYS:
+            payload["configuration"] = self._sanitize_view_configuration(
+                spec,
+                source,
+                existing_view,
+            )
         if spec.filter is not None or not creating:
             payload["filter"] = spec.filter
         if creating:
@@ -783,6 +790,57 @@ class NotionInitializer:
                 payload["database_id"] = database_id
                 payload["position"] = {"type": spec.position}
         return payload
+
+    @staticmethod
+    def _sanitize_view_configuration(
+        spec: ViewSpec,
+        source: NotionResource,
+        existing_view: Mapping[str, Any],
+    ) -> JsonObject:
+        """Remove stale view IDs while preserving valid user-added columns."""
+        desired = view_configuration(spec, source.property_ids)
+        configuration = existing_view.get("configuration")
+        if not isinstance(configuration, Mapping):
+            return desired
+        properties = configuration.get("properties")
+        if not isinstance(properties, list):
+            return desired
+
+        valid_property_ids = set(source.property_ids.values())
+        seen_property_ids: set[str] = set()
+        sanitized_properties: list[JsonObject] = []
+        for item in properties:
+            if not isinstance(item, Mapping):
+                continue
+            property_id = str(item.get("property_id") or "")
+            if not property_id or property_id not in valid_property_ids:
+                continue
+            if property_id in seen_property_ids:
+                continue
+            sanitized_properties.append(dict(item))
+            seen_property_ids.add(property_id)
+
+        desired_properties = desired.get("properties")
+        if isinstance(desired_properties, list):
+            for item in desired_properties:
+                if not isinstance(item, Mapping):
+                    continue
+                property_id = str(item.get("property_id") or "")
+                if not property_id or property_id in seen_property_ids:
+                    continue
+                sanitized_properties.append(dict(item))
+                seen_property_ids.add(property_id)
+
+        if len(sanitized_properties) > MAX_VIEW_CONFIGURATION_PROPERTIES:
+            raise ValueError(
+                f"View {spec.name!r} has {len(sanitized_properties)} valid configuration "
+                f"properties after stale entries are removed; Notion allows at most "
+                f"{MAX_VIEW_CONFIGURATION_PROPERTIES}. Remove some columns from the view."
+            )
+
+        sanitized = dict(configuration)
+        sanitized["properties"] = sanitized_properties
+        return sanitized
 
     @staticmethod
     def _view_group(spec: ViewSpec) -> str:
@@ -896,6 +954,7 @@ class NotionInitializer:
                         source,
                         creating=False,
                         preserve_configuration=True,
+                        existing_view=existing,
                     ),
                 )
                 updated += 1
