@@ -12,15 +12,29 @@
 
 ## Unreleased
 
-- 下一版本的变更记录会继续放在这里，发布时再归入对应版本。
-- 修复 Notion AI 视图沿用历史 `configuration.properties` 导致配置条目累积到 100 条的问题；
-  发现残留/重复属性 ID 时，会先把 `configuration.properties` 显式置为 `null`，再写入清理后的配置，
-  解决 Notion 普通 PATCH 浅合并导致历史配置无法移除的问题。合法用户字段会保留，并补齐 5/7 个
-  系统默认字段；清理后若仍超过 Notion 100 项上限，会在请求前明确停止。后续只重置有问题的 view，
-  不再反复改变 view ID；Episode 数据库的 41 个数据字段、页面和 AI 内容不受影响。
-- `audit-view-configurations --details` 现在同时输出 view ID 和父 linked database ID，便于在执行精确维护前核对目标。
-- 修复 Notion 属性 ID 在 data source 与 view 响应中分别使用 URL 编码和解码形式时的误判；
-  现在清理、去重和审计均按规范化 ID 比较，不会把实际存在的字段误报为历史残留并反复重置 view。
+下一版本的变更记录会继续放在这里，发布时再归入对应版本。
+
+### 2026-08-08
+
+- 新增 `audit-view-configurations --details` 及独立的 `Audit Notion View Configurations` 工作流。
+  它只读输出每个托管 view 的 `view_id`、父 linked database、`configuration.properties` 总数、
+  `visible` 数量以及 `known`/`unknown` 属性名，便于先定位再修复。
+- 修复 Notion AI 视图沿用历史 `configuration.properties` 导致配置条目累积到 100 条的问题。
+  发现残留、重复或异常属性 ID 时，程序先把 `configuration.properties` 显式置为 `null`，再写入清理后的
+  配置，解决 Notion 普通 PATCH 浅合并无法移除旧配置的问题。合法用户字段会保留，并补齐 5/7 个系统
+  默认可见字段；没有问题的 view 不重置，也不反复改变 view ID。
+- 修复 data source 与 view 响应中属性 ID 一个 URL 编码、一个解码的兼容问题。清理、去重和审计现在按规范化
+  ID 比较，不会把真实存在的字段误报为历史残留。
+- 清理后的配置如果仍超过 Notion API 对 `configuration.properties` 的 100 项结构上限，会在发出更新请求
+  前明确失败并提示减少配置项，不静默隐藏或丢弃用户新增属性。Episode 数据库字段、页面、文字稿、摘要、
+  思维导图和其他 AI 内容不受视图修复影响。
+- 本次线上维护先归档了根页面中确认重复的 4 个 linked database block（确认串：
+  `ARCHIVE_4_LINKED_DATABASE_BLOCKS`），随后重建当前 18 个托管 view；没有删除数据页、数据库或字段。
+- 验收通过：[CI #31246356714](https://github.com/guoyingwei6/Xyz2Notion/actions/runs/31246356714)、
+  [初始化与最终审计 #31246474176](https://github.com/guoyingwei6/Xyz2Notion/actions/runs/31246474176)、
+  [AI 增强后续 #31246640788](https://github.com/guoyingwei6/Xyz2Notion/actions/runs/31246640788)。最终审计确认
+  Episode 相关配置项 `known=42`、`unknown=0`；`configuration.properties=42` 是合法属性配置总数，
+  不是 42 个可见列，实际可见列按 view 为 5/6/7。
 
 ## 0.2.0 - 2026-08-04
 

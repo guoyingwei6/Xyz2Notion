@@ -32,6 +32,24 @@ Actions 摘要只显示聚合数量。转写状态在 Notion Episode 的 `ASR St
 确认目标根页面和旧模板数据库都已授权给当前 Integration。更换 Token 后要重新
 授权页面。页面 ID 可带或不带连字符，但不能填整个 OAuth 回调结果。
 
+### `body.configuration.properties.length should be ≤ 100`
+
+这不是 Episode 行数，也不是 Notion 页面上肉眼看到的可见列数。`configuration.properties`
+是 view 内部的属性配置数组，可能包含隐藏项、已经删除的属性 ID 或重复项；`visible=true` 的数量才是
+实际显示列数。100 是 Notion Views API 对这个数组的结构校验上限，与 Education Plus 的数据库行数或页面
+块配额不是同一个限制。
+
+先运行只读审计：
+
+```bash
+uv run xyz2notion audit-view-configurations --details
+```
+
+确认 `unknown=0` 且没有重复项后，通常不需要删除数据库字段或 Episode 页面；运行 `Initialize Notion` 的
+`initialize` 会清理受管视图的残留配置并保留合法自定义字段。如果清理后仍超过 100，程序会在请求前停止，
+此时只需减少该 view 的配置项。只有根页面存在重复 linked database 容器时，才在核对精确数量并确认后使用
+`rebuild-dashboard`；该操作归档的是根页面 block，不是数据库、字段或 AI 内容。
+
 ### 百炼 ASR 没有完成
 
 百炼录音文件识别是异步流程，队列会保存任务 ID 并在后续运行继续轮询。只有任务进入

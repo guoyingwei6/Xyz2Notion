@@ -73,6 +73,7 @@ ASR 降级模型和免费文本摘要模型。项目只接受代码已核对的�
 | `Retry Failed Episode AI` | 每 2 小时；也可手动 | 先处理 `人工请求重试`，再处理普通 `可重试失败`；每阶段最多 2 期 |
 | `Xyz2Notion Maintenance` | 手动 | 迁移、单集重做、统计或热力图重建 |
 | `Xyz2Notion Notion-only Repair` | 手动 | 只读盘点 AI/封面/零播放存量，或分批修复封面与已发布脑图；归档已确认的 legacy 零播放页面 |
+| `Audit Notion View Configurations` | 手动 | 只读检查托管视图的配置项总数、可见列数、合法/未知属性和视图归属 |
 
 元数据工作流每天 UTC 21:17（UTC+8 次日 05:17）自动运行一次；手动运行仍必须输入
 `RUN_SAFE_INCREMENTAL_SYNC`。自动与手动运行都受 20 请求、3 秒间隔、单页
@@ -103,6 +104,46 @@ AI 定时任务不包含 `XIAOYUZHOU_REFRESH_TOKEN`。转写队列只读取 Noti
 
 如果 Fork 中存在公开的 `config.yaml`，AI 工作流使用它；否则使用
 `config.example.yaml`。配置文件只能包含模型顺序、运行上限等非秘密设置。
+
+## Notion 视图配置审计、修复与重建
+
+### 先审计，不要先同步
+
+`Audit Notion View Configurations` 工作流只需要 `NOTION_TOKEN` 和 `NOTION_PAGE_ID`，不会访问小宇宙，也不会修改 Notion。
+等价的本地命令是：
+
+```bash
+uv run xyz2notion audit-view-configurations --details
+```
+
+输出中的几个数字含义不同：
+
+- `configuration.properties`：Notion 视图内部保存的属性配置项总数，包含 `visible=false` 的项；它不是页面上当前可见的列数。
+- `visible`：配置项中 `visible=true` 的数量，才是当前实际显示的列数。
+- `known` / `unknown`：这些配置项的属性 ID 是否还能在当前数据源找到。`unknown` 不为 0，或同一个 ID 重复出现，说明视图配置有历史残留。
+- `view_id` / `parent_database_id`：用于确认具体是哪一个 view、哪一个根页面 linked database 容器，不代表 Episode 数据库 ID。
+
+Notion API 对 `configuration.properties` 数组本身有最多 100 项的校验。这是视图配置请求的结构上限，不是 Education Plus 账号的数据库行数、页面块数或字段数配额。因此，Notion 界面看起来只有几列时，历史残留 ID、重复项或隐藏项仍可能让 API 收到 101 项。
+
+### 正常修复路径
+
+1. 先运行上面的只读审计，并保存 Actions 摘要中的 `view_id`、`parent_database_id`、`known` 和 `unknown`。
+2. 如果只是视图属性残留，运行 `Initialize Notion`，选择 `initialize`。程序只对有残留、重复或格式异常的 table/gallery view 显式清空 `configuration.properties`，再写入清理后的配置；合法的用户字段和系统默认字段会保留，view ID 不会反复变化。
+3. 如果根页面中出现重复或失效的 linked database 容器，先运行 `audit-dashboard` 核对精确数量，再由维护者确认后运行 `rebuild-dashboard`。这个操作会归档指定的根页面 linked database block 并重建托管视图，不删除数据页、数据库、字段、Episode 页面、文字稿、摘要或思维导图。工作流要求确认字符串严格匹配：
+
+   ```text
+   ARCHIVE_<expected_count>_LINKED_DATABASE_BLOCKS
+   ```
+
+   例如本次实际核对并执行的是 4 个容器：`ARCHIVE_4_LINKED_DATABASE_BLOCKS`。这里的 4 是根页面 block 数，不是 Episode 数据库字段数；重建后当前代码生成 18 个托管 view。
+
+4. 修复后再次运行 `audit-view-configurations --details`。本次 2026-08-08 的最终审计结果为：Episode 相关配置项 `known=42`、`unknown=0`，`configuration.properties=42`；实际可见列按不同 view 为 5/6/7。42 是当前数据源的合法属性配置总数（包括标题字段 `Name`），不是 42 个显示列。
+
+### 以后增加属性
+
+可以继续在 Episode 数据库增加新属性，也可以在 view 中把合法属性加入显示配置。下次 `initialize` 会保留仍存在于数据源中的合法自定义属性；只在数据库里新建字段不会被程序强行显示。程序会在发出 Notion 请求前检查清理后的配置数量，如果确实超过 100 项就明确失败并提示减少该 view 的配置项，不会静默隐藏或丢弃新属性。
+
+本次线上修复和验证记录：[`Initialize Notion` 归档/重建](https://github.com/guoyingwei6/Xyz2Notion/actions/runs/31245983402)、[代码 CI](https://github.com/guoyingwei6/Xyz2Notion/actions/runs/31246356714)、[最终初始化与审计](https://github.com/guoyingwei6/Xyz2Notion/actions/runs/31246474176)。
 
 ## 维护工作流
 

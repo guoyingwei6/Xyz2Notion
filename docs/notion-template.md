@@ -88,19 +88,32 @@ uv run xyz2notion notion-init --create-home --page-id YOUR_PAGE_ID
 章节和思维导图共用的增强流程。独立的“思维导图”数据库是 JSON、Mermaid 和 Episode
 关系的内容存储层，不是另一条任务队列。
 
-两个 AI 输出视图会由代码做安全协调：例行初始化发现 Notion 中已经不存在的历史属性 ID 或重复项时，
-会先显式清空 `configuration.properties`，再写入清理后的配置；没有问题的 view 不会重置，也不会反复
-改变 view ID。清理后的配置会保留仍存在于 Episode 数据库中的合法字段，并补齐系统需要的默认字段。
+### AI 视图配置和 100 项限制
+
+两个 AI 输出视图会由代码做安全协调：例行初始化发现 Notion 中已经不存在的历史属性 ID、重复项或异常
+配置时，会先显式清空 `configuration.properties`，再写入清理后的配置；没有问题的 view 不会重置，也不会
+反复改变 view ID。清理后的配置会保留仍存在于 Episode 数据库中的合法字段，并补齐系统需要的默认字段。
 Notion 有时会在 data source 响应中返回 URL 编码的属性 ID、在 view 响应中返回解码后的同一 ID；程序会先
-规范化后再判断是否为残留，避免把合法字段误删或每次初始化都重复重置 view。
-默认字段如下：
+规范化后再判断是否为残留，避免把合法字段误删或每次初始化都重复重置 view。其他托管的 table/gallery
+view 也会按同一规则清理失效 ID，同时保留合法的用户布局；chart view 的图表配置原样保留。
+
+下面列出的是两个 AI view 的默认**可见字段**，不是 `configuration.properties` 数组的总长度：
 
 - **转写文本**：`Name`、`人工请求重试`、`ASR Status`、`ASR Provider`、`转写完成时间`；
 - **AI总结与思维导图**：`Name`、`人工请求重试`、`Podcast`、`增强状态`、`增强 Provider`、
   `总结完成时间`、`Content Version`。
 
-你可以直接在 Notion 的 Episode 数据库和这两个视图中增加合法属性；下一次初始化会保留它们。
-清理后的配置如果确实超过 Notion API 的 100 项上限，程序会在发出更新请求前明确停止并提示减少
-视图列，不会静默丢掉你新增的字段。这只改变视图显示配置，不删除 Episode 数据库中的字段、页面
-或 AI 内容。其他普通 Episode、Podcast、统计视图仍保留用户手动调整的属性显示、列顺序、画廊
-卡片布局或图表展示配置。
+`configuration.properties` 是 Notion 视图内部的属性配置数组，可能同时包含 `visible=false` 的隐藏项；
+`visible=true` 的数量才是 Notion 页面实际显示的列数。因此，审计看到 `configuration.properties=42` 并不
+表示页面有 42 列。2026-08-08 的最终审计中，Episode 相关 view 的配置项为 42，全部能映射到当前字段
+（`known=42`、`unknown=0`），实际可见列按 view 为 5/6/7。42 的来源是当前数据源的合法属性总数，包含
+标题字段 `Name`，不是新增了 42 个视图。
+
+Notion API 对这个数组最多接受 100 项；这是视图配置请求的结构限制，不是 Notion Education Plus 的行数或
+页面块配额。历史残留 ID、重复项或隐藏项会让数组超过 100，即使界面上只看到几十列。程序会先清理并去重，
+如果清理后仍然超过 100，则在发出更新请求前明确停止并提示减少该 view 的配置项，不会静默隐藏或丢掉你
+新增的字段。
+
+你可以继续在 Episode 数据库增加合法属性，也可以在这两个 view 中把合法属性加入显示配置；下一次初始化
+会保留它们。只在数据库里新建字段不会被程序强行显示。这些修复只改变 view 的显示配置，不删除 Episode
+数据库中的字段、页面或 AI 内容。
