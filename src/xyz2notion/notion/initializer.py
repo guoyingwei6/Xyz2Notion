@@ -759,6 +759,8 @@ class NotionInitializer:
         ):
             payload["configuration"] = view_configuration(spec, source.property_ids)
         elif spec.key in SANITIZED_VIEW_CONFIGURATION_KEYS:
+            if existing_view is None:
+                raise AssertionError("existing AI view is required for configuration sanitization")
             payload["configuration"] = self._sanitize_view_configuration(
                 spec,
                 source,
