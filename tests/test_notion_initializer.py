@@ -532,6 +532,37 @@ def test_initializer_skips_manual_retry_view_migration_at_notion_limit() -> None
     assert transcript_view["sorts"] == [{"property": "转写完成时间", "direction": "descending"}]
 
 
+def test_view_configuration_count_details_maps_property_ids_to_names() -> None:
+    fake = FakeNotion()
+    initializer = NotionInitializer(fake, "root")
+    result = initializer.initialize(create_home=True)
+
+    transcript_view = next(view for view in fake.views.values() if view["name"] == "转写文本")
+    episode_properties = fake.data_sources[result.resources["episode"].data_source_id]["properties"]
+    transcript_view["configuration"] = {
+        "type": "table",
+        "properties": [
+            {"property_id": episode_properties["Name"]["id"], "visible": True},
+            {"property_id": "removed-property-id", "visible": False},
+            "malformed-entry",
+        ],
+    }
+
+    count_rows = initializer.view_configuration_counts()
+    count_transcript_row = next(row for row in count_rows if row["name"] == "转写文本")
+    rows = initializer.view_configuration_counts(include_properties=True)
+    transcript_row = next(row for row in rows if row["name"] == "转写文本")
+
+    assert count_transcript_row["properties_count"] == 3
+    assert count_transcript_row["properties"] == []
+    assert transcript_row["properties_count"] == 3
+    assert transcript_row["properties"] == [
+        "Name",
+        "<unknown:removed-property-id>",
+        "<unknown:>",
+    ]
+
+
 def test_initializer_migrates_legacy_mindmap_view_to_episode_source() -> None:
     fake = FakeNotion()
     initializer = NotionInitializer(fake, "root")

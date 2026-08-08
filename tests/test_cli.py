@@ -414,6 +414,39 @@ def test_audit_view_configurations_details_reports_names_not_ids(
     assert "private-" not in output
 
 
+def test_audit_view_configurations_reports_missing_token(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.delenv("NOTION_TOKEN", raising=False)  # type: ignore[attr-defined]
+
+    assert main(["audit-view-configurations", "--page-id", "fixture-page"]) == 2
+    assert "Configuration error" in capsys.readouterr().err  # type: ignore[attr-defined]
+
+
+def test_audit_view_configurations_reports_notion_error(
+    capsys: object,
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
+
+    class FailingInitializer:
+        def __init__(self, _api: object, page_id: str) -> None:
+            assert page_id == "fixture-page"
+
+        def view_configuration_counts(
+            self, *, include_properties: bool = False
+        ) -> list[dict[str, object]]:
+            assert include_properties is True
+            raise cli_module.NotionAPIError("private upstream response")
+
+    monkeypatch.setattr(cli_module, "NotionClient", FakeContextClient)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "NotionInitializer", FailingInitializer)  # type: ignore[attr-defined]
+
+    assert main(["audit-view-configurations", "--page-id", "fixture-page", "--details"]) == 4
+    assert "Notion error" in capsys.readouterr().err  # type: ignore[attr-defined]
+
+
 def test_audit_dashboard_reports_notion_error(
     capsys: object,
     monkeypatch: object,
