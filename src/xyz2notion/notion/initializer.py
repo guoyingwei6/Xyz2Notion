@@ -24,7 +24,6 @@ HOME_MARKER_URL = "https://xyz2notion.local/managed-home-v2"
 HOME_SUMMARY_MARKER_URL = "https://xyz2notion.local/listening-summary-v3"
 DEFAULT_COVER_URL = "https://raw.githubusercontent.com/guoyingwei6/Xyz2Notion/main/assets/cover.svg"
 MANAGED_COVER_PATH = "guoyingwei6/Xyz2Notion/main/assets/cover.svg"
-SANITIZED_VIEW_CONFIGURATION_KEYS = frozenset({"episodes_transcript", "mindmaps"})
 LEGACY_DATABASE_TITLES: dict[str, tuple[str, ...]] = {
     "author": ("Author", "作者"),
     "podcast": ("Podcast",),
@@ -748,19 +747,14 @@ class NotionInitializer:
         }
         # Existing non-AI views may contain deliberate user edits to visible
         # columns, their order, gallery card layout, or chart presentation.
-        # The two AI views need sanitization because their configuration may
-        # contain historical/deleted property IDs, but valid user-added fields
-        # remain part of the view.  The system-defined fields are appended if
-        # missing so the queue controls always stay available.
-        if (
-            creating
-            or not preserve_configuration
-            or (spec.key in SANITIZED_VIEW_CONFIGURATION_KEYS and existing_view is None)
-        ):
+        # Existing table/gallery views need sanitization because their
+        # configuration may contain historical/deleted property IDs, but valid
+        # user-added fields remain part of the view.  The system-defined fields
+        # are appended if missing so each managed view keeps its documented
+        # columns available.  Chart configuration is preserved as-is.
+        if creating or not preserve_configuration:
             payload["configuration"] = view_configuration(spec, source.property_ids)
-        elif spec.key in SANITIZED_VIEW_CONFIGURATION_KEYS:
-            if existing_view is None:
-                raise AssertionError("existing AI view is required for configuration sanitization")
+        elif existing_view is not None and spec.view_type in {"table", "gallery"}:
             payload["configuration"] = self._sanitize_view_configuration(
                 spec,
                 source,

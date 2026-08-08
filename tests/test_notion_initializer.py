@@ -502,25 +502,38 @@ def test_initializer_sanitizes_stale_ai_view_configurations_and_keeps_valid_addi
     assert mindmap_view["sorts"] == [{"property": "总结完成时间", "direction": "descending"}]
 
 
-def test_initializer_preserves_non_ai_view_configuration() -> None:
+def test_initializer_sanitizes_non_ai_view_and_preserves_valid_additions() -> None:
     fake = FakeNotion()
     initializer = NotionInitializer(fake, "root")
-    initializer.initialize(create_home=True)
+    result = initializer.initialize(create_home=True)
 
-    episode_view = next(view for view in fake.views.values() if view["name"] == "Episode · 听过")
+    statistics_view = next(view for view in fake.views.values() if view["name"] == "总收听时长")
+    all_property_ids = result.resources["all"].property_ids
     custom_configuration = {
         "type": "table",
-        "properties": [{"property_id": "custom", "visible": True}],
+        "properties": [
+            {"property_id": all_property_ids["Period Key"], "visible": False},
+            {"property_id": "removed-property", "visible": True},
+        ],
         "wrap_cells": False,
         "frozen_column_index": 1,
         "show_vertical_lines": True,
     }
-    episode_view["configuration"] = custom_configuration
+    statistics_view["configuration"] = custom_configuration
 
-    result = initializer.initialize()
+    initializer.initialize()
 
-    assert result.updated_views == len(VIEW_SPECS) - 1
-    assert episode_view["configuration"] == custom_configuration
+    desired_spec = next(spec for spec in VIEW_SPECS if spec.name == "总收听时长")
+    actual_properties = statistics_view["configuration"]["properties"]
+    actual_ids = {item["property_id"] for item in actual_properties}
+    desired_ids = {
+        item["property_id"]
+        for item in view_configuration(desired_spec, all_property_ids)["properties"]
+    }
+    assert desired_ids.issubset(actual_ids)
+    assert all_property_ids["Period Key"] in actual_ids
+    assert "removed-property" not in actual_ids
+    assert statistics_view["configuration"]["wrap_cells"] is False
 
 
 def test_view_configuration_rejects_more_than_notion_limit() -> None:
