@@ -35,6 +35,7 @@ class FakeNotion:
         self.created_databases = 0
         self.created_views = 0
         self.updated_views = 0
+        self.updated_view_payloads: list[tuple[str, JsonObject]] = []
         self.deleted_view_ids: list[str] = []
 
     def retrieve_page(self, page_id: str) -> JsonObject:
@@ -168,6 +169,7 @@ class FakeNotion:
 
     def update_view(self, view_id: str, payload: Mapping[str, Any]) -> JsonObject:
         self.updated_views += 1
+        self.updated_view_payloads.append((view_id, dict(payload)))
         self.views[view_id].update(payload)
         return self.views[view_id]
 
@@ -474,14 +476,28 @@ def test_initializer_sanitizes_stale_ai_view_configurations_and_keeps_valid_addi
     )
     transcript_view["configuration"] = dict(oversized_configuration)
     mindmap_view["configuration"] = dict(oversized_configuration)
+    update_payload_start = len(fake.updated_view_payloads)
 
     result = initializer.initialize()
 
     managed_view_count = len(VIEW_SPECS) - 1
-    assert result.created_views == 2
-    assert result.updated_views == managed_view_count - 2
-    assert result.deleted_views == 2
-    assert old_view_ids.issubset(set(fake.deleted_view_ids))
+    assert result.created_views == 0
+    assert result.updated_views == managed_view_count
+    assert result.deleted_views == 0
+    assert not old_view_ids.intersection(set(fake.deleted_view_ids))
+    repair_payloads = [
+        payload
+        for view_id, payload in fake.updated_view_payloads[update_payload_start:]
+        if view_id in old_view_ids
+    ]
+    assert (
+        sum(
+            payload.get("configuration", {}).get("properties") is None
+            for payload in repair_payloads
+            if isinstance(payload.get("configuration"), Mapping)
+        )
+        == 2
+    )
     transcript_spec = next(spec for spec in VIEW_SPECS if spec.key == "episodes_transcript")
     mindmap_spec = next(spec for spec in VIEW_SPECS if spec.key == "mindmaps")
     transcript_view = next(view for view in fake.views.values() if view["name"] == "转写文本")
@@ -531,9 +547,8 @@ def test_initializer_sanitizes_non_ai_view_and_preserves_valid_additions() -> No
     result = initializer.initialize()
 
     desired_spec = next(spec for spec in VIEW_SPECS if spec.name == "总收听时长")
-    assert result.created_views == 1
-    assert result.deleted_views == 1
-    statistics_view = next(view for view in fake.views.values() if view["name"] == "总收听时长")
+    assert result.created_views == 0
+    assert result.deleted_views == 0
     actual_properties = statistics_view["configuration"]["properties"]
     actual_ids = {item["property_id"] for item in actual_properties}
     desired_ids = {
@@ -572,7 +587,7 @@ def test_initializer_preserves_valid_custom_column_without_rebuilding_view() -> 
     }
 
 
-def test_view_configuration_rebuild_detection_rejects_malformed_shapes() -> None:
+def test_view_configuration_reset_detection_rejects_malformed_shapes() -> None:
     fake = FakeNotion()
     initializer = NotionInitializer(fake, "root")
     first = initializer.initialize(create_home=True)
@@ -580,23 +595,23 @@ def test_view_configuration_rebuild_detection_rejects_malformed_shapes() -> None
     source = first.resources["episode"]
     valid_property_id = source.property_ids["Name"]
 
-    assert not initializer._view_configuration_needs_rebuild(
+    assert not initializer._view_configuration_needs_reset(
         spec,
         source,
         {"configuration": {"type": "table", "properties": []}},
     )
-    assert initializer._view_configuration_needs_rebuild(spec, source, {})
-    assert initializer._view_configuration_needs_rebuild(
+    assert initializer._view_configuration_needs_reset(spec, source, {})
+    assert initializer._view_configuration_needs_reset(
         spec,
         source,
         {"configuration": {"type": "gallery", "properties": []}},
     )
-    assert initializer._view_configuration_needs_rebuild(
+    assert initializer._view_configuration_needs_reset(
         spec,
         source,
         {"configuration": {"type": "table", "properties": {}}},
     )
-    assert initializer._view_configuration_needs_rebuild(
+    assert initializer._view_configuration_needs_reset(
         spec,
         source,
         {
@@ -606,7 +621,7 @@ def test_view_configuration_rebuild_detection_rejects_malformed_shapes() -> None
             }
         },
     )
-    assert initializer._view_configuration_needs_rebuild(
+    assert initializer._view_configuration_needs_reset(
         spec,
         source,
         {

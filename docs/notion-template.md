@@ -89,8 +89,9 @@ uv run xyz2notion notion-init --create-home --page-id YOUR_PAGE_ID
 关系的内容存储层，不是另一条任务队列。
 
 两个 AI 输出视图会由代码做安全协调：例行初始化发现 Notion 中已经不存在的历史属性 ID 或重复项时，
-会在同一个 linked database 中先创建清理后的替代 view，再删除旧 view；没有问题的 view 不会重建。
-替代 view 会保留仍存在于 Episode 数据库中的合法字段，并补齐系统需要的默认字段。默认字段如下：
+会先显式清空 `configuration.properties`，再写入清理后的配置；没有问题的 view 不会重置，也不会反复
+改变 view ID。清理后的配置会保留仍存在于 Episode 数据库中的合法字段，并补齐系统需要的默认字段。
+默认字段如下：
 
 - **转写文本**：`Name`、`人工请求重试`、`ASR Status`、`ASR Provider`、`转写完成时间`；
 - **AI总结与思维导图**：`Name`、`人工请求重试`、`Podcast`、`增强状态`、`增强 Provider`、

@@ -797,12 +797,12 @@ class NotionInitializer:
         return payload
 
     @staticmethod
-    def _view_configuration_needs_rebuild(
+    def _view_configuration_needs_reset(
         spec: ViewSpec,
         source: NotionResource,
         existing_view: Mapping[str, Any],
     ) -> bool:
-        """Return whether PATCH cannot safely remove the view's old entries."""
+        """Return whether the view needs an explicit property reset before PATCH."""
         if spec.view_type not in {"table", "gallery"}:
             return False
         configuration = existing_view.get("configuration")
@@ -911,52 +911,35 @@ class NotionInitializer:
                 pending_group = None
         return anchors
 
-    def _rebuild_view(
+    def _reset_view_configuration(
         self,
         spec: ViewSpec,
         source: NotionResource,
         existing: Mapping[str, Any],
-    ) -> JsonObject:
-        """Create a clean replacement in the same linked database, then delete the old view."""
+    ) -> None:
+        """Clear server-side properties, then write the sanitized configuration."""
         view_id = str(existing.get("id") or "")
-        parent = existing.get("parent")
-        database_id = (
-            str(parent.get("database_id"))
-            if isinstance(parent, Mapping) and parent.get("database_id")
-            else ""
-        )
-        if not view_id or not database_id:
-            raise ValueError(
-                f"Cannot rebuild managed view {spec.name!r}: missing view or parent database ID"
-            )
+        if not view_id:
+            raise ValueError(f"Cannot reset managed view {spec.name!r}: missing view ID")
 
-        replacement = self.api.create_view(
-            self._view_payload(
-                spec,
-                source,
-                creating=True,
-                preserve_configuration=True,
-                existing_view=existing,
-                database_id=database_id,
-            )
+        sanitized_payload = self._view_payload(
+            spec,
+            source,
+            creating=False,
+            preserve_configuration=True,
+            existing_view=existing,
         )
-        replacement_id = str(replacement.get("id") or "")
-        replacement_parent = replacement.get("parent")
-        replacement_database_id = (
-            str(replacement_parent.get("database_id"))
-            if isinstance(replacement_parent, Mapping) and replacement_parent.get("database_id")
-            else ""
+        # Notion documents configuration updates as shallow merges.  In
+        # practice, sending a replacement properties array can retain old
+        # server-side entries.  Explicitly nulling the nullable properties
+        # field first is the API-supported reset operation; the second PATCH
+        # then writes only valid IDs while preserving the other presentation
+        # settings and the view's stable ID.
+        self.api.update_view(
+            view_id,
+            {"configuration": {"type": spec.view_type, "properties": None}},
         )
-        if not replacement_id or replacement_database_id != database_id:
-            raise ValueError(
-                f"Notion replacement for view {spec.name!r} was not created in the same database"
-            )
-
-        # Create first so a failed POST leaves the user's original view intact.
-        # The delete is scoped to this exact view object; the linked database,
-        # data source, properties, and pages are not touched.
-        self.api.delete_view(view_id)
-        return replacement
+        self.api.update_view(view_id, sanitized_payload)
 
     def _ensure_views(self, resources: dict[str, NotionResource]) -> tuple[int, int, int]:
         created = 0
@@ -1032,11 +1015,9 @@ class NotionInitializer:
                 group_tail[group] = database_id
                 managed_views[(source.data_source_id, spec.name)] = view
                 created += 1
-            elif self._view_configuration_needs_rebuild(spec, source, existing):
-                view = self._rebuild_view(spec, source, existing)
-                managed_views[(source.data_source_id, spec.name)] = view
-                created += 1
-                deleted += 1
+            elif self._view_configuration_needs_reset(spec, source, existing):
+                self._reset_view_configuration(spec, source, existing)
+                updated += 1
             else:
                 self.api.update_view(
                     str(existing["id"]),
