@@ -1237,7 +1237,16 @@ def _run_audit_view_configurations(args: argparse.Namespace) -> int:
     for row in rows:
         count = row["properties_count"]
         count_label = "unknown" if count is None else str(count)
-        print(f"- {row['name']}: configuration.properties={count_label}")
+        visible_count = row.get("visible_properties_count")
+        visible_label = "unknown" if visible_count is None else str(visible_count)
+        line = f"- {row['name']}: configuration.properties={count_label}, visible={visible_label}"
+        if args.details:
+            known_count = row.get("known_properties_count")
+            unknown_count = row.get("unknown_properties_count")
+            known_label = "unknown" if known_count is None else str(known_count)
+            unknown_label = "unknown" if unknown_count is None else str(unknown_count)
+            line += f", known={known_label}, unknown={unknown_label}"
+        print(line)
         if args.details:
             properties = row.get("properties")
             if isinstance(properties, list) and properties:

@@ -23,7 +23,7 @@ HOME_MARKER_URL = "https://xyz2notion.local/managed-home-v2"
 HOME_SUMMARY_MARKER_URL = "https://xyz2notion.local/listening-summary-v3"
 DEFAULT_COVER_URL = "https://raw.githubusercontent.com/guoyingwei6/Xyz2Notion/main/assets/cover.svg"
 MANAGED_COVER_PATH = "guoyingwei6/Xyz2Notion/main/assets/cover.svg"
-MAX_VIEW_CONFIGURATION_PROPERTIES = 100
+AUTHORITATIVE_VIEW_CONFIGURATION_KEYS = frozenset({"episodes_transcript", "mindmaps"})
 LEGACY_DATABASE_TITLES: dict[str, tuple[str, ...]] = {
     "author": ("Author", "作者"),
     "podcast": ("Podcast",),
@@ -680,11 +680,18 @@ class NotionInitializer:
         for (data_source_id, name), view in sorted(self._managed_views().items()):
             configuration = view.get("configuration")
             properties_count: int | None = None
+            visible_properties_count: int | None = None
+            known_properties_count: int | None = None
+            unknown_properties_count: int | None = None
             configured_properties: list[str] = []
             if isinstance(configuration, Mapping):
                 properties = configuration.get("properties")
                 if isinstance(properties, list):
                     properties_count = len(properties)
+                    visible_properties_count = sum(
+                        isinstance(item, Mapping) and item.get("visible") is True
+                        for item in properties
+                    )
                     if include_properties:
                         property_names = property_names_by_source.get(data_source_id)
                         if property_names is None:
@@ -694,21 +701,30 @@ class NotionInitializer:
                                 for property_name, property_id in _property_ids(data_source).items()
                             }
                             property_names_by_source[data_source_id] = property_names
+                        known_properties_count = 0
+                        unknown_properties_count = 0
                         for item in properties:
                             property_id = (
                                 str(item.get("property_id") or "")
                                 if isinstance(item, Mapping)
                                 else ""
                             )
-                            configured_properties.append(
-                                property_names.get(property_id, f"<unknown:{property_id}>")
-                            )
+                            property_name = property_names.get(property_id)
+                            if property_name is None:
+                                unknown_properties_count += 1
+                                configured_properties.append(f"<unknown:{property_id}>")
+                            else:
+                                known_properties_count += 1
+                                configured_properties.append(property_name)
             rows.append(
                 {
                     "data_source_id": data_source_id,
                     "view_id": str(view.get("id") or ""),
                     "name": name,
                     "properties_count": properties_count,
+                    "visible_properties_count": visible_properties_count,
+                    "known_properties_count": known_properties_count,
+                    "unknown_properties_count": unknown_properties_count,
                     "properties": configured_properties,
                 }
             )
@@ -721,7 +737,6 @@ class NotionInitializer:
         *,
         creating: bool,
         preserve_configuration: bool = False,
-        existing_view: Mapping[str, Any] | None = None,
         database_id: str | None = None,
         after_block_id: str | None = None,
     ) -> JsonObject:
@@ -729,37 +744,19 @@ class NotionInitializer:
             "name": spec.name,
             "sorts": list(spec.sorts),
         }
-        # Existing views may contain deliberate user edits to visible columns,
-        # their order, gallery card layout, or chart presentation.  Do not send
-        # a replacement configuration during routine initialization; omitting
-        # it from PATCH preserves Notion's current view configuration.  New
-        # views still receive the complete code-defined default configuration.
-        if creating or not preserve_configuration:
+        # Existing non-AI views may contain deliberate user edits to visible
+        # columns, their order, gallery card layout, or chart presentation.
+        # The two AI views are different: their columns are the public control
+        # surface for the ASR/enrichment queues, so their configuration is
+        # code-owned and must be rebuilt from the current whitelist on every
+        # reconciliation.  Replacing it also removes historical/deleted
+        # property IDs that Notion can retain in the view configuration.
+        if (
+            creating
+            or not preserve_configuration
+            or spec.key in AUTHORITATIVE_VIEW_CONFIGURATION_KEYS
+        ):
             payload["configuration"] = view_configuration(spec, source.property_ids)
-        elif spec.key in {"episodes_transcript", "mindmaps"} and existing_view is not None:
-            # Add the one manual retry switch to existing AI tables exactly once.
-            # The rest of the user's layout, column order, and visibility remain
-            # untouched.  If the user later hides the column, its property ID is
-            # already present and this migration will not re-add it.
-            configuration = existing_view.get("configuration")
-            manual_retry_id = source.property_ids.get("人工请求重试")
-            if isinstance(configuration, Mapping) and manual_retry_id:
-                properties = configuration.get("properties")
-                if (
-                    isinstance(properties, list)
-                    and not any(
-                        isinstance(item, Mapping)
-                        and str(item.get("property_id") or "") == manual_retry_id
-                        for item in properties
-                    )
-                    and len(properties) < MAX_VIEW_CONFIGURATION_PROPERTIES
-                ):
-                    migrated_configuration = dict(configuration)
-                    migrated_configuration["properties"] = [
-                        *properties,
-                        {"property_id": manual_retry_id, "visible": True},
-                    ]
-                    payload["configuration"] = migrated_configuration
         if spec.filter is not None or not creating:
             payload["filter"] = spec.filter
         if creating:
@@ -899,7 +896,6 @@ class NotionInitializer:
                         source,
                         creating=False,
                         preserve_configuration=True,
-                        existing_view=existing,
                     ),
                 )
                 updated += 1

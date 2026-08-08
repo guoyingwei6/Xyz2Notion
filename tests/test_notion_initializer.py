@@ -10,7 +10,6 @@ from xyz2notion.notion.initializer import (
     HOME_MARKER,
     HOME_MARKER_URL,
     HOME_SUMMARY_MARKER_URL,
-    MAX_VIEW_CONFIGURATION_PROPERTIES,
     NotionInitializer,
     home_blocks,
 )
@@ -449,87 +448,80 @@ def test_initializer_is_idempotent_and_preserves_user_content() -> None:
     assert marker_count == 1
 
 
-def test_initializer_preserves_manual_view_columns_and_order() -> None:
+def test_initializer_reconciles_authoritative_ai_view_configurations() -> None:
     fake = FakeNotion()
     initializer = NotionInitializer(fake, "root")
-    initializer.initialize(create_home=True)
+    first = initializer.initialize(create_home=True)
 
     transcript_view = next(view for view in fake.views.values() if view["name"] == "转写文本")
     mindmap_view = next(view for view in fake.views.values() if view["name"] == "AI总结与思维导图")
-    transcript_configuration = {
+    oversized_configuration = {
         "type": "table",
         "properties": [
-            {"property_id": "podcast", "visible": True},
-            {"property_id": "title", "visible": True},
+            {"property_id": f"historical-{index}", "visible": index % 2 == 0}
+            for index in range(100)
         ],
         "wrap_cells": False,
         "frozen_column_index": 1,
         "show_vertical_lines": True,
     }
-    mindmap_configuration = {
-        "type": "table",
-        "properties": [
-            {"property_id": "title", "visible": True},
-            {"property_id": "enhancement-status", "visible": True},
-        ],
-        "wrap_cells": True,
-        "frozen_column_index": 1,
-        "show_vertical_lines": False,
-    }
-    transcript_view["configuration"] = transcript_configuration
-    mindmap_view["configuration"] = mindmap_configuration
+    transcript_view["configuration"] = dict(oversized_configuration)
+    mindmap_view["configuration"] = dict(oversized_configuration)
 
     result = initializer.initialize()
 
     assert result.updated_views == len(VIEW_SPECS) - 1
-    assert (
-        transcript_view["configuration"]["properties"][:2] == transcript_configuration["properties"]
+    episode_property_ids = first.resources["episode"].property_ids
+    transcript_spec = next(spec for spec in VIEW_SPECS if spec.key == "episodes_transcript")
+    mindmap_spec = next(spec for spec in VIEW_SPECS if spec.key == "mindmaps")
+    assert transcript_view["configuration"] == view_configuration(
+        transcript_spec, episode_property_ids
     )
-    assert transcript_view["configuration"]["properties"][2] == {
-        "property_id": "ds-3:人工请求重试",
-        "visible": True,
-    }
-    assert mindmap_view["configuration"]["properties"][:2] == mindmap_configuration["properties"]
-    assert mindmap_view["configuration"]["properties"][2] == {
-        "property_id": "ds-3:人工请求重试",
-        "visible": True,
-    }
-    assert transcript_view["configuration"]["wrap_cells"] is False
-    assert mindmap_view["configuration"]["wrap_cells"] is True
-    # Filters and sorts remain code-managed while presentation settings stay
-    # under the user's control.
+    assert mindmap_view["configuration"] == view_configuration(mindmap_spec, episode_property_ids)
+    assert len(transcript_view["configuration"]["properties"]) == 5
+    assert len(mindmap_view["configuration"]["properties"]) == 7
+    assert all(
+        item["property_id"] != "historical-0"
+        for item in transcript_view["configuration"]["properties"]
+    )
+    assert all(
+        item["property_id"] != "historical-0"
+        for item in mindmap_view["configuration"]["properties"]
+    )
     assert transcript_view["sorts"] == [{"property": "转写完成时间", "direction": "descending"}]
     assert mindmap_view["sorts"] == [{"property": "总结完成时间", "direction": "descending"}]
 
 
-def test_initializer_skips_manual_retry_view_migration_at_notion_limit() -> None:
+def test_initializer_preserves_non_ai_view_configuration() -> None:
     fake = FakeNotion()
     initializer = NotionInitializer(fake, "root")
     initializer.initialize(create_home=True)
 
-    transcript_view = next(view for view in fake.views.values() if view["name"] == "转写文本")
-    existing_properties = [
-        {"property_id": f"custom-{index}", "visible": True}
-        for index in range(MAX_VIEW_CONFIGURATION_PROPERTIES)
-    ]
-    transcript_view["configuration"] = {
+    episode_view = next(view for view in fake.views.values() if view["name"] == "Episode · 听过")
+    custom_configuration = {
         "type": "table",
-        "properties": existing_properties,
+        "properties": [{"property_id": "custom", "visible": True}],
         "wrap_cells": False,
         "frozen_column_index": 1,
         "show_vertical_lines": True,
     }
+    episode_view["configuration"] = custom_configuration
 
     result = initializer.initialize()
 
     assert result.updated_views == len(VIEW_SPECS) - 1
-    assert transcript_view["configuration"]["properties"] == existing_properties
-    assert len(transcript_view["configuration"]["properties"]) == MAX_VIEW_CONFIGURATION_PROPERTIES
-    assert all(
-        item["property_id"] != "ds-3:人工请求重试"
-        for item in transcript_view["configuration"]["properties"]
+    assert episode_view["configuration"] == custom_configuration
+
+
+def test_view_configuration_rejects_more_than_notion_limit() -> None:
+    spec = replace(
+        next(spec for spec in VIEW_SPECS if spec.key == "episodes_transcript"),
+        visible_properties=tuple(f"property-{index}" for index in range(101)),
     )
-    assert transcript_view["sorts"] == [{"property": "转写完成时间", "direction": "descending"}]
+    property_ids = {name: f"id-{index}" for index, name in enumerate(spec.visible_properties)}
+
+    with pytest.raises(ValueError, match="allows at most 100"):
+        view_configuration(spec, property_ids)
 
 
 def test_view_configuration_count_details_maps_property_ids_to_names() -> None:
@@ -554,8 +546,14 @@ def test_view_configuration_count_details_maps_property_ids_to_names() -> None:
     transcript_row = next(row for row in rows if row["name"] == "转写文本")
 
     assert count_transcript_row["properties_count"] == 3
+    assert count_transcript_row["visible_properties_count"] == 1
+    assert count_transcript_row["known_properties_count"] is None
+    assert count_transcript_row["unknown_properties_count"] is None
     assert count_transcript_row["properties"] == []
     assert transcript_row["properties_count"] == 3
+    assert transcript_row["visible_properties_count"] == 1
+    assert transcript_row["known_properties_count"] == 1
+    assert transcript_row["unknown_properties_count"] == 2
     assert transcript_row["properties"] == [
         "Name",
         "<unknown:removed-property-id>",

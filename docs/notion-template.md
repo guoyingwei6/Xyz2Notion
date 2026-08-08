@@ -55,7 +55,7 @@ uv run xyz2notion notion-init --create-home --page-id YOUR_PAGE_ID
 - 按数据源、首页父页面和视图名称复用视图；
 - 只添加缺失的 Xyz2Notion 管理属性，不重写已有 Formula、Relation 或选项；
 - 不传 `null` 删除未知属性；
-- 不删除任何数据库、视图、页面块或用户笔记；
+- 不删除数据库、页面块、用户笔记或 Episode 数据属性；仅清理已明确由代码托管的旧展示视图和视图配置；
 - 首页标记或稳定布局锚点已存在时不重复创建布局。
 
 因此重复执行不会生成第二套数据库或视图，用户添加的字段、块和视图会保留。
@@ -88,5 +88,12 @@ uv run xyz2notion notion-init --create-home --page-id YOUR_PAGE_ID
 章节和思维导图共用的增强流程。独立的“思维导图”数据库是 JSON、Mermaid 和 Episode
 关系的内容存储层，不是另一条任务队列。
 
-例行初始化只维护缺失的数据结构、视图筛选和排序，不覆盖用户手动调整的属性显示、列顺序、
-画廊卡片布局或图表展示配置。
+两个 AI 输出视图是代码托管视图，例行初始化会把它们的 `configuration.properties` 重建为当前
+白名单，自动删除 Notion 中残留的历史属性 ID，并保证不会超过 Notion API 的 100 项上限：
+
+- **转写文本**：`Name`、`人工请求重试`、`ASR Status`、`ASR Provider`、`转写完成时间`；
+- **AI总结与思维导图**：`Name`、`人工请求重试`、`Podcast`、`增强状态`、`增强 Provider`、
+  `总结完成时间`、`Content Version`。
+
+这只改变两个视图显示哪些列，不删除 Episode 数据库中的字段、页面或 AI 内容。其他普通 Episode、
+Podcast、统计视图仍保留用户手动调整的属性显示、列顺序、画廊卡片布局或图表展示配置。

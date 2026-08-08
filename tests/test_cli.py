@@ -356,12 +356,14 @@ def test_audit_view_configurations_reports_counts(
                     "view_id": "private-view-id",
                     "name": "转写文本",
                     "properties_count": 100,
+                    "visible_properties_count": 5,
                 },
                 {
                     "data_source_id": "private-source-id",
                     "view_id": "private-view-id-2",
                     "name": "AI总结与思维导图",
                     "properties_count": 5,
+                    "visible_properties_count": 5,
                 },
             ]
 
@@ -373,8 +375,8 @@ def test_audit_view_configurations_reports_counts(
     assert main(["audit-view-configurations"]) == 0
     output = capsys.readouterr().out  # type: ignore[attr-defined]
     assert "View configuration audit OK" in output
-    assert "- 转写文本: configuration.properties=100" in output
-    assert "- AI总结与思维导图: configuration.properties=5" in output
+    assert "- 转写文本: configuration.properties=100, visible=5" in output
+    assert "- AI总结与思维导图: configuration.properties=5, visible=5" in output
     assert "private-" not in output
 
 
@@ -400,6 +402,9 @@ def test_audit_view_configurations_details_reports_names_not_ids(
                     "view_id": "private-view-id",
                     "name": "转写文本",
                     "properties_count": 2,
+                    "visible_properties_count": 2,
+                    "known_properties_count": 2,
+                    "unknown_properties_count": 0,
                     "properties": ["Name", "人工请求重试"],
                 }
             ]
@@ -408,7 +413,7 @@ def test_audit_view_configurations_details_reports_names_not_ids(
 
     assert main(["audit-view-configurations", "--details"]) == 0
     output = capsys.readouterr().out  # type: ignore[attr-defined]
-    assert "- 转写文本: configuration.properties=2" in output
+    assert "- 转写文本: configuration.properties=2, visible=2, known=2, unknown=0" in output
     assert "  1. Name" in output
     assert "  2. 人工请求重试" in output
     assert "private-" not in output

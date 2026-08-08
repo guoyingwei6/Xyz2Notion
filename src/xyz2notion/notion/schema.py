@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 JsonObject = dict[str, Any]
+MAX_VIEW_CONFIGURATION_PROPERTIES = 100
 
 
 @dataclass(frozen=True)
@@ -652,6 +653,14 @@ def view_configuration(spec: ViewSpec, property_ids: dict[str, str]) -> JsonObje
         for name in spec.visible_properties
         if name in property_ids
     ]
+    if len(properties) > MAX_VIEW_CONFIGURATION_PROPERTIES:
+        raise ValueError(
+            f"View {spec.name!r} defines {len(properties)} configuration properties; "
+            f"Notion allows at most {MAX_VIEW_CONFIGURATION_PROPERTIES}"
+        )
+    property_ids_in_configuration = [item["property_id"] for item in properties]
+    if len(property_ids_in_configuration) != len(set(property_ids_in_configuration)):
+        raise ValueError(f"View {spec.name!r} defines duplicate configuration properties")
     if spec.view_type == "gallery":
         configuration: JsonObject = {
             "type": "gallery",
