@@ -96,11 +96,12 @@ AI 定时任务不包含 `XIAOYUZHOU_REFRESH_TOKEN`。转写队列只读取 Noti
 
 1. 在 `Actions` 手动运行 `Initialize Notion`，首次选择 `bootstrap`；
 2. 手动运行 `Sync Podcast Metadata`；
-3. 各手动运行一次 `Transcribe Episode Queue` 和
+3. 先手动运行 `Enrich Transcribed Episodes` 并勾选 `preflight_only`，确认摘要路由健康；
+4. 各手动运行一次 `Transcribe Episode Queue` 和
    `Enrich Transcribed Episodes`，每次只选 1 期；
-4. 验收成功后启用两条 Queue Variable；首次将两个 backlog Variable 设为
+5. 验收成功后启用两条 Queue Variable；首次将两个 backlog Variable 设为
    `true`，存量清空后改为 `false`；
-5. 查看工作流摘要中的聚合计数，以及 Notion Episode 的 `ASR Status`。
+6. 查看工作流摘要中的聚合计数，以及 Notion Episode 的 `ASR Status` 和 `增强状态`。
 
 如果 Fork 中存在公开的 `config.yaml`，AI 工作流使用它；否则使用
 `config.example.yaml`。配置文件只能包含模型顺序、运行上限等非秘密设置。

@@ -84,13 +84,17 @@ jobs:
           set -euo pipefail
           config_path="config.yaml"
           if [[ ! -f "$config_path" ]]; then config_path="config.example.yaml"; fi
+          set +e
           result="$(uv run xyz2notion process-manual-retries \
-            --config "$config_path" --limit "${RETRY_LIMIT:-2}")"
+            --config "$config_path" --limit "${RETRY_LIMIT:-2}" 2>&1)"
+          status=$?
+          set -e
           printf '%s\n' "$result"
           {
             printf '## Xyz2Notion manually requested retries\n\n'
             printf '```text\n%s\n```\n' "$result"
           } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
 
       - name: Retry failed ASR checkpoints only
         if: github.event_name == 'workflow_dispatch' || vars.ASR_QUEUE_ENABLED == 'true'
@@ -125,10 +129,14 @@ jobs:
           set -euo pipefail
           config_path="config.yaml"
           if [[ ! -f "$config_path" ]]; then config_path="config.example.yaml"; fi
+          set +e
           result="$(uv run python -m xyz2notion.orchestration.enrichment_queue \
-            --config "$config_path" --mode retry --limit "${RETRY_LIMIT:-2}")"
+            --config "$config_path" --mode retry --limit "${RETRY_LIMIT:-2}" 2>&1)"
+          status=$?
+          set -e
           printf '%s\n' "$result"
           {
             printf '## Xyz2Notion failed enrichment retry\n\n'
             printf '```text\n%s\n```\n' "$result"
           } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"

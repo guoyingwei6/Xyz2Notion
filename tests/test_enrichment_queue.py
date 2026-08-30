@@ -14,6 +14,7 @@ from xyz2notion.config import (
     RuntimeCredentials,
     SummaryConfig,
 )
+from xyz2notion.models import ProviderError, ProviderErrorCategory, ProviderFailure
 from xyz2notion.notion.client import NotionAPIError
 from xyz2notion.orchestration import enrichment_queue as queue_module
 from xyz2notion.orchestration.enrichment_queue import (
@@ -37,8 +38,9 @@ def episode(
     favorited: bool = False,
     liked: bool = False,
     listening_status: str | None = None,
+    enrichment_status: str | None = None,
 ) -> dict[str, object]:
-    return {
+    page: dict[str, object] = {
         "id": page_id,
         "properties": {
             "Name": {"title": [{"plain_text": f"title-{page_id}"}]},
@@ -54,6 +56,11 @@ def episode(
             "Skip AI": {"checkbox": False},
         },
     }
+    if enrichment_status is not None:
+        properties = page["properties"]
+        assert isinstance(properties, dict)
+        properties["增强状态"] = {"select": {"name": enrichment_status}}
+    return page
 
 
 @dataclass
@@ -115,6 +122,17 @@ def test_queue_selects_only_transcript_or_publish_checkpoints() -> None:
         "enriched",
         "transcribed",
     ]
+
+
+def test_queue_uses_independent_enrichment_status_after_asr_is_complete() -> None:
+    pages = [
+        episode("pending", status="已转写", enrichment_status="待增强"),
+        episode("publish", status="已转写", enrichment_status="待发布"),
+        episode("complete", status="已转写", enrichment_status="已完成"),
+        episode("failed", status="已转写", enrichment_status="最终失败"),
+    ]
+    selected = select_enrichment_work(pages, limit=10)
+    assert [candidate.page_id for candidate, _page in selected] == ["publish", "pending"]
 
 
 def test_queue_keeps_episode_candidate_safety_gates() -> None:
@@ -224,6 +242,8 @@ def test_queue_modes_apply_strict_caps() -> None:
     assert resolve_queue_limit("normal", 99) == 2
     with pytest.raises(ValueError, match="positive"):
         resolve_queue_limit("backlog", 0)
+    with pytest.raises(ValueError, match="unknown"):
+        resolve_queue_limit("invalid")
 
 
 def test_status_parser_and_candidate_skip_malformed_pages() -> None:
@@ -234,6 +254,10 @@ def test_status_parser_and_candidate_skip_malformed_pages() -> None:
             {"properties": {"ASR Status": []}}
         )
         == ""
+    )
+    assert queue_module._episode_enrichment_status({}) == ""  # type: ignore[attr-defined]
+    assert (  # type: ignore[attr-defined]
+        queue_module._episode_enrichment_status({"properties": {"增强状态": {"select": []}}}) == ""
     )
     assert (
         queue_module._episode_status(  # type: ignore[attr-defined]
@@ -283,7 +307,6 @@ def test_summary_policy_and_remote_to_local_client_wiring(
         ("local", None),
         ("fallback", ("remote-client", "local-client")),
     ]
-
     calls.clear()
     assert queue_module._summary_client(config, None) == (  # type: ignore[attr-defined]
         None,
@@ -293,6 +316,36 @@ def test_summary_policy_and_remote_to_local_client_wiring(
         ("local", None),
         ("fallback", (None, "local-client")),
     ]
+
+
+def test_summary_preflight_is_notion_free_and_validates_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    credentials = RuntimeCredentials(xiaoyuzhou_device_id="test-device")
+    summary_context = FakeContext("summary-client")
+    report = SimpleNamespace(summary=lambda: "healthy")
+    calls: list[object] = []
+    monkeypatch.setattr(queue_module, "load_config", lambda _path: AppConfig())
+    monkeypatch.setattr(queue_module, "load_runtime_credentials", lambda: credentials)
+    monkeypatch.setattr(queue_module, "_summary_client", lambda *_args: summary_context)
+    monkeypatch.setattr(
+        queue_module,
+        "preflight_summary_client",
+        lambda client: calls.append(client) or report,
+    )
+    assert queue_module.run_summary_preflight(config_path="config.yaml") is report
+    assert calls == ["summary-client"]
+
+    for config, message in (
+        (AppConfig(summary=SummaryConfig(enabled=False)), "summary.enabled"),
+        (
+            AppConfig(summary=SummaryConfig(local_qwen_fallback=False)),
+            "local_qwen_fallback",
+        ),
+    ):
+        monkeypatch.setattr(queue_module, "load_config", lambda _path, value=config: value)
+        with pytest.raises(ConfigurationError, match=message):
+            queue_module.run_summary_preflight(config_path="config.yaml")
 
 
 def test_run_enrichment_queue_uses_only_summary_clients(
@@ -338,6 +391,12 @@ def test_run_enrichment_queue_uses_only_summary_clients(
     monkeypatch.setattr(queue_module, "_summary_client", lambda *_args: summary_context)
     monkeypatch.setattr(queue_module, "NotionEpisodeStateStore", lambda _api: state_context)
     monkeypatch.setattr(queue_module, "EpisodeAIProcessor", Processor)
+    preflights: list[object] = []
+    monkeypatch.setattr(
+        queue_module,
+        "preflight_summary_client",
+        lambda client: preflights.append(client),
+    )
 
     result = queue_module.run_enrichment_queue(
         config_path="config.yaml",
@@ -351,6 +410,7 @@ def test_run_enrichment_queue_uses_only_summary_clients(
     assert constructed["local_whisper"] is None
     assert constructed["summary_client"] == "summary-client"
     assert constructed["mindmap_data_source_id"] == "mindmap-ds"
+    assert preflights == ["summary-client"]
 
 
 @pytest.mark.parametrize(
@@ -416,6 +476,24 @@ def test_main_success_and_safe_failure_exit_codes(
     assert queue_module.main(["--mode", "backlog", "--limit", "2"]) == 0
     assert "selected=1" in capsys.readouterr().out
 
+    failed = EnrichmentQueueResult(
+        selected=2,
+        remaining=0,
+        actions={"failed": 2},
+        states={"FAILED_RETRYABLE": 2},
+        failure_categories={"unavailable": 2},
+    )
+    monkeypatch.setattr(queue_module, "run_enrichment_queue", lambda **_kwargs: failed)
+    assert queue_module.main([]) == 5
+    failed_output = capsys.readouterr().out
+    assert "Transcript enrichment FAILED" in failed_output
+    assert "failure_categories: unavailable=2" in failed_output
+
+    preflight = SimpleNamespace(summary=lambda: "Summary route preflight OK")
+    monkeypatch.setattr(queue_module, "run_summary_preflight", lambda **_kwargs: preflight)
+    assert queue_module.main(["--preflight-only"]) == 0
+    assert capsys.readouterr().out.strip() == "Summary route preflight OK"
+
     def config_failure(**_kwargs: object) -> EnrichmentQueueResult:
         raise ConfigurationError("bad config")
 
@@ -429,6 +507,23 @@ def test_main_success_and_safe_failure_exit_codes(
     monkeypatch.setattr(queue_module, "run_enrichment_queue", notion_failure)
     assert queue_module.main([]) == 4
     assert "Notion error: safe notion failure" in capsys.readouterr().err
+
+    def provider_failure(**_kwargs: object) -> EnrichmentQueueResult:
+        raise ProviderError(
+            ProviderFailure(
+                provider="summary_fallback_chain",
+                category=ProviderErrorCategory.UNAVAILABLE,
+                message="safe combined failure",
+                code="runtime_load",
+            )
+        )
+
+    monkeypatch.setattr(queue_module, "run_enrichment_queue", provider_failure)
+    assert queue_module.main([]) == 5
+    provider_error = capsys.readouterr().err
+    assert "provider=summary_fallback_chain" in provider_error
+    assert "category=unavailable; code=runtime_load" in provider_error
+    assert "detail=safe combined failure" in provider_error
 
 
 def test_enrichment_workflow_is_asr_free_cached_and_mode_gated() -> None:
@@ -455,5 +550,8 @@ def test_enrichment_workflow_is_asr_free_cached_and_mode_gated() -> None:
     assert "github.event.workflow_run.conclusion == 'success'" in text
     assert "37 22 * * *" not in text
     assert "xyz2notion.orchestration.enrichment_queue" in text
+    assert "preflight_only" in text
+    assert "--preflight-only" in text
+    assert 'exit "$status"' in text
     assert "~/.cache/xyz2notion" in text
     assert "llama_cpp_python-0.3.19-cp312-cp312-linux_x86_64.whl" in text

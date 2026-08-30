@@ -49,7 +49,7 @@ class FakeClient:
         validator: object,
     ) -> tuple[EnrichmentPayload, CompletionUsage]:
         assert system
-        assert max_output_tokens == 8192
+        assert max_output_tokens == 4096
         self.calls.append(user)
         result = enrichment_payload(f"摘要-{len(self.calls)}")
         if validator is not None:

@@ -180,7 +180,7 @@ def test_retry_after_and_transport_retry() -> None:
             httpx.Response(403, json={"error": {"code": "AccessDenied"}}),
             ProviderErrorCategory.AUTHENTICATION,
         ),
-        (httpx.Response(404), ProviderErrorCategory.UNAVAILABLE),
+        (httpx.Response(404), ProviderErrorCategory.UNSUPPORTED),
         (httpx.Response(400, text="private body"), ProviderErrorCategory.INVALID_INPUT),
         (httpx.Response(503), ProviderErrorCategory.UNAVAILABLE),
         (

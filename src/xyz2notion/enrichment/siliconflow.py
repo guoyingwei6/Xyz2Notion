@@ -279,11 +279,7 @@ class SiliconFlowSummaryClient:
             self.active_model = model
             return result
         if last_error is not None:
-            raise _error(
-                ProviderErrorCategory.UNAVAILABLE,
-                "All configured SiliconFlow free summary models are unavailable",
-                code=last_error.failure.code,
-            ) from last_error
+            raise last_error
         raise _error(
             ProviderErrorCategory.UNAVAILABLE,
             "No SiliconFlow free summary model is available",
@@ -373,11 +369,7 @@ class SiliconFlowSummaryClient:
                 last_validation_message,
             )
         if last_service_error is not None:
-            raise _error(
-                ProviderErrorCategory.UNAVAILABLE,
-                "All configured SiliconFlow free summary models are unavailable",
-                code=last_service_error.failure.code,
-            ) from last_service_error
+            raise last_service_error
         raise _error(
             ProviderErrorCategory.UNAVAILABLE,
             "No SiliconFlow free summary model is available",

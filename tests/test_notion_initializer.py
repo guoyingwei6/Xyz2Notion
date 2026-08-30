@@ -395,6 +395,7 @@ def test_initializer_creates_complete_clean_room_template() -> None:
     assert mindmap_view["data_source_id"] == result.resources["episode"].data_source_id
     assert mindmap_view["filter"] == {
         "or": [
+            {"property": "增强状态", "select": {"equals": "待发布"}},
             {"property": "增强状态", "select": {"equals": "已完成"}},
             {"property": "增强状态", "select": {"equals": "可重试失败"}},
             {"property": "增强状态", "select": {"equals": "最终失败"}},
@@ -1137,6 +1138,7 @@ def test_ai_views_are_separate_from_native_episode_status_tabs() -> None:
     assert mindmap.source == "episode"
     assert mindmap.filter == {
         "or": [
+            {"property": "增强状态", "select": {"equals": "待发布"}},
             {"property": "增强状态", "select": {"equals": "已完成"}},
             {"property": "增强状态", "select": {"equals": "可重试失败"}},
             {"property": "增强状态", "select": {"equals": "最终失败"}},

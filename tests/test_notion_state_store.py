@@ -14,6 +14,7 @@ from xyz2notion.notion.client import NotionAPIError
 from xyz2notion.orchestration.state_store import (
     EpisodeAIState,
     NotionEpisodeStateStore,
+    _asr_status,
     _enrichment_provider,
     _enrichment_status,
     _file_url,
@@ -83,7 +84,7 @@ def test_enrichment_metadata_tracks_the_independent_pipeline() -> None:
     transcribed = PipelineRecord(eid="transcribed").transition(PipelineState.TRANSCRIBED)
     assert _enrichment_status(transcribed) == "待增强"
     enriched = transcribed.transition(PipelineState.ENRICHED)
-    assert _enrichment_status(enriched) == "已完成"
+    assert _enrichment_status(enriched) == "待发布"
     assert _enrichment_status(enriched.transition(PipelineState.PUBLISHED)) == "已完成"
 
     asr_retry = (
@@ -238,14 +239,14 @@ def test_save_uploads_private_json_then_switches_episode_property() -> None:
     page_id, raw_payload = api.updates[0]
     payload = raw_payload  # type: ignore[assignment]
     assert page_id == "page"
-    assert payload["properties"]["ASR Status"]["select"]["name"] == "已增强"
+    assert payload["properties"]["ASR Status"]["select"]["name"] == "已转写"
     assert payload["properties"]["ASR Provider"]["rich_text"][0]["text"]["content"] == (
         "siliconflow"
     )
     assert payload["properties"]["增强 Provider"]["rich_text"][0]["text"]["content"] == (
         "siliconflow_summary"
     )
-    assert payload["properties"]["增强状态"]["select"]["name"] == "已完成"
+    assert payload["properties"]["增强状态"]["select"]["name"] == "待发布"
     assert payload["properties"]["转写完成时间"]["date"]["start"] == (
         state.transcript.created_at.isoformat()  # type: ignore[union-attr]
     )
@@ -253,6 +254,26 @@ def test_save_uploads_private_json_then_switches_episode_property() -> None:
         state.summary.created_at.isoformat()  # type: ignore[union-attr]
     )
     assert payload["properties"]["AI State File"]["files"][0]["file_upload"]["id"] == ("upload-1")
+
+
+def test_asr_status_stays_transcribed_when_summary_fails() -> None:
+    transcript = full_state().transcript
+    assert transcript is not None
+    record = (
+        PipelineRecord(eid="episode")
+        .transition(PipelineState.TRANSCRIBED)
+        .transition(
+            PipelineState.FAILED_FINAL,
+            failure=ProviderFailure(
+                provider="summary_fallback_chain",
+                category=ProviderErrorCategory.SCHEMA_CHANGED,
+                message="safe failure",
+            ),
+        )
+    )
+    state = EpisodeAIState(record=record, transcript=transcript)
+    assert _asr_status(state) == "已转写"
+    assert _enrichment_status(record) == "最终失败"
 
 
 def test_clear_manual_retry_only_unchecks_the_request() -> None:

@@ -142,6 +142,7 @@ ASR_STATUS_OPTIONS = (
 ENRICHMENT_STATUS_OPTIONS = (
     ("未开始", "gray"),
     ("待增强", "blue"),
+    ("待发布", "purple"),
     ("已完成", "green"),
     ("可重试失败", "orange"),
     ("最终失败", "red"),
@@ -630,6 +631,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         ),
         filter={
             "or": [
+                {"property": "增强状态", "select": {"equals": "待发布"}},
                 {"property": "增强状态", "select": {"equals": "已完成"}},
                 {"property": "增强状态", "select": {"equals": "可重试失败"}},
                 {"property": "增强状态", "select": {"equals": "最终失败"}},

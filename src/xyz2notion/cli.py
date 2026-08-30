@@ -27,7 +27,7 @@ from xyz2notion.migration.schema import (
     detect_workspace_schema_version,
     migration_plan,
 )
-from xyz2notion.models import ProviderFailure, local_today
+from xyz2notion.models import ProviderError, ProviderFailure, local_today
 from xyz2notion.notion.client import JsonObject, NotionAPIError, NotionClient
 from xyz2notion.notion.cover_localizer import NotionCoverLocalizer
 from xyz2notion.notion.initializer import DATA_PAGE_TITLE, HOME_MARKER_URL, NotionInitializer
@@ -309,12 +309,33 @@ def _episode_asr_status(page: Mapping[str, object]) -> str:
     return str(selected.get("name") or "")
 
 
+def _episode_enrichment_status(page: Mapping[str, object]) -> str:
+    properties = page.get("properties")
+    if not isinstance(properties, Mapping):
+        return ""
+    status_property = properties.get("增强状态")
+    if not isinstance(status_property, Mapping):
+        return ""
+    selected = status_property.get("select") or status_property.get("status")
+    if not isinstance(selected, Mapping):
+        return ""
+    return str(selected.get("name") or "")
+
+
 def _eligible_ai_pages(
     pages: Sequence[JsonObject],
     *,
     retry_failed: bool,
 ) -> list[JsonObject]:
-    return [page for page in pages if (_episode_asr_status(page) == "可重试失败") is retry_failed]
+    return [
+        page
+        for page in pages
+        if (
+            _episode_asr_status(page) == "可重试失败"
+            or _episode_enrichment_status(page) == "可重试失败"
+        )
+        is retry_failed
+    ]
 
 
 def _ai_page_priority(page: Mapping[str, object]) -> tuple[int, int, str]:
@@ -502,8 +523,18 @@ def _run_manual_retry_queue(args: argparse.Namespace) -> int:
     except NotionAPIError as exc:
         print(f"Notion error: {exc}", file=sys.stderr)
         return 4
+    except ProviderError as exc:
+        failure = exc.failure
+        code = f"; code={failure.code}" if failure.code else ""
+        print(
+            "Summary route FAILED "
+            f"(provider={failure.provider}; category={failure.category.value}{code}; "
+            f"detail={failure.message})",
+            file=sys.stderr,
+        )
+        return 5
     print(result.summary())
-    return 0
+    return 5 if result.has_failures else 0
 
 
 def _notion_runtime(args: argparse.Namespace) -> tuple[SecretStr, str]:
@@ -747,7 +778,10 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
 
             normal_candidates = episode_candidates(_eligible_ai_pages(episodes, retry_failed=False))
             retry_candidates = episode_candidates(_eligible_ai_pages(episodes, retry_failed=True))
-            statuses = Counter(_episode_asr_status(page) or "未设置" for page in episodes)
+            asr_statuses = Counter(_episode_asr_status(page) or "未设置" for page in episodes)
+            enrichment_statuses = Counter(
+                _episode_enrichment_status(page) or "未设置" for page in episodes
+            )
             asr_providers: Counter[str] = Counter()
             asr_models: Counter[str] = Counter()
             for page in episodes:
@@ -760,7 +794,12 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
                     asr_providers[provider] += 1
                 if model:
                     asr_models[model] += 1
-            final_pages = [page for page in episodes if _episode_asr_status(page) == "最终失败"]
+            final_pages = [
+                page
+                for page in episodes
+                if _episode_asr_status(page) == "最终失败"
+                or _episode_enrichment_status(page) == "最终失败"
+            ]
             failure_categories: Counter[str] = Counter()
             with NotionEpisodeStateStore(notion) as state_store:
                 for page in final_pages:
@@ -799,7 +838,13 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
         print(f"Notion error: {exc}", file=sys.stderr)
         return 4
 
-    status_summary = ", ".join(f"{name}={statuses[name]}" for name in sorted(statuses)) or "none=0"
+    asr_status_summary = (
+        ", ".join(f"{name}={asr_statuses[name]}" for name in sorted(asr_statuses)) or "none=0"
+    )
+    enrichment_status_summary = (
+        ", ".join(f"{name}={enrichment_statuses[name]}" for name in sorted(enrichment_statuses))
+        or "none=0"
+    )
     failure_summary = (
         ", ".join(f"{name}={failure_categories[name]}" for name in sorted(failure_categories))
         or "none=0"
@@ -813,7 +858,8 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
     print(
         "Notion backlog audit OK "
         f"(episodes={len(episodes)}; normal_ai_candidates={len(normal_candidates)}; "
-        f"retry_ai_candidates={len(retry_candidates)}; statuses: {status_summary}; "
+        f"retry_ai_candidates={len(retry_candidates)}; asr_statuses: {asr_status_summary}; "
+        f"enrichment_statuses: {enrichment_status_summary}; "
         f"statistics_total_seconds={total_seconds}; "
         f"statistics_baseline={'set' if baseline_version_set else 'unset'}; "
         f"asr_providers: {provider_summary}; asr_models: {model_summary}; "

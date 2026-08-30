@@ -6,6 +6,10 @@ Actions 摘要只显示聚合数量。转写状态在 Notion Episode 的 `ASR St
 摘要/章节/思维导图状态在 `增强状态`、`增强 Provider`；检查点仍在 `Failure Reason` 和
 `AI State File`。不要为了排错打印 Secret、完整请求头或服务商响应正文。
 
+只要本次选中的条目出现处理失败，摘要命令就返回非零，Actions 会显示红色；摘要区仍会
+写出 `failure_categories` 聚合。绿色只表示这次队列没有失败，不能再被单纯的命令退出码
+误报为成功。
+
 ## 常见问题
 
 ### `Process completed with exit code 2`
@@ -73,6 +77,15 @@ SiliconFlow 文本接口；若整个 Key 或网络不可用，本地文字稿检
 
 通常是未配置 `SILICONFLOW_API_KEY`、摘要被关闭，或免费文本模型正在限流。文字稿
 已经保存在 Notion 检查点中；补 Key 或稍后重试不会重复 ASR。
+
+先在 `Enrich Transcribed Episodes` 手动运行中勾选 `preflight_only`。它只用固定短文本
+检测 `SiliconFlow -> 本地 Qwen` 摘要路由，不读取或修改 Notion。输出会区分远程
+`authentication`、`quota_exhausted`、`rate_limited`、`unavailable` 等类别，以及本地
+`runtime_load`、`runtime_memory`、`runtime_context`、`runtime_inference`；两个通道都失败
+时会同时显示两层脱敏原因。
+
+已有文字稿即使摘要失败，`ASR Status` 仍保持 `已转写`，失败只写入 `增强状态`。旧记录会在
+下一次保存其 AI 检查点时自动纠正，不会因此重新转写音频。
 
 ### 手动请求优先处理或重试
 

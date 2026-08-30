@@ -30,6 +30,9 @@ LOCAL_QWEN_URL = (
 )
 LOCAL_QWEN_SHA256 = "228fb5627f7510b8b3516cdb6435e4b0d2a2bf330fe5b0ab19284a3570a8bb1f"
 LOCAL_QWEN_SIZE = 1_107_408_544
+LOCAL_QWEN_CONTEXT_TOKENS = 24_576
+LOCAL_QWEN_BATCH_TOKENS = 128
+LOCAL_QWEN_MAX_OUTPUT_TOKENS = 4_096
 StructuredModel = TypeVar("StructuredModel", bound=BaseModel)
 ModelFactory = Callable[[Path], Any]
 
@@ -75,12 +78,24 @@ def _load_llama(path: Path) -> Any:
         ) from exc
     return llama_factory(
         model_path=str(path),
-        n_ctx=40_960,
+        n_ctx=LOCAL_QWEN_CONTEXT_TOKENS,
         n_threads=max(1, min(4, os.cpu_count() or 1)),
-        n_batch=512,
+        n_batch=LOCAL_QWEN_BATCH_TOKENS,
         seed=20260731,
         verbose=False,
     )
+
+
+def _runtime_failure_code(exc: Exception, *, stage: str) -> str:
+    """Classify llama.cpp failures without exposing its raw runtime message."""
+    if isinstance(exc, MemoryError):
+        return "runtime_memory"
+    detail = str(exc).lower()
+    if any(marker in detail for marker in ("out of memory", "bad_alloc", "allocate", "mmap")):
+        return "runtime_memory"
+    if any(marker in detail for marker in ("n_ctx", "context", "kv cache", "token limit")):
+        return "runtime_context"
+    return f"runtime_{stage}"
 
 
 class LocalQwenSummaryClient:
@@ -159,7 +174,17 @@ class LocalQwenSummaryClient:
 
     def _llama(self) -> Any:
         if self._model is None:
-            self._model = self._model_factory(self._ensure_model_file())
+            try:
+                self._model = self._model_factory(self._ensure_model_file())
+            except ProviderError:
+                raise
+            except Exception as exc:
+                code = _runtime_failure_code(exc, stage="load")
+                raise _error(
+                    ProviderErrorCategory.UNAVAILABLE,
+                    f"Local Qwen model load failed ({code})",
+                    code=code,
+                ) from exc
         return self._model
 
     @staticmethod
@@ -186,8 +211,18 @@ class LocalQwenSummaryClient:
                 ],
                 response_format={"type": "json_object", "schema": dict(schema)},
                 temperature=0.1,
-                max_tokens=min(max_output_tokens, 8_192),
+                max_tokens=min(max_output_tokens, LOCAL_QWEN_MAX_OUTPUT_TOKENS),
             )
+        except ProviderError:
+            raise
+        except Exception as exc:
+            code = _runtime_failure_code(exc, stage="inference")
+            raise _error(
+                ProviderErrorCategory.UNAVAILABLE,
+                f"Local Qwen inference failed ({code})",
+                code=code,
+            ) from exc
+        try:
             choice = response["choices"][0]
             message = choice["message"]
             content = message["content"]
@@ -198,17 +233,10 @@ class LocalQwenSummaryClient:
                 input_tokens=max(0, int(usage.get("prompt_tokens", 0))),
                 output_tokens=max(0, int(usage.get("completion_tokens", 0))),
             )
-        except ProviderError:
-            raise
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise _error(
                 ProviderErrorCategory.SCHEMA_CHANGED,
                 "Local Qwen returned an unexpected completion schema",
-            ) from exc
-        except RuntimeError as exc:
-            raise _error(
-                ProviderErrorCategory.UNAVAILABLE,
-                "Local Qwen inference failed",
             ) from exc
 
     def generate_structured(

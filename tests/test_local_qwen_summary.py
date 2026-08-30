@@ -7,8 +7,11 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from xyz2notion.enrichment.client import FallbackSummaryClient
+from xyz2notion.enrichment.client import FallbackSummaryClient, preflight_summary_client
 from xyz2notion.enrichment.local_qwen import (
+    LOCAL_QWEN_BATCH_TOKENS,
+    LOCAL_QWEN_CONTEXT_TOKENS,
+    LOCAL_QWEN_MAX_OUTPUT_TOKENS,
     LOCAL_QWEN_MODEL,
     LocalQwenSummaryClient,
     _default_model_path,
@@ -91,7 +94,7 @@ def test_local_qwen_generates_schema_constrained_json(
     assert usage == CompletionUsage(20, 10)
     assert client.active_model == LOCAL_QWEN_MODEL
     assert client.active_provider == "local_qwen_summary"
-    assert model.requests[0]["max_tokens"] == 8_192
+    assert model.requests[0]["max_tokens"] == LOCAL_QWEN_MAX_OUTPUT_TOKENS
     assert model.requests[0]["response_format"] == {
         "type": "json_object",
         "schema": EnrichmentPayload.model_json_schema(),
@@ -204,7 +207,8 @@ def test_load_llama_uses_bounded_cpu_configuration(
     monkeypatch.setattr("xyz2notion.enrichment.local_qwen.os.cpu_count", lambda: 32)
     _load_llama(Path("model.gguf"))
     assert captured["n_threads"] == 4
-    assert captured["n_ctx"] == 40_960
+    assert captured["n_ctx"] == LOCAL_QWEN_CONTEXT_TOKENS
+    assert captured["n_batch"] == LOCAL_QWEN_BATCH_TOKENS
     assert captured["verbose"] is False
 
 
@@ -320,7 +324,31 @@ def test_local_qwen_maps_runtime_failure_to_unavailable(
     with pytest.raises(ProviderError) as caught:
         client._complete(system="system", user="user", schema={}, max_output_tokens=100)
     assert caught.value.failure.category is ProviderErrorCategory.UNAVAILABLE
+    assert caught.value.failure.code == "runtime_inference"
     assert "private runtime detail" not in caught.value.failure.message
+
+
+def test_local_qwen_classifies_safe_load_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = b"pinned-model"
+    model_path = tmp_path / "model.gguf"
+    model_path.write_bytes(content)
+    monkeypatch.setattr("xyz2notion.enrichment.local_qwen.LOCAL_QWEN_SIZE", len(content))
+    monkeypatch.setattr(
+        "xyz2notion.enrichment.local_qwen.LOCAL_QWEN_SHA256",
+        hashlib.sha256(content).hexdigest(),
+    )
+
+    def fail_load(_path: Path) -> object:
+        raise RuntimeError("failed to allocate private model path")
+
+    client = LocalQwenSummaryClient(model_path=model_path, model_factory=fail_load)
+    with pytest.raises(ProviderError) as caught:
+        client._llama()
+    assert caught.value.failure.code == "runtime_memory"
+    assert "private model path" not in caught.value.failure.message
 
 
 def test_local_qwen_repair_failure_is_bounded(
@@ -414,6 +442,85 @@ def test_fallback_client_keeps_remote_success() -> None:
     assert value.summary == "远程成功"
     assert client.active_model == "Qwen/Qwen3-8B"
     assert client.active_provider == "siliconflow_summary"
+
+
+def test_fallback_client_preserves_both_safe_failure_layers() -> None:
+    def fail(provider: str, category: ProviderErrorCategory, code: str) -> object:
+        def generate(*_args: object, **_kwargs: object) -> object:
+            raise ProviderError(
+                ProviderFailure(
+                    provider=provider,
+                    category=category,
+                    message="safe fixture",
+                    code=code,
+                )
+            )
+
+        return SimpleNamespace(
+            models=(provider,),
+            active_model=None,
+            generate_structured=generate,
+        )
+
+    client = FallbackSummaryClient(
+        fail("siliconflow_summary", ProviderErrorCategory.QUOTA_EXHAUSTED, "quota.code"),
+        fail("local_qwen_summary", ProviderErrorCategory.UNAVAILABLE, "runtime_load"),
+    )
+    with pytest.raises(ProviderError) as caught:
+        client.generate_structured(
+            EnrichmentPayload,
+            system="system",
+            user="user",
+            max_output_tokens=1000,
+        )
+    failure = caught.value.failure
+    assert failure.provider == "summary_fallback_chain"
+    assert failure.category is ProviderErrorCategory.UNAVAILABLE
+    assert failure.message == (
+        "Summary providers failed: "
+        "primary=siliconflow_summary:quota_exhausted:quota.code; "
+        "fallback=local_qwen_summary:unavailable:runtime_load"
+    )
+
+
+def test_summary_preflight_reports_primary_failure_and_working_fallback() -> None:
+    class Remote:
+        models = ("Qwen/Qwen3-8B",)
+        active_model = None
+
+        def generate_structured(self, *_args: object, **_kwargs: object) -> object:
+            raise ProviderError(
+                ProviderFailure(
+                    provider="siliconflow_summary",
+                    category=ProviderErrorCategory.QUOTA_EXHAUSTED,
+                    message="safe fixture",
+                    code="quota.code",
+                )
+            )
+
+    class Local:
+        models = (LOCAL_QWEN_MODEL,)
+        active_model = LOCAL_QWEN_MODEL
+        active_provider = "local_qwen_summary"
+
+        def generate_structured(
+            self,
+            model_type: object,
+            *_args: object,
+            **_kwargs: object,
+        ) -> object:
+            return model_type(ok=True), CompletionUsage()  # type: ignore[operator]
+
+    result = preflight_summary_client(  # type: ignore[arg-type]
+        FallbackSummaryClient(Remote(), Local())  # type: ignore[arg-type]
+    )
+    assert result.provider == "local_qwen_summary"
+    assert result.model == LOCAL_QWEN_MODEL
+    assert result.summary() == (
+        "Summary route preflight OK "
+        f"(active_provider=local_qwen_summary; active_model={LOCAL_QWEN_MODEL}; "
+        "primary=siliconflow_summary:quota_exhausted:quota.code; fallback=ok)"
+    )
 
 
 def test_fallback_client_without_remote_and_context_cleanup() -> None:

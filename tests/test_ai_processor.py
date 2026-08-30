@@ -242,6 +242,17 @@ def test_candidate_extraction_skips_incomplete_rows() -> None:
             },
         },
         {
+            "id": "published-with-split-status",
+            "properties": {
+                "EID": {"rich_text": [{"plain_text": "published"}]},
+                "Name": {"title": [{"plain_text": "新状态单集"}]},
+                "Audio URL": {"url": "https://cdn.example/published"},
+                "Played Seconds": {"number": 120},
+                "ASR Status": {"select": {"name": "已转写"}},
+                "增强状态": {"select": {"name": "已完成"}},
+            },
+        },
+        {
             "id": "too-short",
             "properties": {
                 "EID": {"rich_text": [{"plain_text": "short"}]},

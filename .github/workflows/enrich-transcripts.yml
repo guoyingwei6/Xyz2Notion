@@ -19,6 +19,11 @@ on:
         options:
           - "1"
           - "2"
+      preflight_only:
+        description: "Test the shared summary route without changing Notion"
+        required: true
+        default: false
+        type: boolean
   schedule:
     - cron: "41 */2 * * *"
   # Normal lane: start after ASR, with a periodic fallback for persisted transcripts
@@ -95,6 +100,7 @@ jobs:
           BACKLOG_ENABLED: ${{ vars.XYZ2NOTION_ENRICHMENT_BACKLOG }}
           MANUAL_MODE: ${{ inputs.mode }}
           MANUAL_LIMIT: ${{ inputs.limit }}
+          PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
@@ -114,14 +120,22 @@ jobs:
             mode="backlog"
             limit="2"
           fi
-          result="$(
-            uv run python -m xyz2notion.orchestration.enrichment_queue \
-              --config "$config_path" \
-              --mode "$mode" \
-              --limit "$limit"
-          )"
+          queue_cmd=(
+            uv run python -m xyz2notion.orchestration.enrichment_queue
+            --config "$config_path"
+            --mode "$mode"
+            --limit "$limit"
+          )
+          if [[ "${PREFLIGHT_ONLY:-false}" == "true" ]]; then
+            queue_cmd+=(--preflight-only)
+          fi
+          set +e
+          result="$("${queue_cmd[@]}" 2>&1)"
+          status=$?
+          set -e
           printf '%s\n' "$result"
           {
             printf '## Xyz2Notion transcript enrichment\n\n'
             printf '```text\n%s\n```\n' "$result"
           } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"

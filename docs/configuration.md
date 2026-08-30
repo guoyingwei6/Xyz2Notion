@@ -43,9 +43,9 @@ asr:
 | `siliconflow_models` | Qwen3-8B | 唯一允许的远程免费摘要模型 |
 | `local_qwen_fallback` | `true` | 远程失败后启用 GitHub Actions 本地 Qwen3-1.7B |
 | `prompt_version` | `summary-v1` | 版本化 Prompt |
-| `chunk_tokens` | `24000` | 单块最大估算 Token |
+| `chunk_tokens` | `12000` | 单块最大估算 Token；为 Actions 本地 Qwen 预留上下文余量 |
 | `chunk_minutes` | `30` | 单块最大时长 |
-| `max_output_tokens` | `8192` | 单次最大输出 |
+| `max_output_tokens` | `4096` | 单次最大输出 |
 
 配置验证仅接受当前版本核对过的三个百炼 Paraformer 模型、两个 SiliconFlow ASR 模型
 和一个免费摘要模型。远程摘要

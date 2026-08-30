@@ -9,6 +9,7 @@ import httpx
 from pydantic import ConfigDict, Field
 
 from xyz2notion.asr.audio import validate_public_audio_url
+from xyz2notion.enrichment.client import SUMMARY_FALLBACK_PROVIDER
 from xyz2notion.models import ContractModel, SummaryResult, TranscriptResult
 from xyz2notion.notion.client import JsonObject, NotionAPIError, rich_text
 from xyz2notion.state import PipelineRecord, PipelineState
@@ -61,11 +62,14 @@ _STATUS_NAMES = {
 _ENRICHMENT_STATUS_NAMES = {
     "not_started": "未开始",
     "pending": "待增强",
+    "publish_pending": "待发布",
     "complete": "已完成",
     "retryable": "可重试失败",
     "final": "最终失败",
 }
-_SUMMARY_PROVIDER_NAMES = frozenset({"siliconflow_summary", "local_qwen_summary"})
+_SUMMARY_PROVIDER_NAMES = frozenset(
+    {"siliconflow_summary", "local_qwen_summary", SUMMARY_FALLBACK_PROVIDER}
+)
 
 
 def _summary_provider_name(summary: SummaryResult | None) -> str:
@@ -80,8 +84,10 @@ def _summary_provider_name(summary: SummaryResult | None) -> str:
 
 def _enrichment_status(record: PipelineRecord) -> str:
     """Map the pipeline checkpoint to the independent AI enrichment status."""
-    if record.state in {PipelineState.ENRICHED, PipelineState.PUBLISHED}:
+    if record.state is PipelineState.PUBLISHED:
         return _ENRICHMENT_STATUS_NAMES["complete"]
+    if record.state is PipelineState.ENRICHED:
+        return _ENRICHMENT_STATUS_NAMES["publish_pending"]
     if record.state is PipelineState.TRANSCRIBED:
         return _ENRICHMENT_STATUS_NAMES["pending"]
     if record.state is PipelineState.FAILED_RETRYABLE:
@@ -95,6 +101,13 @@ def _enrichment_status(record: PipelineRecord) -> str:
     ):
         return _ENRICHMENT_STATUS_NAMES["final"]
     return _ENRICHMENT_STATUS_NAMES["not_started"]
+
+
+def _asr_status(state: EpisodeAIState) -> str:
+    """Report only speech-to-text progress, independent of later AI stages."""
+    if state.transcript is not None:
+        return _STATUS_NAMES[PipelineState.TRANSCRIBED]
+    return _STATUS_NAMES[state.record.state]
 
 
 def _enrichment_provider(state: EpisodeAIState) -> str:
@@ -202,7 +215,7 @@ class NotionEpisodeStateStore:
                     }
                 ]
             },
-            "ASR Status": {"select": {"name": _STATUS_NAMES[revised.record.state]}},
+            "ASR Status": {"select": {"name": _asr_status(revised)}},
             "ASR Provider": {"rich_text": rich_text(revised.provider or "")},
             "ASR Task ID": {"rich_text": rich_text(revised.provider_task_id or "")},
             "ASR Source Task ID": {"rich_text": rich_text(revised.source_task_id or "")},

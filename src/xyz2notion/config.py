@@ -116,9 +116,9 @@ class SummaryConfig(StrictConfigModel):
     siliconflow_models: tuple[str, ...] = ("Qwen/Qwen3-8B",)
     local_qwen_fallback: bool = True
     prompt_version: str = Field(default="summary-v1", min_length=1)
-    chunk_tokens: int = Field(default=24_000, ge=1_000, le=100_000)
+    chunk_tokens: int = Field(default=12_000, ge=1_000, le=100_000)
     chunk_minutes: int = Field(default=30, ge=5, le=120)
-    max_output_tokens: int = Field(default=8_192, ge=512, le=32_768)
+    max_output_tokens: int = Field(default=4_096, ge=512, le=32_768)
 
     @model_validator(mode="after")
     def validate_models(self) -> Self:

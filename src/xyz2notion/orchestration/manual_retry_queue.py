@@ -17,6 +17,7 @@ from xyz2notion.config import (
     load_config,
     load_runtime_credentials,
 )
+from xyz2notion.enrichment.client import preflight_summary_client
 from xyz2notion.enrichment.pipeline import SummaryPolicy
 from xyz2notion.notion.client import JsonObject, NotionAPIError, NotionClient
 from xyz2notion.notion.initializer import NotionInitializer
@@ -66,16 +67,23 @@ class ManualRetryQueueResult:
     actions: Mapping[str, int]
     states: Mapping[str, int]
     categories: Mapping[str, int] = field(default_factory=dict)
+    failure_categories: Mapping[str, int] = field(default_factory=dict)
+
+    @property
+    def has_failures(self) -> bool:
+        return self.actions.get("failed", 0) > 0
 
     def summary(self) -> str:
         def render(values: Mapping[str, int]) -> str:
             return ", ".join(f"{name}={values[name]}" for name in sorted(values)) or "none=0"
 
+        outcome = "FAILED" if self.has_failures else "OK"
         return (
-            "Manual retry queue OK "
+            f"Manual retry queue {outcome} "
             f"(selected={self.selected}; remaining={self.remaining}; "
             f"actions: {render(self.actions)}; states: {render(self.states)}; "
-            f"categories: {render(self.categories)})"
+            f"categories: {render(self.categories)}; "
+            f"failure_categories: {render(self.failure_categories)})"
         )
 
 
@@ -225,6 +233,8 @@ def run_manual_retry_queue(
         for client in (dashscope, siliconflow, local_whisper, summary_client):
             if client is not None:
                 stack.enter_context(client)
+        if selected and summary_client is not None:
+            preflight_summary_client(summary_client)
 
         processor = EpisodeAIProcessor(
             notion,
@@ -269,10 +279,14 @@ def run_manual_retry_queue(
     actions = Counter(outcome.action for outcome in outcomes)
     states = Counter(outcome.state.value for outcome in outcomes)
     categories = Counter(ai_category_label(item.page) for item in selected[: len(outcomes)])
+    failure_categories = Counter(
+        outcome.detail or "unknown" for outcome in outcomes if outcome.action == "failed"
+    )
     return ManualRetryQueueResult(
         selected=len(outcomes),
         remaining=max(0, len(all_items) - len(outcomes)),
         actions=actions,
         states=states,
         categories=categories,
+        failure_categories=failure_categories,
     )

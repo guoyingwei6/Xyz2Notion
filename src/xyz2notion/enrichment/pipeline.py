@@ -31,9 +31,9 @@ class SummaryPolicy:
     """Chunking policy used for one free summary run."""
 
     prompt_version: str = PROMPT_VERSION
-    chunk_tokens: int = 24_000
+    chunk_tokens: int = 12_000
     chunk_minutes: int = 30
-    max_output_tokens: int = 8_192
+    max_output_tokens: int = 4_096
 
 
 def _node_ids(root: MindmapNode) -> tuple[str, ...]:

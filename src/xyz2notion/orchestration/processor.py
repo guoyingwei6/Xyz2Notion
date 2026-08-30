@@ -159,6 +159,7 @@ def episode_candidates(
         title = _property_text(properties, "Name")
         audio_url = _property_url(properties, "Audio URL")
         asr_status = _property_selection(properties, "ASR Status")
+        enrichment_status = _property_selection(properties, "增强状态")
         played_seconds = _property_number(properties, "Played Seconds")
         liked = _property_checkbox(properties, "Liked")
         favorited = _property_checkbox(properties, "Favorited")
@@ -169,7 +170,13 @@ def episode_candidates(
             and audio_url
             and (manual_override or played_seconds >= 120 or favorited or liked)
             and not skip_ai
-            and (include_final or asr_status not in {"已发布", "最终失败"})
+            and (
+                include_final
+                or (
+                    asr_status not in {"已发布", "最终失败"}
+                    and enrichment_status not in {"已完成", "最终失败"}
+                )
+            )
         ):
             try:
                 validate_public_audio_url(audio_url)

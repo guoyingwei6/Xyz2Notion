@@ -466,6 +466,12 @@ def test_run_manual_retry_queue_is_manual_first_and_stage_aware(
     )
     monkeypatch.setattr(queue_module, "EpisodeAIProcessor", Processor)
     monkeypatch.setattr(queue_module.time, "sleep", sleeps.append)
+    preflights: list[object] = []
+    monkeypatch.setattr(
+        queue_module,
+        "preflight_summary_client",
+        lambda client: preflights.append(client),
+    )
 
     result = queue_module.run_manual_retry_queue(config_path="config.yaml", requested_limit=2)
 
@@ -480,3 +486,4 @@ def test_run_manual_retry_queue_is_manual_first_and_stage_aware(
     assert result.actions == {"pending": 1, "published": 1}
     assert result.states == {"ASR_RUNNING": 1, "PUBLISHED": 1}
     assert result.categories == {"favorite": 1, "liked": 1}
+    assert preflights == [provider]
