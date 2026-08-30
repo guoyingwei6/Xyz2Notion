@@ -24,6 +24,11 @@ on:
         required: true
         default: false
         type: boolean
+      diagnose_siliconflow:
+        description: "Probe SiliconFlow model and request features without changing Notion"
+        required: true
+        default: false
+        type: boolean
   schedule:
     - cron: "41 */2 * * *"
   # Normal lane: start after ASR, with a periodic fallback for persisted transcripts
@@ -101,6 +106,7 @@ jobs:
           MANUAL_MODE: ${{ inputs.mode }}
           MANUAL_LIMIT: ${{ inputs.limit }}
           PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
+          DIAGNOSE_SILICONFLOW: ${{ inputs.diagnose_siliconflow }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
@@ -128,6 +134,9 @@ jobs:
           )
           if [[ "${PREFLIGHT_ONLY:-false}" == "true" ]]; then
             queue_cmd+=(--preflight-only)
+          fi
+          if [[ "${DIAGNOSE_SILICONFLOW:-false}" == "true" ]]; then
+            queue_cmd=(uv run python -m xyz2notion.orchestration.summary_diagnostic)
           fi
           set +e
           result="$("${queue_cmd[@]}" 2>&1)"

@@ -134,6 +134,7 @@ def test_enrichment_workflow_uses_only_summary_credentials() -> None:
     assert "llama_cpp_python-0.3.19-cp312-cp312-linux_x86_64.whl" in text
     assert "github.event.workflow_run.conclusion == 'success'" in text
     assert "github.event_name == 'workflow_run'" in text
+    assert "xyz2notion.orchestration.summary_diagnostic" in text
     assert "37 22 * * *" not in text
 
 
