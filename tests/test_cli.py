@@ -1859,8 +1859,34 @@ def test_notion_backlog_property_helpers_cover_malformed_values() -> None:
     timeline_failure = schema_failure.model_copy(
         update={"message": "SiliconFlow JSON repair did not satisfy timeline constraints"}
     )
+    local_schema_failure = schema_failure.model_copy(
+        update={
+            "provider": "local_qwen_summary",
+            "message": "Local Qwen JSON repair did not satisfy the summary schema",
+        }
+    )
+    local_timeline_failure = local_schema_failure.model_copy(
+        update={"message": "Local Qwen JSON repair did not satisfy timeline constraints"}
+    )
+    local_normalization_failure = local_schema_failure.model_copy(
+        update={"message": "Local enrichment normalization did not satisfy constraints"}
+    )
+    local_completion_failure = local_schema_failure.model_copy(
+        update={"message": "Local Qwen returned an unexpected completion schema"}
+    )
     assert cli_module._safe_failure_reason_code(schema_failure) == "summary_schema"  # type: ignore[attr-defined]
     assert cli_module._safe_failure_reason_code(timeline_failure) == "timeline_constraints"  # type: ignore[attr-defined]
+    assert cli_module._safe_failure_reason_code(local_schema_failure) == "summary_schema"  # type: ignore[attr-defined]
+    assert (  # type: ignore[attr-defined]
+        cli_module._safe_failure_reason_code(local_timeline_failure) == "timeline_constraints"
+    )
+    assert (  # type: ignore[attr-defined]
+        cli_module._safe_failure_reason_code(local_normalization_failure)
+        == "normalization_constraints"
+    )
+    assert (  # type: ignore[attr-defined]
+        cli_module._safe_failure_reason_code(local_completion_failure) == "completion_schema"
+    )
 
 
 def test_notion_backlog_audit_handles_unreadable_final_states(

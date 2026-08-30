@@ -732,10 +732,20 @@ def _cover_storage_kind(properties: Mapping[str, object]) -> str:
 
 def _safe_failure_reason_code(failure: ProviderFailure) -> str:
     """Reduce known static failures to non-identifying aggregate reason codes."""
-    if failure.message == "SiliconFlow JSON repair did not satisfy the summary schema":
+    if failure.message in {
+        "SiliconFlow JSON repair did not satisfy the summary schema",
+        "Local Qwen JSON repair did not satisfy the summary schema",
+    }:
         return "summary_schema"
-    if failure.message == "SiliconFlow JSON repair did not satisfy timeline constraints":
+    if failure.message in {
+        "SiliconFlow JSON repair did not satisfy timeline constraints",
+        "Local Qwen JSON repair did not satisfy timeline constraints",
+    }:
         return "timeline_constraints"
+    if failure.message == "Local enrichment normalization did not satisfy constraints":
+        return "normalization_constraints"
+    if failure.message == "Local Qwen returned an unexpected completion schema":
+        return "completion_schema"
     if failure.message == "Transcript contains no readable content":
         return "empty_transcript"
     if failure.message == "SiliconFlow rejected the summary request (HTTP 400)":
