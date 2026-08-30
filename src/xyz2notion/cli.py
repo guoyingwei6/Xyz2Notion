@@ -1010,8 +1010,16 @@ def _run_reopen_summary_failures(
                 {
                     "page_size": 100,
                     "filter": {
-                        "property": "ASR Status",
-                        "select": {"equals": "最终失败"},
+                        "or": [
+                            {
+                                "property": "ASR Status",
+                                "select": {"equals": "最终失败"},
+                            },
+                            {
+                                "property": "增强状态",
+                                "select": {"equals": "最终失败"},
+                            },
+                        ]
                     },
                 },
             )
