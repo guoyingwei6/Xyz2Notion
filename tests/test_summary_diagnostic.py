@@ -113,7 +113,7 @@ def test_diagnostic_main_reports_missing_and_live_route(
     monkeypatch.setattr(
         summary_diagnostic,
         "diagnose_siliconflow_summary",
-        lambda _key: live,
+        lambda _key, *, model: live,
     )
     assert summary_diagnostic.main() == 0
     assert "model_listed=true" in capsys.readouterr().out

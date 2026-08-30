@@ -17,6 +17,10 @@ from xyz2notion.enrichment.siliconflow import (
 from xyz2notion.security import CredentialKind, validate_credential_destination
 
 SILICONFLOW_MODELS_URL = "https://api.siliconflow.cn/v1/models"
+DIAGNOSTIC_MODELS = (
+    DEFAULT_SUMMARY_MODELS[0],
+    "Qwen/Qwen2.5-7B-Instruct",
+)
 
 
 def _safe_code(value: object) -> str:
@@ -198,9 +202,12 @@ def main(_argv: Sequence[str] | None = None) -> int:
     if credentials.siliconflow_api_key is None:
         print("Configuration error: missing SILICONFLOW_API_KEY", file=sys.stderr)
         return 2
-    diagnostic = diagnose_siliconflow_summary(credentials.siliconflow_api_key)
-    print(diagnostic.summary())
-    return 0 if diagnostic.minimal_accepted else 5
+    diagnostics = tuple(
+        diagnose_siliconflow_summary(credentials.siliconflow_api_key, model=model)
+        for model in DIAGNOSTIC_MODELS
+    )
+    print("\n".join(diagnostic.summary() for diagnostic in diagnostics))
+    return 0 if any(diagnostic.minimal_accepted for diagnostic in diagnostics) else 5
 
 
 if __name__ == "__main__":

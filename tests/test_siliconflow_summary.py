@@ -170,6 +170,10 @@ def test_retry_after_and_transport_retry() -> None:
             ProviderErrorCategory.AUTHENTICATION,
         ),
         (
+            httpx.Response(402, json={"code": 30001}),
+            ProviderErrorCategory.QUOTA_EXHAUSTED,
+        ),
+        (
             httpx.Response(
                 403,
                 json={"error": {"code": "AllocationQuota.FreeTierOnly"}},

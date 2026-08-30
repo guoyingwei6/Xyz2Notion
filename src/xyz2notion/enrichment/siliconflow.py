@@ -202,6 +202,12 @@ class SiliconFlowSummaryClient:
                     "SiliconFlow API key is invalid",
                     code=code or "401",
                 )
+            if response.status_code == 402:
+                raise _error(
+                    ProviderErrorCategory.QUOTA_EXHAUSTED,
+                    "SiliconFlow summary quota or account balance is unavailable",
+                    code=code or "402",
+                )
             if response.status_code == 403:
                 category = (
                     ProviderErrorCategory.QUOTA_EXHAUSTED
