@@ -119,5 +119,6 @@ Prompt 设计记录见 [`prompts/summary-v1.md`](../prompts/summary-v1.md)。结
 JSON 语法、字段类型、缺失字段、章节越界或脑图 ID 重复，只允许额外执行一次
 JSON 修复；修复 Prompt 不会重新调用 ASR，也不访问音频。修复后仍不合格时，
 切换本地 Qwen3，再允许一次本地 JSON 修复；仍失败才保存 `schema_changed`。
-远程 Qwen3 使用 `enable_thinking=true`；本地 Qwen3 使用约束 JSON 和
-`/no_think`，优先保证结构化输出稳定。
+远程 Qwen3 使用 `enable_thinking=false`，避免 SiliconFlow 的 thinking 与
+JSON-object 模式组合被接口拒绝；本地 Qwen3 使用约束 JSON 和 `/no_think`，
+优先保证结构化输出稳定。

@@ -160,7 +160,11 @@ class SiliconFlowSummaryClient:
             "max_tokens": max_output_tokens,
         }
         if model in THINKING_CONTROL_MODELS:
-            payload["enable_thinking"] = True
+            # SiliconFlow's JSON-object mode is used as a hard contract by the
+            # enrichment pipeline.  Keep Qwen3 reasoning disabled here: the
+            # provider rejects the thinking + JSON-mode combination with an
+            # invalid-input response before generation starts.
+            payload["enable_thinking"] = False
         for attempt in range(self.max_retries + 1):
             response: httpx.Response | None = None
             try:

@@ -69,7 +69,7 @@ def test_structured_completion_uses_official_json_mode() -> None:
         assert request.headers["Authorization"] == f"Bearer {API_KEY}"
         body = json.loads(request.content)
         assert body["response_format"] == {"type": "json_object"}
-        assert body["enable_thinking"] is True
+        assert body["enable_thinking"] is False
         assert body["model"] == "Qwen/Qwen3-8B"
         return completion(json.dumps(payload(), ensure_ascii=False))
 
