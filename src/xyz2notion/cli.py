@@ -21,6 +21,7 @@ from xyz2notion.config import (
     load_config,
     load_runtime_credentials,
 )
+from xyz2notion.enrichment.client import SUMMARY_FALLBACK_PROVIDER
 from xyz2notion.migration.legacy import LegacyTemplateMigrator
 from xyz2notion.migration.schema import (
     CURRENT_WORKSPACE_SCHEMA_VERSION,
@@ -945,6 +946,7 @@ def _run_archive_legacy_zero_play(args: argparse.Namespace) -> int:
 def _run_reopen_summary_failures(
     args: argparse.Namespace,
     *,
+    allowed_providers: frozenset[str],
     allowed_reasons: frozenset[str],
     confirmation_label: str,
 ) -> int:
@@ -990,7 +992,7 @@ def _run_reopen_summary_failures(
                     if (
                         state.record.state is not PipelineState.FAILED_FINAL
                         or failure is None
-                        or failure.provider != "siliconflow_summary"
+                        or failure.provider not in allowed_providers
                         or _safe_failure_reason_code(failure) not in allowed_reasons
                         or state.transcript is None
                         or state.summary is not None
@@ -1006,6 +1008,10 @@ def _run_reopen_summary_failures(
                     state_store.save(
                         str(page["id"]),
                         state.model_copy(update={"record": record}),
+                    )
+                    notion.update_page(
+                        str(page["id"]),
+                        {"properties": {"人工请求重试": {"checkbox": True}}},
                     )
                     reopened += 1
     except (ConfigurationError, MissingCredentialError) as exc:
@@ -1023,6 +1029,7 @@ def _run_reopen_summary_failures(
 def _run_reopen_timeline_failures(args: argparse.Namespace) -> int:
     return _run_reopen_summary_failures(
         args,
+        allowed_providers=frozenset({"siliconflow_summary"}),
         allowed_reasons=frozenset({"timeline_constraints"}),
         confirmation_label="TIMELINE",
     )
@@ -1031,11 +1038,19 @@ def _run_reopen_timeline_failures(args: argparse.Namespace) -> int:
 def _run_reopen_all_summary_failures(args: argparse.Namespace) -> int:
     return _run_reopen_summary_failures(
         args,
+        allowed_providers=frozenset(
+            {
+                "siliconflow_summary",
+                "local_qwen_summary",
+                SUMMARY_FALLBACK_PROVIDER,
+            }
+        ),
         allowed_reasons=frozenset(
             {
                 "summary_schema",
                 "timeline_constraints",
                 "request_http_400_20015",
+                "unavailable",
             }
         ),
         confirmation_label="SUMMARY",

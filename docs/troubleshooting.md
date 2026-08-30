@@ -94,6 +94,10 @@ SiliconFlow 文本接口；若整个 Key 或网络不可用，本地文字稿检
 按检查点自动识别恢复阶段，排队中/转写中的任务只查询而不重复提交。请求执行后复选框会自动取消；
 再次失败会回到普通 `可重试失败` 队列。
 
+`最终失败` 不会被定时队列自动重开。对已有文字稿、尚无摘要的历史摘要失败，可用
+`reopen-summary-failures` 按 1–2 条分批重开；命令会保留 transcript 检查点并勾选
+`人工请求重试`，随后由 `Retry Failed Episode AI` 精确消费，不会重新执行 ASR。
+
 ### 只重试普通失败单集
 
 重新运行 `Transcribe Episode Queue` 或 `Enrich Transcribed Episodes`。它们只消费

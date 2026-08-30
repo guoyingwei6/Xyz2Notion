@@ -2009,23 +2009,32 @@ def test_reopen_timeline_failures_requires_bound_confirmation(
 
 
 @pytest.mark.parametrize(
-    ("category", "message", "code"),
+    ("provider", "category", "message", "code"),
     [
         (
+            "siliconflow_summary",
             ProviderErrorCategory.SCHEMA_CHANGED,
             "SiliconFlow JSON repair did not satisfy the summary schema",
             None,
         ),
         (
+            "siliconflow_summary",
             ProviderErrorCategory.INVALID_INPUT,
             "SiliconFlow rejected the summary request (HTTP 400)",
             "20015",
+        ),
+        (
+            "local_qwen_summary",
+            ProviderErrorCategory.UNAVAILABLE,
+            "Local Qwen inference failed",
+            None,
         ),
     ],
 )
 def test_reopen_summary_failure_preserves_transcript_checkpoint(
     capsys: object,
     monkeypatch: object,
+    provider: str,
     category: ProviderErrorCategory,
     message: str,
     code: str | None,
@@ -2033,7 +2042,7 @@ def test_reopen_summary_failure_preserves_transcript_checkpoint(
     monkeypatch.setenv("NOTION_TOKEN", "secret_fixture_token")  # type: ignore[attr-defined]
     monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
     failure = ProviderFailure(
-        provider="siliconflow_summary",
+        provider=provider,
         category=category,
         message=message,
         code=code,
@@ -2059,6 +2068,8 @@ def test_reopen_summary_failure_preserves_transcript_checkpoint(
     ]
 
     class FakeNotion(FakeContextClient):
+        manual_requests: ClassVar[list[tuple[str, object]]] = []
+
         def query_data_source(
             self,
             source: str,
@@ -2073,6 +2084,10 @@ def test_reopen_summary_failure_preserves_transcript_checkpoint(
                 },
             }
             return pages
+
+        def update_page(self, page_id: str, payload: object) -> dict[str, object]:
+            self.manual_requests.append((page_id, payload))
+            return {}
 
     class FakeInitializer:
         def __init__(self, _api: object, _page_id: str) -> None:
@@ -2106,6 +2121,7 @@ def test_reopen_summary_failure_preserves_transcript_checkpoint(
     monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
     monkeypatch.setattr(cli_module, "NotionEpisodeStateStore", FakeStore)  # type: ignore[attr-defined]
     FakeStore.saved = []
+    FakeNotion.manual_requests = []
 
     assert (
         main(
@@ -2126,6 +2142,12 @@ def test_reopen_summary_failure_preserves_transcript_checkpoint(
     assert reopened.record.failure is None
     assert reopened.transcript == transcript
     assert reopened.summary is None
+    assert FakeNotion.manual_requests == [
+        (
+            "timeline-page",
+            {"properties": {"人工请求重试": {"checkbox": True}}},
+        )
+    ]
 
 
 def test_reopen_timeline_failures_skips_unrelated_or_incomplete_states(
