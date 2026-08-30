@@ -554,4 +554,4 @@ def test_enrichment_workflow_is_asr_free_cached_and_mode_gated() -> None:
     assert "--preflight-only" in text
     assert 'exit "$status"' in text
     assert "~/.cache/xyz2notion" in text
-    assert "llama_cpp_python-0.3.19-cp312-cp312-linux_x86_64.whl" in text
+    assert "llama_cpp_python-0.3.35-py3-none-manylinux2014_x86_64" in text

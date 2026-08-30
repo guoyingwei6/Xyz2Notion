@@ -74,25 +74,25 @@ jobs:
           path: |
             ~/.cache/uv
             ~/.cache/xyz2notion
-          key: local-summary-${{ runner.os }}-py312-qwen3-1.7b-q4km-${{ hashFiles('uv.lock') }}
+          key: local-summary-${{ runner.os }}-py312-qwen3-1.7b-q4km-llama0.3.35-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            local-summary-${{ runner.os }}-py312-qwen3-1.7b-q4km-
+            local-summary-${{ runner.os }}-py312-qwen3-1.7b-q4km-llama0.3.35-
 
       - name: Install locked application and cached local summary runtime
         run: |
           python -m pip install uv==0.9.28
           uv sync --locked
           runtime_dir="$HOME/.cache/xyz2notion/runtime"
-          runtime_wheel="$runtime_dir/llama_cpp_python-0.3.19-cp312-cp312-linux_x86_64.whl"
+          runtime_wheel="$runtime_dir/llama_cpp_python-0.3.35-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
           mkdir -p "$runtime_dir"
           if [[ ! -f "$runtime_wheel" ]] || \
              ! printf '%s  %s\n' \
-               'ca1b372a3f5b30dcd0a73179a33b0f675adbb805bc64f6f656f208a71ff631d4' \
+               'd172f3d3c8cdd194c3c47c71cb077ed6e61354a2d0f939ceeac0c8fd29999596' \
                "$runtime_wheel" | sha256sum --check --status; then
             curl --fail --location --retry 3 --output "$runtime_wheel.part" \
-              'https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.19/llama_cpp_python-0.3.19-cp312-cp312-linux_x86_64.whl'
+              'https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.35/llama_cpp_python-0.3.35-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl'
             printf '%s  %s\n' \
-              'ca1b372a3f5b30dcd0a73179a33b0f675adbb805bc64f6f656f208a71ff631d4' \
+              'd172f3d3c8cdd194c3c47c71cb077ed6e61354a2d0f939ceeac0c8fd29999596' \
               "$runtime_wheel.part" | sha256sum --check --status
             mv "$runtime_wheel.part" "$runtime_wheel"
           fi

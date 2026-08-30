@@ -131,7 +131,7 @@ def test_enrichment_workflow_uses_only_summary_credentials() -> None:
     assert "SILICONFLOW_API_KEY" in text
     assert "TINGWU_COOKIE" not in text
     assert "process-ai" not in text
-    assert "llama_cpp_python-0.3.19-cp312-cp312-linux_x86_64.whl" in text
+    assert "llama_cpp_python-0.3.35-py3-none-manylinux2014_x86_64" in text
     assert "github.event.workflow_run.conclusion == 'success'" in text
     assert "github.event_name == 'workflow_run'" in text
     assert "xyz2notion.orchestration.summary_diagnostic" in text
