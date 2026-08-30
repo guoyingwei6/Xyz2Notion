@@ -47,7 +47,7 @@ from xyz2notion.orchestration.processor import (
     episode_candidates,
 )
 from xyz2notion.orchestration.recovery import reset_episode_ai
-from xyz2notion.orchestration.state_store import NotionEpisodeStateStore
+from xyz2notion.orchestration.state_store import EpisodeAIState, NotionEpisodeStateStore
 from xyz2notion.security import CredentialKind, allowed_hosts
 from xyz2notion.state import PipelineRecord, PipelineState
 from xyz2notion.statistics.incremental import NotionIncrementalStatistics
@@ -774,6 +774,19 @@ def _safe_failure_reason_code(failure: ProviderFailure) -> str:
     return failure.category.value
 
 
+def _summary_recovery_priority(reason: str) -> int:
+    """Try schema canaries before bulk runtime failures while preserving order."""
+    return {
+        "legacy_local_schema": 0,
+        "summary_schema": 1,
+        "completion_schema": 2,
+        "timeline_constraints": 3,
+        "normalization_constraints": 4,
+        "request_http_400_20015": 5,
+        "unavailable": 10,
+    }.get(reason, 20)
+
+
 def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
     """Read aggregate cleanup and AI status without exposing Episode identity."""
     try:
@@ -1003,10 +1016,9 @@ def _run_reopen_summary_failures(
                 },
             )
             reopened = skipped = 0
+            candidates: list[tuple[int, JsonObject, EpisodeAIState]] = []
             with NotionEpisodeStateStore(notion) as state_store:
                 for page in pages:
-                    if reopened >= args.limit:
-                        break
                     properties = page.get("properties")
                     if not isinstance(properties, Mapping) or not page.get("id"):
                         skipped += 1
@@ -1017,16 +1029,22 @@ def _run_reopen_summary_failures(
                         continue
                     state = state_store.load(page, eid)
                     failure = state.record.failure
+                    reason = _safe_failure_reason_code(failure) if failure is not None else ""
                     if (
                         state.record.state is not PipelineState.FAILED_FINAL
                         or failure is None
                         or failure.provider not in allowed_providers
-                        or _safe_failure_reason_code(failure) not in allowed_reasons
+                        or reason not in allowed_reasons
                         or state.transcript is None
                         or state.summary is not None
                     ):
                         skipped += 1
                         continue
+                    candidates.append((_summary_recovery_priority(reason), page, state))
+                for _priority, page, state in sorted(candidates, key=lambda item: item[0]):
+                    if reopened >= args.limit:
+                        break
+                    eid = state.record.eid
                     record = PipelineRecord(
                         eid=eid,
                         state=PipelineState.TRANSCRIBED,
