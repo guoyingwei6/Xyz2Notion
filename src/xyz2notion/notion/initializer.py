@@ -184,6 +184,52 @@ def _property_ids(data_source: Mapping[str, Any]) -> dict[str, str]:
     }
 
 
+def _merged_select_property(
+    current_property: object,
+    desired_property: object,
+) -> JsonObject | None:
+    """Add desired select options while preserving every existing user option."""
+    if not isinstance(current_property, Mapping) or not isinstance(desired_property, Mapping):
+        return None
+    current_select = current_property.get("select")
+    desired_select = desired_property.get("select")
+    if not isinstance(current_select, Mapping) or not isinstance(desired_select, Mapping):
+        return None
+    current_options = current_select.get("options")
+    desired_options = desired_select.get("options")
+    if not isinstance(current_options, list) or not isinstance(desired_options, list):
+        return None
+
+    merged: list[JsonObject] = []
+    names: set[str] = set()
+    for option in current_options:
+        if not isinstance(option, Mapping) or not isinstance(option.get("name"), str):
+            continue
+        name = str(option["name"])
+        item: JsonObject = {"name": name}
+        color = option.get("color")
+        if isinstance(color, str):
+            item["color"] = color
+        merged.append(item)
+        names.add(name)
+
+    changed = False
+    for option in desired_options:
+        if not isinstance(option, Mapping) or not isinstance(option.get("name"), str):
+            continue
+        name = str(option["name"])
+        if name in names:
+            continue
+        item = {"name": name}
+        color = option.get("color")
+        if isinstance(color, str):
+            item["color"] = color
+        merged.append(item)
+        names.add(name)
+        changed = True
+    return {"select": {"options": merged}} if changed else None
+
+
 def _canonical_property_id(value: object) -> str:
     """Compare Notion property IDs independent of URL-encoding differences."""
     return unquote(str(value or ""))
@@ -570,7 +616,7 @@ class NotionInitializer:
         data_source_id: str,
         desired: Mapping[str, Any],
     ) -> None:
-        """Add schema fields without rewriting existing formulas, options, or relations."""
+        """Add schema fields and missing select options without deleting user schema."""
         data_source = self.api.retrieve_data_source(data_source_id)
         current = data_source.get("properties")
         current_names = set(current) if isinstance(current, dict) else set()
@@ -581,6 +627,23 @@ class NotionInitializer:
             except NotionAPIError as exc:
                 raise NotionAPIError(
                     f"Failed to add Notion property {name!r}: {exc}",
+                    status_code=exc.status_code,
+                    code=exc.code,
+                    retryable=exc.retryable,
+                ) from exc
+        if not isinstance(current, Mapping):
+            return
+        for name, value in desired.items():
+            if name not in current:
+                continue
+            select_update = _merged_select_property(current[name], value)
+            if select_update is None:
+                continue
+            try:
+                self.api.update_data_source(data_source_id, {name: select_update})
+            except NotionAPIError as exc:
+                raise NotionAPIError(
+                    f"Failed to add Notion select options for {name!r}: {exc}",
                     status_code=exc.status_code,
                     code=exc.code,
                     retryable=exc.retryable,

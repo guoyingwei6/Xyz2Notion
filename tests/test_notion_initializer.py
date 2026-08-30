@@ -1,4 +1,5 @@
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import replace
 from typing import Any
 
@@ -449,6 +450,30 @@ def test_initializer_is_idempotent_and_preserves_user_content() -> None:
     assert user_block in fake.blocks["root"]
     marker_count = sum(HOME_MARKER_URL in str(block) for block in fake.blocks["root"])
     assert marker_count == 1
+
+
+def test_initializer_adds_missing_select_options_and_preserves_custom_options() -> None:
+    fake = FakeNotion()
+    initializer = NotionInitializer(fake, "root")
+    first = initializer.initialize(create_home=True)
+    episode_ds = first.resources["episode"].data_source_id
+    fake.data_sources[episode_ds]["properties"]["增强状态"] = deepcopy(
+        fake.data_sources[episode_ds]["properties"]["增强状态"]
+    )
+    enrichment = fake.data_sources[episode_ds]["properties"]["增强状态"]["select"]
+    enrichment["options"] = [
+        option for option in enrichment["options"] if option["name"] != "待发布"
+    ]
+    enrichment["options"].append({"name": "我的自定义状态", "color": "pink"})
+
+    initializer.initialize()
+
+    option_names = {
+        option["name"]
+        for option in fake.data_sources[episode_ds]["properties"]["增强状态"]["select"]["options"]
+    }
+    assert "待发布" in option_names
+    assert "我的自定义状态" in option_names
 
 
 def test_initializer_sanitizes_stale_ai_view_configurations_and_keeps_valid_additions() -> None:
