@@ -10,13 +10,15 @@ import pytest
 from xyz2notion.enrichment.client import FallbackSummaryClient, preflight_summary_client
 from xyz2notion.enrichment.local_qwen import (
     LOCAL_QWEN_BATCH_TOKENS,
+    LOCAL_QWEN_COMPACT_OUTPUT_TOKENS,
     LOCAL_QWEN_CONTEXT_TOKENS,
-    LOCAL_QWEN_MAX_OUTPUT_TOKENS,
     LOCAL_QWEN_MODEL,
+    LocalEnrichmentPayload,
     LocalQwenSummaryClient,
     _default_model_path,
     _load_llama,
 )
+from xyz2notion.enrichment.prompts import FULL_PROMPT
 from xyz2notion.enrichment.schema import EnrichmentPayload
 from xyz2notion.enrichment.siliconflow import CompletionUsage
 from xyz2notion.models import (
@@ -37,6 +39,12 @@ def payload(summary: str = "本地摘要") -> dict[str, object]:
         "questions": ["问题"],
         "mindmap": {"node_id": "root", "title": "主题", "children": []},
     }
+
+
+def compact_payload(summary: str = "本地摘要") -> dict[str, object]:
+    value = payload(summary)
+    del value["mindmap"]
+    return value
 
 
 class FakeLlama:
@@ -82,7 +90,7 @@ def test_local_qwen_generates_schema_constrained_json(
     client, model = local_client(
         tmp_path,
         monkeypatch,
-        [json.dumps(payload(), ensure_ascii=False)],
+        [json.dumps(compact_payload(), ensure_ascii=False)],
     )
     value, usage = client.generate_structured(
         EnrichmentPayload,
@@ -91,17 +99,60 @@ def test_local_qwen_generates_schema_constrained_json(
         max_output_tokens=10_000,
     )
     assert value.summary == "本地摘要"
+    assert value.mindmap.node_id == "root"
+    assert [child.title for child in value.mindmap.children] == ["开场"]
     assert usage == CompletionUsage(20, 10)
     assert client.active_model == LOCAL_QWEN_MODEL
     assert client.active_provider == "local_qwen_summary"
-    assert model.requests[0]["max_tokens"] == LOCAL_QWEN_MAX_OUTPUT_TOKENS
+    assert model.requests[0]["max_tokens"] == LOCAL_QWEN_COMPACT_OUTPUT_TOKENS
     assert model.requests[0]["response_format"] == {
         "type": "json_object",
-        "schema": EnrichmentPayload.model_json_schema(),
+        "schema": LocalEnrichmentPayload.model_json_schema(),
     }
+    compact_schema = LocalEnrichmentPayload.model_json_schema()
+    assert "mindmap" not in compact_schema["properties"]
+    assert compact_schema["properties"]["chapters"]["maxItems"] == 8
     messages = model.requests[0]["messages"]
     assert isinstance(messages, list)
     assert "/no_think" in str(messages[-1])
+    assert "不要输出 mindmap" in str(messages[-1])
+
+
+def test_local_qwen_replaces_recursive_prompt_schema(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, model = local_client(
+        tmp_path,
+        monkeypatch,
+        [json.dumps(compact_payload(), ensure_ascii=False)],
+    )
+    full_schema = json.dumps(
+        EnrichmentPayload.model_json_schema(),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    compact_schema = json.dumps(
+        LocalEnrichmentPayload.model_json_schema(),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    client.generate_structured(
+        EnrichmentPayload,
+        system="system",
+        user=FULL_PROMPT.format(
+            duration_ms=1_000,
+            schema=full_schema,
+            transcript="文字稿",
+        ),
+        max_output_tokens=10_000,
+    )
+    messages = model.requests[0]["messages"]
+    assert isinstance(messages, list)
+    request_text = str(messages[-1])
+    assert full_schema not in request_text
+    assert compact_schema in request_text
+    assert "不要输出 mindmap" in request_text
 
 
 def test_local_qwen_repairs_invalid_json_once(
@@ -111,7 +162,7 @@ def test_local_qwen_repairs_invalid_json_once(
     client, model = local_client(
         tmp_path,
         monkeypatch,
-        ["not-json", json.dumps(payload("修复成功"), ensure_ascii=False)],
+        ["not-json", json.dumps(compact_payload("修复成功"), ensure_ascii=False)],
     )
     value, usage = client.generate_structured(
         EnrichmentPayload,
@@ -139,7 +190,7 @@ def test_local_qwen_download_is_checksum_pinned(
     client = LocalQwenSummaryClient(
         model_path=model_path,
         client=httpx.Client(transport=transport),
-        model_factory=lambda _path: FakeLlama([json.dumps(payload())]),
+        model_factory=lambda _path: FakeLlama([json.dumps(compact_payload())]),
     )
     assert client._ensure_model_file() == model_path
     assert model_path.read_bytes() == content
@@ -274,7 +325,7 @@ def test_local_qwen_context_closes_owned_client_and_drops_model(
     client, _model = local_client(
         tmp_path,
         monkeypatch,
-        [json.dumps(payload(), ensure_ascii=False)],
+        [json.dumps(compact_payload(), ensure_ascii=False)],
     )
     with client as entered:
         assert entered is client
@@ -287,7 +338,7 @@ def test_local_qwen_accepts_fenced_json(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fenced = f"```json\n{json.dumps(payload(), ensure_ascii=False)}\n```"
+    fenced = f"```json\n{json.dumps(compact_payload(), ensure_ascii=False)}\n```"
     client, _model = local_client(tmp_path, monkeypatch, [fenced])
     value, _usage = client.generate_structured(
         EnrichmentPayload,
@@ -309,6 +360,7 @@ def test_local_qwen_rejects_unexpected_completion_schema(
     with pytest.raises(ProviderError) as caught:
         client._complete(system="system", user="user", schema={}, max_output_tokens=100)
     assert caught.value.failure.category is ProviderErrorCategory.SCHEMA_CHANGED
+    assert caught.value.failure.code == "completion_schema"
 
 
 def test_local_qwen_maps_runtime_failure_to_unavailable(
@@ -364,6 +416,7 @@ def test_local_qwen_repair_failure_is_bounded(
             max_output_tokens=1000,
         )
     assert caught.value.failure.category is ProviderErrorCategory.SCHEMA_CHANGED
+    assert caught.value.failure.code == "summary_schema"
     assert len(model.requests) == 2
 
 
@@ -371,7 +424,7 @@ def test_local_qwen_repair_must_pass_semantic_validator(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    encoded = json.dumps(payload(), ensure_ascii=False)
+    encoded = json.dumps(compact_payload(), ensure_ascii=False)
     client, model = local_client(tmp_path, monkeypatch, [encoded, encoded])
     with pytest.raises(ProviderError) as caught:
         client.generate_structured(
@@ -382,6 +435,7 @@ def test_local_qwen_repair_must_pass_semantic_validator(
             validator=lambda _value: False,
         )
     assert caught.value.failure.category is ProviderErrorCategory.SCHEMA_CHANGED
+    assert caught.value.failure.code == "timeline_constraints"
     assert len(model.requests) == 2
 
 
@@ -481,6 +535,7 @@ def test_fallback_client_preserves_both_safe_failure_layers() -> None:
         "primary=siliconflow_summary:quota_exhausted:quota.code; "
         "fallback=local_qwen_summary:unavailable:runtime_load"
     )
+    assert failure.code == "runtime_load"
 
 
 def test_summary_preflight_reports_primary_failure_and_working_fallback() -> None:

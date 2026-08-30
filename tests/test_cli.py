@@ -1874,6 +1874,25 @@ def test_notion_backlog_property_helpers_cover_malformed_values() -> None:
     local_completion_failure = local_schema_failure.model_copy(
         update={"message": "Local Qwen returned an unexpected completion schema"}
     )
+    coded_fallback_failure = local_schema_failure.model_copy(
+        update={
+            "provider": "summary_fallback_chain",
+            "message": (
+                "Summary providers failed: primary=siliconflow_summary:quota_exhausted:30001; "
+                "fallback=local_qwen_summary:schema_changed:summary_schema"
+            ),
+            "code": "summary_schema",
+        }
+    )
+    legacy_fallback_failure = coded_fallback_failure.model_copy(
+        update={
+            "message": (
+                "Summary providers failed: primary=siliconflow_summary:quota_exhausted:30001; "
+                "fallback=local_qwen_summary:schema_changed"
+            ),
+            "code": None,
+        }
+    )
     assert cli_module._safe_failure_reason_code(schema_failure) == "summary_schema"  # type: ignore[attr-defined]
     assert cli_module._safe_failure_reason_code(timeline_failure) == "timeline_constraints"  # type: ignore[attr-defined]
     assert cli_module._safe_failure_reason_code(local_schema_failure) == "summary_schema"  # type: ignore[attr-defined]
@@ -1886,6 +1905,12 @@ def test_notion_backlog_property_helpers_cover_malformed_values() -> None:
     )
     assert (  # type: ignore[attr-defined]
         cli_module._safe_failure_reason_code(local_completion_failure) == "completion_schema"
+    )
+    assert (  # type: ignore[attr-defined]
+        cli_module._safe_failure_reason_code(coded_fallback_failure) == "summary_schema"
+    )
+    assert (  # type: ignore[attr-defined]
+        cli_module._safe_failure_reason_code(legacy_fallback_failure) == "legacy_local_schema"
     )
 
 
@@ -2053,6 +2078,21 @@ def test_reopen_timeline_failures_requires_bound_confirmation(
             "local_qwen_summary",
             ProviderErrorCategory.UNAVAILABLE,
             "Local Qwen inference failed",
+            None,
+        ),
+        (
+            "local_qwen_summary",
+            ProviderErrorCategory.SCHEMA_CHANGED,
+            "Local Qwen JSON repair did not satisfy the summary schema",
+            "summary_schema",
+        ),
+        (
+            "summary_fallback_chain",
+            ProviderErrorCategory.SCHEMA_CHANGED,
+            (
+                "Summary providers failed: primary=siliconflow_summary:quota_exhausted:30001; "
+                "fallback=local_qwen_summary:schema_changed"
+            ),
             None,
         ),
     ],

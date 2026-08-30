@@ -8,14 +8,17 @@ import json
 import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Annotated, Any, TypeVar, cast
 
 import httpx
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from xyz2notion.enrichment.prompts import REPAIR_PROMPT
+from xyz2notion.enrichment.schema import EnrichmentPayload
 from xyz2notion.enrichment.siliconflow import CompletionUsage
 from xyz2notion.models import (
+    Chapter,
+    MindmapNode,
     ProviderError,
     ProviderErrorCategory,
     ProviderFailure,
@@ -33,8 +36,95 @@ LOCAL_QWEN_SIZE = 1_107_408_544
 LOCAL_QWEN_CONTEXT_TOKENS = 24_576
 LOCAL_QWEN_BATCH_TOKENS = 128
 LOCAL_QWEN_MAX_OUTPUT_TOKENS = 4_096
+LOCAL_QWEN_COMPACT_OUTPUT_TOKENS = 3_072
 StructuredModel = TypeVar("StructuredModel", bound=BaseModel)
+GeneratedModel = TypeVar("GeneratedModel", bound=BaseModel)
 ModelFactory = Callable[[Path], Any]
+
+CompactItem = Annotated[str, Field(max_length=120)]
+CompactName = Annotated[str, Field(max_length=48)]
+
+
+class LocalChapter(BaseModel):
+    """Bounded non-recursive chapter contract for the small local model."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    start_ms: int = Field(ge=0)
+    title: str = Field(min_length=1, max_length=64)
+    summary: str = Field(default="", max_length=160)
+
+
+class LocalEnrichmentPayload(BaseModel):
+    """Compact local output converted into the full persisted contract."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    summary: str = Field(min_length=1, max_length=600)
+    chapters: tuple[LocalChapter, ...] = Field(default=(), max_length=8)
+    highlights: tuple[CompactItem, ...] = Field(default=(), max_length=6)
+    quotes: tuple[CompactItem, ...] = Field(default=(), max_length=5)
+    terms: tuple[CompactName, ...] = Field(default=(), max_length=8)
+    people: tuple[CompactName, ...] = Field(default=(), max_length=8)
+    questions: tuple[CompactItem, ...] = Field(default=(), max_length=6)
+
+    def to_enrichment_payload(self) -> EnrichmentPayload:
+        """Build the recursive mind-map deterministically from bounded chapters."""
+        chapters = tuple(
+            Chapter(
+                start_ms=chapter.start_ms,
+                title=chapter.title,
+                summary=chapter.summary,
+            )
+            for chapter in self.chapters
+        )
+        cleaned_summary = self.summary.strip()
+        root_title = cleaned_summary.splitlines()[0][:80].strip() if cleaned_summary else "节目摘要"
+        mindmap = MindmapNode(
+            node_id="root",
+            title=root_title,
+            children=tuple(
+                MindmapNode(
+                    node_id=f"chapter-{index}",
+                    title=chapter.title,
+                )
+                for index, chapter in enumerate(chapters, start=1)
+            ),
+        )
+        return EnrichmentPayload(
+            summary=self.summary,
+            chapters=chapters,
+            highlights=self.highlights,
+            quotes=self.quotes,
+            terms=self.terms,
+            people=self.people,
+            questions=self.questions,
+            mindmap=mindmap,
+        )
+
+
+def _compact_enrichment_prompt(user: str) -> str:
+    """Replace the recursive contract and explicitly bound local generation."""
+    full_schema = json.dumps(
+        EnrichmentPayload.model_json_schema(),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    compact_schema = json.dumps(
+        LocalEnrichmentPayload.model_json_schema(),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    localized = user.replace(full_schema, compact_schema)
+    localized = localized.replace(
+        "6. mindmap 是以节目主题为根节点的树，每个 node_id 在树内唯一；",
+        "6. 不要输出 mindmap；程序会根据 chapters 确定性构建；",
+    )
+    return (
+        f"{localized}\n\n"
+        "本地紧凑输出限制：只输出 Schema 中列出的字段，不要输出 mindmap；"
+        "summary 最多 600 字，chapters 最多 8 个，其他数组严格遵守 Schema 的数量和长度上限。"
+    )
 
 
 def _error(
@@ -237,17 +327,18 @@ class LocalQwenSummaryClient:
             raise _error(
                 ProviderErrorCategory.SCHEMA_CHANGED,
                 "Local Qwen returned an unexpected completion schema",
+                code="completion_schema",
             ) from exc
 
-    def generate_structured(
+    def _generate_model(
         self,
-        model_type: type[StructuredModel],
+        model_type: type[GeneratedModel],
         *,
         system: str,
         user: str,
         max_output_tokens: int,
-        validator: Callable[[StructuredModel], bool] | None = None,
-    ) -> tuple[StructuredModel, CompletionUsage]:
+        validator: Callable[[GeneratedModel], bool] | None = None,
+    ) -> tuple[GeneratedModel, CompletionUsage]:
         """Generate schema-constrained JSON and allow one local repair."""
         schema = model_type.model_json_schema()
         content, usage = self._complete(
@@ -277,11 +368,48 @@ class LocalQwenSummaryClient:
                 raise _error(
                     ProviderErrorCategory.SCHEMA_CHANGED,
                     "Local Qwen JSON repair did not satisfy the summary schema",
+                    code="summary_schema",
                 ) from exc
             if validator is not None and not validator(value):
                 raise _error(
                     ProviderErrorCategory.SCHEMA_CHANGED,
                     "Local Qwen JSON repair did not satisfy timeline constraints",
+                    code="timeline_constraints",
                 ) from None
         self.active_model = LOCAL_QWEN_MODEL
         return value, usage
+
+    def generate_structured(
+        self,
+        model_type: type[StructuredModel],
+        *,
+        system: str,
+        user: str,
+        max_output_tokens: int,
+        validator: Callable[[StructuredModel], bool] | None = None,
+    ) -> tuple[StructuredModel, CompletionUsage]:
+        """Use a compact non-recursive contract for full local enrichment."""
+        if model_type is EnrichmentPayload:
+            compact_validator = (
+                None
+                if validator is None
+                else lambda value: validator(cast(StructuredModel, value.to_enrichment_payload()))
+            )
+            compact, usage = self._generate_model(
+                LocalEnrichmentPayload,
+                system=system,
+                user=_compact_enrichment_prompt(user),
+                max_output_tokens=min(
+                    max_output_tokens,
+                    LOCAL_QWEN_COMPACT_OUTPUT_TOKENS,
+                ),
+                validator=compact_validator,
+            )
+            return cast(StructuredModel, compact.to_enrichment_payload()), usage
+        return self._generate_model(
+            model_type,
+            system=system,
+            user=user,
+            max_output_tokens=max_output_tokens,
+            validator=validator,
+        )

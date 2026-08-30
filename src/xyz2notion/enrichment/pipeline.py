@@ -141,11 +141,13 @@ class TranscriptEnricher:
         )
         normalized = normalize_payload(payload, duration_ms)
         if not validate_payload(normalized, duration_ms):
+            model = self.client.active_model or self.client.models[0]
             raise ProviderError(
                 ProviderFailure(
-                    provider="siliconflow_summary",
+                    provider=_active_summary_provider(self.client, model),
                     category=ProviderErrorCategory.SCHEMA_CHANGED,
                     message="Local enrichment normalization did not satisfy constraints",
+                    code="normalization_constraints",
                 )
             )
         return normalized, usage

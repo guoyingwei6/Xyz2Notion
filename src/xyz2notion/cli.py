@@ -28,7 +28,12 @@ from xyz2notion.migration.schema import (
     detect_workspace_schema_version,
     migration_plan,
 )
-from xyz2notion.models import ProviderError, ProviderFailure, local_today
+from xyz2notion.models import (
+    ProviderError,
+    ProviderErrorCategory,
+    ProviderFailure,
+    local_today,
+)
 from xyz2notion.notion.client import JsonObject, NotionAPIError, NotionClient
 from xyz2notion.notion.cover_localizer import NotionCoverLocalizer
 from xyz2notion.notion.initializer import DATA_PAGE_TITLE, HOME_MARKER_URL, NotionInitializer
@@ -732,6 +737,19 @@ def _cover_storage_kind(properties: Mapping[str, object]) -> str:
 
 def _safe_failure_reason_code(failure: ProviderFailure) -> str:
     """Reduce known static failures to non-identifying aggregate reason codes."""
+    if failure.code in {
+        "summary_schema",
+        "timeline_constraints",
+        "normalization_constraints",
+        "completion_schema",
+    }:
+        return failure.code
+    if (
+        failure.provider == SUMMARY_FALLBACK_PROVIDER
+        and failure.category is ProviderErrorCategory.SCHEMA_CHANGED
+        and "fallback=local_qwen_summary:schema_changed" in failure.message
+    ):
+        return "legacy_local_schema"
     if failure.message in {
         "SiliconFlow JSON repair did not satisfy the summary schema",
         "Local Qwen JSON repair did not satisfy the summary schema",
@@ -1059,6 +1077,9 @@ def _run_reopen_all_summary_failures(args: argparse.Namespace) -> int:
             {
                 "summary_schema",
                 "timeline_constraints",
+                "normalization_constraints",
+                "completion_schema",
+                "legacy_local_schema",
                 "request_http_400_20015",
                 "unavailable",
             }
