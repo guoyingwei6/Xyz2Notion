@@ -201,3 +201,17 @@ def test_notion_repair_supports_read_only_backlog_audit() -> None:
     assert "uv run xyz2notion archive-legacy-zero-play" in text
     assert '--expected-count "$LIMIT"' in text
     assert "XIAOYUZHOU_REFRESH_TOKEN" not in text
+
+
+def test_final_summary_recovery_is_bounded_audited_and_asr_free() -> None:
+    text, workflow = _workflow("recover-final-summaries.yml")
+    dispatch = workflow[True]["workflow_dispatch"]  # type: ignore[index,operator]
+    inputs = dispatch["inputs"]  # type: ignore[index]
+    assert inputs["batches"]["options"] == ["1", "2", "3", "4", "5", "6"]  # type: ignore[index]
+    assert "timeout-minutes: 360" in text
+    assert "reopen-summary-failures" in text
+    assert "--limit 2 --confirm REOPEN_2_SUMMARY_FAILURES" in text
+    assert "process-manual-retries" in text
+    assert "audit-notion-backlog" in text
+    assert "retry_status" in text
+    assert "process-asr" not in text
