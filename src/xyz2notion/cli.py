@@ -785,8 +785,10 @@ def _safe_failure_diagnostic_code(failure: ProviderFailure) -> str:
     return f"{failure.provider}:{failure.category.value}:{code or 'none'}"
 
 
-def _summary_recovery_priority(reason: str) -> int:
+def _summary_recovery_priority(reason: str, code: str | None = None) -> int:
     """Try schema canaries before bulk runtime failures while preserving order."""
+    if code == "runtime_context":
+        return 6
     return {
         "legacy_local_schema": 0,
         "summary_schema": 1,
@@ -1065,7 +1067,9 @@ def _run_reopen_summary_failures(
                     ):
                         skipped += 1
                         continue
-                    candidates.append((_summary_recovery_priority(reason), page, state))
+                    candidates.append(
+                        (_summary_recovery_priority(reason, failure.code), page, state)
+                    )
                 for _priority, page, state in sorted(candidates, key=lambda item: item[0]):
                     if reopened >= args.limit:
                         break

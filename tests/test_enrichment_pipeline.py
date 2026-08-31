@@ -107,6 +107,26 @@ def test_long_transcript_uses_map_reduce_and_accumulates_usage() -> None:
     assert result.output_tokens == 80
 
 
+def test_client_chunk_limit_clamps_configured_transcript_chunks() -> None:
+    client = FakeClient()
+    client.max_transcript_chunk_tokens = 30
+    transcript = TranscriptResult(
+        provider="siliconflow",
+        provider_task_id="task",
+        model="model",
+        duration_ms=180_000,
+        text="全文",
+        segments=(
+            TranscriptSegment(start_ms=0, end_ms=60_000, text="甲" * 20),
+            TranscriptSegment(start_ms=60_000, end_ms=120_000, text="乙" * 20),
+            TranscriptSegment(start_ms=120_000, end_ms=180_000, text="丙" * 20),
+        ),
+    )
+    policy = replace(SummaryPolicy(), chunk_tokens=100, chunk_minutes=5)
+    TranscriptEnricher(client, policy=policy).summarize(transcript)  # type: ignore[arg-type]
+    assert len(client.calls) == 4
+
+
 def test_payload_timeline_and_mindmap_ids_are_validated() -> None:
     valid = enrichment_payload()
     assert validate_payload(valid, 1_000)

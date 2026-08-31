@@ -15,6 +15,7 @@ from xyz2notion.enrichment.local_qwen import (
     LOCAL_QWEN_COMPACT_OUTPUT_TOKENS,
     LOCAL_QWEN_CONTEXT_TOKENS,
     LOCAL_QWEN_MODEL,
+    LOCAL_QWEN_TRANSCRIPT_CHUNK_TOKENS,
     LocalEnrichmentPayload,
     LocalQwenSummaryClient,
     _default_model_path,
@@ -109,6 +110,7 @@ def test_local_qwen_generates_schema_constrained_json(
     assert usage == CompletionUsage(20, 10)
     assert client.active_model == LOCAL_QWEN_MODEL
     assert client.active_provider == "local_qwen_summary"
+    assert client.max_transcript_chunk_tokens == LOCAL_QWEN_TRANSCRIPT_CHUNK_TOKENS
     assert model.requests[0]["max_tokens"] == LOCAL_QWEN_COMPACT_OUTPUT_TOKENS
     assert model.requests[0]["response_format"] == {
         "type": "json_object",
@@ -582,6 +584,19 @@ def test_fallback_client_preserves_both_safe_failure_layers() -> None:
         "fallback=local_qwen_summary:unavailable:runtime_load"
     )
     assert failure.code == "runtime_load"
+
+
+def test_fallback_client_exposes_strictest_transcript_chunk_limit() -> None:
+    primary = SimpleNamespace(
+        models=("remote",),
+        max_transcript_chunk_tokens=20_000,
+    )
+    fallback = SimpleNamespace(
+        models=("local",),
+        max_transcript_chunk_tokens=12_000,
+    )
+    client = FallbackSummaryClient(primary, fallback)  # type: ignore[arg-type]
+    assert client.max_transcript_chunk_tokens == 12_000
 
 
 def test_summary_preflight_reports_primary_failure_and_working_fallback() -> None:

@@ -127,6 +127,16 @@ class FallbackSummaryClient:
         self.active_model: str | None = None
         self.active_provider: str | None = None
         self.last_primary_failure: ProviderFailure | None = None
+        chunk_limits = tuple(
+            limit
+            for candidate in (primary, fallback)
+            if isinstance(
+                (limit := getattr(candidate, "max_transcript_chunk_tokens", None)),
+                int,
+            )
+            and limit > 0
+        )
+        self.max_transcript_chunk_tokens: int | None = min(chunk_limits) if chunk_limits else None
 
     def close(self) -> None:
         for client in (self.primary, self.fallback):

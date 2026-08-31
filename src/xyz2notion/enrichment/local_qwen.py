@@ -38,6 +38,7 @@ LOCAL_QWEN_BATCH_TOKENS = 256
 LOCAL_QWEN_MAX_OUTPUT_TOKENS = 4_096
 LOCAL_QWEN_COMPACT_OUTPUT_TOKENS = 2_048
 LOCAL_QWEN_CHUNK_OUTPUT_TOKENS = 1_024
+LOCAL_QWEN_TRANSCRIPT_CHUNK_TOKENS = 12_000
 StructuredModel = TypeVar("StructuredModel", bound=BaseModel)
 GeneratedModel = TypeVar("GeneratedModel", bound=BaseModel)
 ModelFactory = Callable[[Path], Any]
@@ -198,6 +199,7 @@ class LocalQwenSummaryClient:
     """Download once, verify, and lazily run Qwen3-1.7B on the Actions CPU."""
 
     models: tuple[str, ...] = (LOCAL_QWEN_MODEL,)
+    max_transcript_chunk_tokens = LOCAL_QWEN_TRANSCRIPT_CHUNK_TOKENS
 
     def __init__(
         self,

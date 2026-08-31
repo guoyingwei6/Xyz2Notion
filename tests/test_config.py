@@ -38,7 +38,7 @@ def test_example_config_is_valid_and_secret_free() -> None:
     assert config.summary.siliconflow_models == ("Qwen/Qwen3-8B",)
     assert config.summary.local_qwen_fallback is True
     assert config.summary.prompt_version == "summary-v1"
-    assert config.summary.chunk_tokens == 17_000
+    assert config.summary.chunk_tokens == 12_000
     assert config.summary.chunk_minutes == 60
     assert config.limits.episodes_per_run == 4
     raw = Path("config.example.yaml").read_text(encoding="utf-8")

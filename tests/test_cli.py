@@ -2042,6 +2042,8 @@ def test_safe_failure_reason_distinguishes_summary_invalid_input() -> None:
 def test_summary_recovery_prioritizes_schema_canaries() -> None:
     priority = cli_module._summary_recovery_priority  # type: ignore[attr-defined]
     assert priority("legacy_local_schema") < priority("summary_schema")
+    assert priority("summary_schema") < priority("unavailable", "runtime_context")
+    assert priority("unavailable", "runtime_context") < priority("unavailable")
     assert priority("summary_schema") < priority("unavailable")
     assert priority("unavailable") < priority("unknown")
 

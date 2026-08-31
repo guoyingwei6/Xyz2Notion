@@ -22,7 +22,7 @@ summary:
     - Qwen/Qwen3-8B
   local_qwen_fallback: true
   prompt_version: summary-v1
-  chunk_tokens: 17000
+  chunk_tokens: 12000
   chunk_minutes: 60
   max_output_tokens: 4096
 

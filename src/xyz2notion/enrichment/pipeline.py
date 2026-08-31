@@ -154,9 +154,13 @@ class TranscriptEnricher:
 
     def summarize(self, transcript: TranscriptResult) -> SummaryResult:
         """Summarize once from persisted transcript data; this method has no ASR access."""
+        client_chunk_limit = getattr(self.client, "max_transcript_chunk_tokens", None)
+        max_chunk_tokens = self.policy.chunk_tokens
+        if isinstance(client_chunk_limit, int) and client_chunk_limit > 0:
+            max_chunk_tokens = min(max_chunk_tokens, client_chunk_limit)
         chunks = chunk_transcript(
             transcript,
-            max_tokens=self.policy.chunk_tokens,
+            max_tokens=max_chunk_tokens,
             max_duration_ms=self.policy.chunk_minutes * 60 * 1000,
         )
         if not chunks:
