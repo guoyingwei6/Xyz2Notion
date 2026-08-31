@@ -110,7 +110,6 @@ def test_transcribe_workflow_uses_only_current_asr_providers() -> None:
         "workflows": ["Sync Podcast Metadata"],
         "types": ["completed"],
     }
-    assert "DASHSCOPE_API_KEY" in text
     assert "SILICONFLOW_API_KEY" in text
     assert "TINGWU_COOKIE" not in text
     assert "process-asr" in text
@@ -128,7 +127,6 @@ def test_enrichment_workflow_uses_only_summary_credentials() -> None:
         "workflows": ["Transcribe Episode Queue"],
         "types": ["completed"],
     }
-    assert "DASHSCOPE_API_KEY" in text
     assert "SILICONFLOW_API_KEY" in text
     assert "TINGWU_COOKIE" not in text
     assert "process-ai" not in text
@@ -137,6 +135,18 @@ def test_enrichment_workflow_uses_only_summary_credentials() -> None:
     assert "github.event_name == 'workflow_run'" in text
     assert "xyz2notion.orchestration.summary_diagnostic" in text
     assert "37 22 * * *" not in text
+
+
+def test_summary_provider_diagnostic_never_receives_notion_credentials() -> None:
+    text, workflow = _workflow("diagnose-summary-providers.yml")
+    assert workflow[True] == {"workflow_dispatch": None}  # type: ignore[index]
+    assert "DASHSCOPE_API_KEY" in text
+    assert "SILICONFLOW_API_KEY" in text
+    assert "summary_diagnostic" in text
+    assert "NOTION_TOKEN" not in text
+    assert "NOTION_PAGE_ID" not in text
+    assert "process-manual-retries" not in text
+    assert "enrichment_queue" not in text
 
 
 def test_retry_failed_ai_workflow_is_bounded_and_retry_only() -> None:

@@ -1,0 +1,42 @@
+name: Diagnose Summary Providers
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xyz2notion-diagnostics
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Install locked application
+        run: |
+          python -m pip install uv==0.9.28
+          uv sync --locked
+
+      - name: Probe fixed non-user summary requests
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
+        run: |
+          set -euo pipefail
+          result="$(uv run python -m xyz2notion.orchestration.summary_diagnostic)"
+          printf '%s\n' "$result"
+          {
+            printf '## Summary provider diagnostics\n\n'
+            printf '```text\n%s\n```\n' "$result"
+          } >> "$GITHUB_STEP_SUMMARY"
