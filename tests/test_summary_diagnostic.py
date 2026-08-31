@@ -7,9 +7,13 @@ from pydantic import SecretStr
 
 from xyz2notion.orchestration import summary_diagnostic
 from xyz2notion.orchestration.summary_diagnostic import (
+    DASHSCOPE_CHAT_URL,
+    DASHSCOPE_DIAGNOSTIC_MODEL,
     SILICONFLOW_MODELS_URL,
+    DashScopeSummaryDiagnostic,
     DiagnosticProbe,
     SiliconFlowSummaryDiagnostic,
+    diagnose_dashscope_summary,
     diagnose_siliconflow_summary,
 )
 
@@ -88,6 +92,39 @@ def test_diagnostic_safely_handles_transport_and_malformed_responses() -> None:
         diagnose_siliconflow_summary(" ")
 
 
+def test_dashscope_diagnostic_is_secret_safe_and_tests_json_mode() -> None:
+    requests: list[dict[str, object]] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == DASHSCOPE_CHAT_URL
+        assert request.headers["Authorization"] == f"Bearer {API_KEY}"
+        body = json.loads(request.content)
+        requests.append(body)
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": '{"ok":true}'}}]},
+        )
+
+    result = diagnose_dashscope_summary(
+        SecretStr(API_KEY),
+        client=httpx.Client(transport=httpx.MockTransport(handle)),
+    )
+    assert result.model == DASHSCOPE_DIAGNOSTIC_MODEL
+    assert result.minimal_accepted is True
+    assert [probe.name for probe in result.probes] == [
+        "minimal",
+        "no_thinking",
+        "json_no_thinking",
+    ]
+    assert "enable_thinking" not in requests[0]
+    assert requests[1]["enable_thinking"] is False
+    assert requests[2]["response_format"] == {"type": "json_object"}
+    assert API_KEY not in result.summary()
+
+    with pytest.raises(ValueError, match="cannot be empty"):
+        diagnose_dashscope_summary(" ")
+
+
 def test_diagnostic_main_reports_missing_and_live_route(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -95,10 +132,10 @@ def test_diagnostic_main_reports_missing_and_live_route(
     monkeypatch.setattr(
         summary_diagnostic,
         "load_runtime_credentials",
-        lambda: SimpleNamespace(siliconflow_api_key=None),
+        lambda: SimpleNamespace(siliconflow_api_key=None, dashscope_api_key=None),
     )
     assert summary_diagnostic.main() == 2
-    assert "missing SILICONFLOW_API_KEY" in capsys.readouterr().err
+    assert "missing SILICONFLOW_API_KEY and DASHSCOPE_API_KEY" in capsys.readouterr().err
 
     live = SiliconFlowSummaryDiagnostic(
         model=MODEL,
@@ -108,7 +145,10 @@ def test_diagnostic_main_reports_missing_and_live_route(
     monkeypatch.setattr(
         summary_diagnostic,
         "load_runtime_credentials",
-        lambda: SimpleNamespace(siliconflow_api_key=SecretStr(API_KEY)),
+        lambda: SimpleNamespace(
+            siliconflow_api_key=SecretStr(API_KEY),
+            dashscope_api_key=None,
+        ),
     )
     monkeypatch.setattr(
         summary_diagnostic,
@@ -117,3 +157,23 @@ def test_diagnostic_main_reports_missing_and_live_route(
     )
     assert summary_diagnostic.main() == 0
     assert "model_listed=true" in capsys.readouterr().out
+
+    dashscope_live = DashScopeSummaryDiagnostic(
+        model=DASHSCOPE_DIAGNOSTIC_MODEL,
+        probes=(DiagnosticProbe("minimal", True, "200", "200"),),
+    )
+    monkeypatch.setattr(
+        summary_diagnostic,
+        "load_runtime_credentials",
+        lambda: SimpleNamespace(
+            siliconflow_api_key=None,
+            dashscope_api_key=SecretStr(API_KEY),
+        ),
+    )
+    monkeypatch.setattr(
+        summary_diagnostic,
+        "diagnose_dashscope_summary",
+        lambda _key: dashscope_live,
+    )
+    assert summary_diagnostic.main() == 0
+    assert "DashScope summary diagnostic" in capsys.readouterr().out

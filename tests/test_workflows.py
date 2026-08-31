@@ -128,6 +128,7 @@ def test_enrichment_workflow_uses_only_summary_credentials() -> None:
         "workflows": ["Transcribe Episode Queue"],
         "types": ["completed"],
     }
+    assert "DASHSCOPE_API_KEY" in text
     assert "SILICONFLOW_API_KEY" in text
     assert "TINGWU_COOKIE" not in text
     assert "process-ai" not in text

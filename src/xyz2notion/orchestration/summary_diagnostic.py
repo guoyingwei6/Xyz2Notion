@@ -1,4 +1,4 @@
-"""Secret-safe live diagnostic for the configured SiliconFlow summary model."""
+"""Secret-safe live diagnostics for configured remote summary providers."""
 
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ from xyz2notion.enrichment.siliconflow import (
 from xyz2notion.security import CredentialKind, validate_credential_destination
 
 SILICONFLOW_MODELS_URL = "https://api.siliconflow.cn/v1/models"
+DASHSCOPE_CHAT_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+DASHSCOPE_DIAGNOSTIC_MODEL = "qwen-flash"
 DIAGNOSTIC_MODELS = (
     DEFAULT_SUMMARY_MODELS[0],
     "Qwen/Qwen2.5-7B-Instruct",
@@ -82,15 +84,35 @@ class SiliconFlowSummaryDiagnostic:
         return "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class DashScopeSummaryDiagnostic:
+    """Bounded request-capability matrix for one DashScope text model."""
+
+    model: str
+    probes: tuple[DiagnosticProbe, ...]
+
+    @property
+    def minimal_accepted(self) -> bool:
+        return any(probe.name == "minimal" and probe.accepted for probe in self.probes)
+
+    def summary(self) -> str:
+        lines = [
+            f"DashScope summary diagnostic (model={self.model})",
+            *(probe.summary() for probe in self.probes),
+        ]
+        return "\n".join(lines)
+
+
 def _probe_request(
     client: httpx.Client,
     *,
+    url: str,
     name: str,
     headers: Mapping[str, str],
     payload: Mapping[str, object],
 ) -> DiagnosticProbe:
     try:
-        response = client.post(SILICONFLOW_CHAT_URL, headers=headers, json=payload)
+        response = client.post(url, headers=headers, json=payload)
     except (httpx.TimeoutException, httpx.TransportError) as exc:
         return DiagnosticProbe(
             name=name,
@@ -170,18 +192,21 @@ def diagnose_siliconflow_summary(
             models_probe,
             _probe_request(
                 active_client,
+                url=SILICONFLOW_CHAT_URL,
                 name="minimal",
                 headers=headers,
                 payload=base,
             ),
             _probe_request(
                 active_client,
+                url=SILICONFLOW_CHAT_URL,
                 name="no_thinking",
                 headers=headers,
                 payload=no_thinking,
             ),
             _probe_request(
                 active_client,
+                url=SILICONFLOW_CHAT_URL,
                 name="json_no_thinking",
                 headers=headers,
                 payload=json_no_thinking,
@@ -197,15 +222,74 @@ def diagnose_siliconflow_summary(
             active_client.close()
 
 
+def diagnose_dashscope_summary(
+    api_key: str | SecretStr,
+    *,
+    model: str = DASHSCOPE_DIAGNOSTIC_MODEL,
+    client: httpx.Client | None = None,
+) -> DashScopeSummaryDiagnostic:
+    """Probe DashScope chat and JSON modes without logging generated content."""
+    secret = api_key.get_secret_value() if isinstance(api_key, SecretStr) else api_key
+    if not secret.strip():
+        raise ValueError("DashScope API key cannot be empty")
+    validate_credential_destination(DASHSCOPE_CHAT_URL, CredentialKind.DASHSCOPE)
+    headers = {
+        "Authorization": f"Bearer {secret}",
+        "Content-Type": "application/json",
+    }
+    owns_client = client is None
+    active_client = client or httpx.Client(timeout=90)
+    try:
+        base: dict[str, object] = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": "Return only JSON."},
+                {"role": "user", "content": 'Return exactly {"ok":true}.'},
+            ],
+            "temperature": 0.1,
+            "max_completion_tokens": 256,
+        }
+        no_thinking = {**base, "enable_thinking": False}
+        json_no_thinking = {
+            **no_thinking,
+            "response_format": {"type": "json_object"},
+        }
+        probes = tuple(
+            _probe_request(
+                active_client,
+                url=DASHSCOPE_CHAT_URL,
+                name=name,
+                headers=headers,
+                payload=payload,
+            )
+            for name, payload in (
+                ("minimal", base),
+                ("no_thinking", no_thinking),
+                ("json_no_thinking", json_no_thinking),
+            )
+        )
+        return DashScopeSummaryDiagnostic(model=model, probes=probes)
+    finally:
+        if owns_client:
+            active_client.close()
+
+
 def main(_argv: Sequence[str] | None = None) -> int:
     credentials = load_runtime_credentials()
-    if credentials.siliconflow_api_key is None:
-        print("Configuration error: missing SILICONFLOW_API_KEY", file=sys.stderr)
+    if credentials.siliconflow_api_key is None and credentials.dashscope_api_key is None:
+        print(
+            "Configuration error: missing SILICONFLOW_API_KEY and DASHSCOPE_API_KEY",
+            file=sys.stderr,
+        )
         return 2
-    diagnostics = tuple(
-        diagnose_siliconflow_summary(credentials.siliconflow_api_key, model=model)
-        for model in DIAGNOSTIC_MODELS
-    )
+    diagnostics: tuple[SiliconFlowSummaryDiagnostic | DashScopeSummaryDiagnostic, ...] = ()
+    if credentials.siliconflow_api_key is not None:
+        diagnostics += tuple(
+            diagnose_siliconflow_summary(credentials.siliconflow_api_key, model=model)
+            for model in DIAGNOSTIC_MODELS
+        )
+    if credentials.dashscope_api_key is not None:
+        diagnostics += (diagnose_dashscope_summary(credentials.dashscope_api_key),)
     print("\n".join(diagnostic.summary() for diagnostic in diagnostics))
     return 0 if any(diagnostic.minimal_accepted for diagnostic in diagnostics) else 5
 
