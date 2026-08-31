@@ -235,6 +235,7 @@ def run_manual_retry_queue(
                 config.asr.local_whisper_model if AsrProvider.LOCAL_WHISPER in providers else None
             ),
             local_qwen_summary=config.summary.local_qwen_fallback,
+            local_summary_progress=progress,
         )
         for client in (dashscope, siliconflow, local_whisper, summary_client):
             if client is not None:

@@ -3,8 +3,16 @@ name: Recover Final Summary Failures
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: "Reopen a final failure or resume an already-open manual summary"
+        required: true
+        default: "reopen-final"
+        type: choice
+        options:
+          - reopen-final
+          - resume-existing
       batches:
-        description: "Sequential batches; each batch reopens at most 2 summaries"
+        description: "Sequential batches; each batch handles at most 2 summaries"
         required: true
         default: "1"
         type: choice
@@ -24,7 +32,7 @@ on:
           - "1"
           - "2"
       confirmation:
-        description: "Exact phrase: RECOVER_<batches>_BATCHES_OF_<items_per_batch>_SUMMARIES"
+        description: "RECOVER_... for reopen-final; RESUME_... for resume-existing"
         required: true
         type: string
 
@@ -83,6 +91,7 @@ jobs:
         env:
           BATCHES: ${{ inputs.batches }}
           ITEMS_PER_BATCH: ${{ inputs.items_per_batch }}
+          MODE: ${{ inputs.mode }}
           CONFIRMATION: ${{ inputs.confirmation }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
@@ -90,9 +99,12 @@ jobs:
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
         run: |
           set -euo pipefail
-          expected="RECOVER_${BATCHES}_BATCHES_OF_${ITEMS_PER_BATCH}_SUMMARIES"
+          action="RECOVER"
+          if [[ "$MODE" == "resume-existing" ]]; then action="RESUME"; fi
+          expected="${action}_${BATCHES}_BATCHES_OF_${ITEMS_PER_BATCH}_SUMMARIES"
           if [[ ! "$BATCHES" =~ ^[1-6]$ ]] || \
              [[ ! "$ITEMS_PER_BATCH" =~ ^[12]$ ]] || \
+             [[ ! "$MODE" =~ ^(reopen-final|resume-existing)$ ]] || \
              [[ "$CONFIRMATION" != "$expected" ]]; then
             printf 'Confirmation error: expected %s.\n' "$expected" >&2
             exit 2
@@ -102,15 +114,21 @@ jobs:
           batch_timeout="75m"
           if [[ "$ITEMS_PER_BATCH" == "1" ]]; then batch_timeout="40m"; fi
           for ((batch=1; batch<=BATCHES; batch++)); do
-            reopen="$(uv run xyz2notion reopen-summary-failures \
-              --limit "$ITEMS_PER_BATCH" \
-              --confirm "REOPEN_${ITEMS_PER_BATCH}_SUMMARY_FAILURES")"
-            printf 'Batch %s reopen: %s\n' "$batch" "$reopen"
-            if [[ "$reopen" =~ reopened=([0-9]+) ]]; then
-              reopened_count="${BASH_REMATCH[1]}"
+            if [[ "$MODE" == "reopen-final" ]]; then
+              reopen="$(uv run xyz2notion reopen-summary-failures \
+                --limit "$ITEMS_PER_BATCH" \
+                --confirm "REOPEN_${ITEMS_PER_BATCH}_SUMMARY_FAILURES")"
+              printf 'Batch %s reopen: %s\n' "$batch" "$reopen"
+              if [[ "$reopen" =~ reopened=([0-9]+) ]]; then
+                reopened_count="${BASH_REMATCH[1]}"
+              else
+                printf 'Missing bounded recovery count.\n' >&2
+                exit 5
+              fi
             else
-              printf 'Missing bounded recovery count.\n' >&2
-              exit 5
+              reopen="Resume existing manual summary requests (limit=${ITEMS_PER_BATCH})"
+              reopened_count="$ITEMS_PER_BATCH"
+              printf 'Batch %s resume: %s\n' "$batch" "$reopen"
             fi
             if (( reopened_count == 0 )); then
               audit="$(uv run xyz2notion audit-notion-backlog)"

@@ -1,6 +1,7 @@
 import hashlib
 import importlib
 import json
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,6 +11,7 @@ import pytest
 from xyz2notion.enrichment.client import FallbackSummaryClient, preflight_summary_client
 from xyz2notion.enrichment.local_qwen import (
     LOCAL_QWEN_BATCH_TOKENS,
+    LOCAL_QWEN_CHUNK_OUTPUT_TOKENS,
     LOCAL_QWEN_COMPACT_OUTPUT_TOKENS,
     LOCAL_QWEN_CONTEXT_TOKENS,
     LOCAL_QWEN_MODEL,
@@ -18,7 +20,7 @@ from xyz2notion.enrichment.local_qwen import (
     _default_model_path,
     _load_llama,
 )
-from xyz2notion.enrichment.prompts import FULL_PROMPT
+from xyz2notion.enrichment.prompts import CHUNK_PROMPT, FULL_PROMPT
 from xyz2notion.enrichment.schema import EnrichmentPayload
 from xyz2notion.enrichment.siliconflow import CompletionUsage
 from xyz2notion.models import (
@@ -64,6 +66,8 @@ def local_client(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     responses: list[str],
+    *,
+    progress: Callable[[str], None] | None = None,
 ) -> tuple[LocalQwenSummaryClient, FakeLlama]:
     content = b"pinned-model"
     model_path = tmp_path / "model.gguf"
@@ -78,6 +82,7 @@ def local_client(
         LocalQwenSummaryClient(
             model_path=model_path,
             model_factory=lambda _path: model,
+            progress=progress,
         ),
         model,
     )
@@ -155,14 +160,49 @@ def test_local_qwen_replaces_recursive_prompt_schema(
     assert "不要输出 mindmap" in request_text
 
 
-def test_local_qwen_repairs_invalid_json_once(
+def test_local_qwen_uses_smaller_budget_for_map_chunks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client, model = local_client(
         tmp_path,
         monkeypatch,
+        [json.dumps(compact_payload(), ensure_ascii=False)],
+    )
+    full_schema = json.dumps(
+        EnrichmentPayload.model_json_schema(),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    client.generate_structured(
+        EnrichmentPayload,
+        system="system",
+        user=CHUNK_PROMPT.format(
+            index=1,
+            count=2,
+            start_ms=0,
+            end_ms=1_000,
+            schema=full_schema,
+            transcript="文字稿",
+        ),
+        max_output_tokens=10_000,
+    )
+    assert model.requests[0]["max_tokens"] == LOCAL_QWEN_CHUNK_OUTPUT_TOKENS
+    messages = model.requests[0]["messages"]
+    assert isinstance(messages, list)
+    assert "分段中间结果必须更短" in str(messages[-1])
+
+
+def test_local_qwen_repairs_invalid_json_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    progress: list[str] = []
+    client, model = local_client(
+        tmp_path,
+        monkeypatch,
         ["not-json", json.dumps(compact_payload("修复成功"), ensure_ascii=False)],
+        progress=progress.append,
     )
     value, usage = client.generate_structured(
         EnrichmentPayload,
@@ -173,6 +213,12 @@ def test_local_qwen_repairs_invalid_json_once(
     assert value.summary == "修复成功"
     assert usage == CompletionUsage(40, 20)
     assert len(model.requests) == 2
+    assert progress == [
+        "Local Qwen generation started (schema=LocalEnrichmentPayload; max_tokens=1000)",
+        "Local Qwen generation finished (input_tokens=20; output_tokens=10)",
+        "Local Qwen JSON repair started (schema=LocalEnrichmentPayload; max_tokens=1000)",
+        "Local Qwen JSON repair finished (input_tokens=20; output_tokens=10)",
+    ]
 
 
 def test_local_qwen_download_is_checksum_pinned(

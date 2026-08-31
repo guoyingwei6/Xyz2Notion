@@ -34,9 +34,10 @@ LOCAL_QWEN_URL = (
 LOCAL_QWEN_SHA256 = "228fb5627f7510b8b3516cdb6435e4b0d2a2bf330fe5b0ab19284a3570a8bb1f"
 LOCAL_QWEN_SIZE = 1_107_408_544
 LOCAL_QWEN_CONTEXT_TOKENS = 24_576
-LOCAL_QWEN_BATCH_TOKENS = 128
+LOCAL_QWEN_BATCH_TOKENS = 256
 LOCAL_QWEN_MAX_OUTPUT_TOKENS = 4_096
-LOCAL_QWEN_COMPACT_OUTPUT_TOKENS = 3_072
+LOCAL_QWEN_COMPACT_OUTPUT_TOKENS = 2_048
+LOCAL_QWEN_CHUNK_OUTPUT_TOKENS = 1_024
 StructuredModel = TypeVar("StructuredModel", bound=BaseModel)
 GeneratedModel = TypeVar("GeneratedModel", bound=BaseModel)
 ModelFactory = Callable[[Path], Any]
@@ -103,7 +104,7 @@ class LocalEnrichmentPayload(BaseModel):
         )
 
 
-def _compact_enrichment_prompt(user: str) -> str:
+def _compact_enrichment_prompt(user: str, *, chunk: bool = False) -> str:
     """Replace the recursive contract and explicitly bound local generation."""
     full_schema = json.dumps(
         EnrichmentPayload.model_json_schema(),
@@ -120,10 +121,15 @@ def _compact_enrichment_prompt(user: str) -> str:
         "6. mindmap 是以节目主题为根节点的树，每个 node_id 在树内唯一；",
         "6. 不要输出 mindmap；程序会根据 chapters 确定性构建；",
     )
+    output_limits = (
+        "分段中间结果必须更短：summary 最多 240 字，chapters 最多 4 个，其他数组最多 3 项。"
+        if chunk
+        else "summary 最多 600 字，chapters 最多 8 个，其他数组严格遵守 Schema 上限。"
+    )
     return (
         f"{localized}\n\n"
         "本地紧凑输出限制：只输出 Schema 中列出的字段，不要输出 mindmap；"
-        "summary 最多 600 字，chapters 最多 8 个，其他数组严格遵守 Schema 的数量和长度上限。"
+        f"{output_limits}"
     )
 
 
@@ -199,14 +205,20 @@ class LocalQwenSummaryClient:
         model_path: str | Path | None = None,
         client: httpx.Client | None = None,
         model_factory: ModelFactory = _load_llama,
+        progress: Callable[[str], None] | None = None,
     ) -> None:
         self.model_path = Path(model_path) if model_path is not None else _default_model_path()
         self.active_model: str | None = None
         self.active_provider: str | None = "local_qwen_summary"
         self._model_factory = model_factory
+        self._progress = progress
         self._model: Any | None = None
         self._owns_client = client is None
         self._client = client or httpx.Client(timeout=300, follow_redirects=True)
+
+    def _report(self, message: str) -> None:
+        if self._progress is not None:
+            self._progress(message)
 
     def close(self) -> None:
         if self._owns_client:
@@ -341,17 +353,29 @@ class LocalQwenSummaryClient:
     ) -> tuple[GeneratedModel, CompletionUsage]:
         """Generate schema-constrained JSON and allow one local repair."""
         schema = model_type.model_json_schema()
+        self._report(
+            "Local Qwen generation started "
+            f"(schema={model_type.__name__}; max_tokens={max_output_tokens})"
+        )
         content, usage = self._complete(
             system=system,
             user=user,
             schema=schema,
             max_output_tokens=max_output_tokens,
         )
+        self._report(
+            "Local Qwen generation finished "
+            f"(input_tokens={usage.input_tokens}; output_tokens={usage.output_tokens})"
+        )
         try:
             value = self._decode(content, model_type)
             if validator is not None and not validator(value):
                 raise ValueError("semantic JSON validation failed")
         except (json.JSONDecodeError, ValidationError, ValueError):
+            self._report(
+                "Local Qwen JSON repair started "
+                f"(schema={model_type.__name__}; max_tokens={max_output_tokens})"
+            )
             repaired, repair_usage = self._complete(
                 system=system,
                 user=REPAIR_PROMPT.format(
@@ -362,6 +386,11 @@ class LocalQwenSummaryClient:
                 max_output_tokens=max_output_tokens,
             )
             usage += repair_usage
+            self._report(
+                "Local Qwen JSON repair finished "
+                f"(input_tokens={repair_usage.input_tokens}; "
+                f"output_tokens={repair_usage.output_tokens})"
+            )
             try:
                 value = self._decode(repaired, model_type)
             except (json.JSONDecodeError, ValidationError) as exc:
@@ -390,6 +419,7 @@ class LocalQwenSummaryClient:
     ) -> tuple[StructuredModel, CompletionUsage]:
         """Use a compact non-recursive contract for full local enrichment."""
         if model_type is EnrichmentPayload:
+            chunk = user.lstrip().startswith("这是长播客的第 ")
             compact_validator = (
                 None
                 if validator is None
@@ -398,10 +428,10 @@ class LocalQwenSummaryClient:
             compact, usage = self._generate_model(
                 LocalEnrichmentPayload,
                 system=system,
-                user=_compact_enrichment_prompt(user),
+                user=_compact_enrichment_prompt(user, chunk=chunk),
                 max_output_tokens=min(
                     max_output_tokens,
-                    LOCAL_QWEN_COMPACT_OUTPUT_TOKENS,
+                    (LOCAL_QWEN_CHUNK_OUTPUT_TOKENS if chunk else LOCAL_QWEN_COMPACT_OUTPUT_TOKENS),
                 ),
                 validator=compact_validator,
             )

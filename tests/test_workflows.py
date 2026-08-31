@@ -207,6 +207,7 @@ def test_final_summary_recovery_is_bounded_audited_and_asr_free() -> None:
     text, workflow = _workflow("recover-final-summaries.yml")
     dispatch = workflow[True]["workflow_dispatch"]  # type: ignore[index,operator]
     inputs = dispatch["inputs"]  # type: ignore[index]
+    assert inputs["mode"]["options"] == ["reopen-final", "resume-existing"]  # type: ignore[index]
     assert inputs["batches"]["options"] == ["1", "2", "3", "4", "5", "6"]  # type: ignore[index]
     assert inputs["items_per_batch"]["options"] == ["1", "2"]  # type: ignore[index]
     assert "timeout-minutes: 360" in text
@@ -217,6 +218,8 @@ def test_final_summary_recovery_is_bounded_audited_and_asr_free() -> None:
     assert 'batch_timeout="40m"' in text
     assert 'batch_timeout="75m"' in text
     assert 'tee "$retry_log"' in text
+    assert 'action="RESUME"' in text
+    assert '[[ "$MODE" == "reopen-final" ]]' in text
     assert "audit-notion-backlog" in text
     assert "retry_status" in text
     assert "process-asr" not in text

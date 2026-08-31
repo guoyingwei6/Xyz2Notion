@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -532,6 +532,7 @@ def build_provider_clients(
     siliconflow_summary_models: tuple[str, ...],
     local_whisper_model: str | None = None,
     local_qwen_summary: bool = True,
+    local_summary_progress: Callable[[str], None] | None = None,
 ) -> tuple[
     DashScopeParaformerClient | None,
     SiliconFlowClient | None,
@@ -547,7 +548,9 @@ def build_provider_clients(
         if siliconflow_summary_api_key is not None
         else None
     )
-    local_summary = LocalQwenSummaryClient() if local_qwen_summary else None
+    local_summary = (
+        LocalQwenSummaryClient(progress=local_summary_progress) if local_qwen_summary else None
+    )
     if local_summary is not None:
         summary_client: StructuredSummaryClient | None = FallbackSummaryClient(
             remote_summary,
