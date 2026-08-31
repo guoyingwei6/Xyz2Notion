@@ -522,6 +522,7 @@ def _run_manual_retry_queue(args: argparse.Namespace) -> int:
             config_path=config_path,
             requested_limit=args.limit,
             page_id_override=args.page_id,
+            progress=lambda message: print(message, flush=True),
         )
     except (ConfigurationError, MissingCredentialError) as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)

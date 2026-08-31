@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -186,6 +186,7 @@ def run_manual_retry_queue(
     config_path: str,
     requested_limit: int | None = None,
     page_id_override: str | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> ManualRetryQueueResult:
     """Process checked rows, reopening failures from the exact stage."""
     config = load_config(config_path)
@@ -211,6 +212,11 @@ def run_manual_retry_queue(
         state_store = stack.enter_context(NotionEpisodeStateStore(notion))
         all_items = select_manual_retry_work(pages, state_store)
         selected = all_items[: _limit(requested_limit)]
+        if progress is not None:
+            progress(
+                "Manual retry queue selection "
+                f"(selected={len(selected)}; available={len(all_items)})"
+            )
 
         providers = set(config.asr.provider_order)
         dashscope, siliconflow, local_whisper, summary_client = build_provider_clients(
@@ -234,7 +240,11 @@ def run_manual_retry_queue(
             if client is not None:
                 stack.enter_context(client)
         if selected and summary_client is not None:
+            if progress is not None:
+                progress("Manual retry summary preflight started")
             preflight_summary_client(summary_client)
+            if progress is not None:
+                progress("Manual retry summary preflight OK")
 
         processor = EpisodeAIProcessor(
             notion,
@@ -251,6 +261,11 @@ def run_manual_retry_queue(
         for index, item in enumerate(selected):
             if index:
                 time.sleep(MANUAL_RETRY_INTER_EPISODE_SECONDS)
+            if progress is not None:
+                progress(
+                    f"Manual retry item {index + 1}/{len(selected)} started "
+                    f"(checkpoint={item.state.record.state.value})"
+                )
             page = item.page
             state = item.state
             if state.record.state is PipelineState.FAILED_FINAL:
@@ -275,6 +290,11 @@ def run_manual_retry_queue(
             if outcome.action not in _MANUAL_REQUEST_INCOMPLETE_ACTIONS:
                 state_store.clear_manual_retry(item.candidate.page_id)
             outcomes.append(outcome)
+            if progress is not None:
+                progress(
+                    f"Manual retry item {index + 1}/{len(selected)} finished "
+                    f"(action={outcome.action}; state={outcome.state.value})"
+                )
 
     actions = Counter(outcome.action for outcome in outcomes)
     states = Counter(outcome.state.value for outcome in outcomes)

@@ -15,8 +15,16 @@ on:
           - "4"
           - "5"
           - "6"
+      items_per_batch:
+        description: "Canary: 1; bounded bulk: 2"
+        required: true
+        default: "1"
+        type: choice
+        options:
+          - "1"
+          - "2"
       confirmation:
-        description: "Exact phrase: RECOVER_<batches>_SUMMARY_BATCHES"
+        description: "Exact phrase: RECOVER_<batches>_BATCHES_OF_<items_per_batch>_SUMMARIES"
         required: true
         type: string
 
@@ -74,6 +82,7 @@ jobs:
       - name: Recover bounded final summary batches
         env:
           BATCHES: ${{ inputs.batches }}
+          ITEMS_PER_BATCH: ${{ inputs.items_per_batch }}
           CONFIRMATION: ${{ inputs.confirmation }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
@@ -81,33 +90,45 @@ jobs:
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
         run: |
           set -euo pipefail
-          expected="RECOVER_${BATCHES}_SUMMARY_BATCHES"
-          if [[ ! "$BATCHES" =~ ^[1-6]$ ]] || [[ "$CONFIRMATION" != "$expected" ]]; then
+          expected="RECOVER_${BATCHES}_BATCHES_OF_${ITEMS_PER_BATCH}_SUMMARIES"
+          if [[ ! "$BATCHES" =~ ^[1-6]$ ]] || \
+             [[ ! "$ITEMS_PER_BATCH" =~ ^[12]$ ]] || \
+             [[ "$CONFIRMATION" != "$expected" ]]; then
             printf 'Confirmation error: expected %s.\n' "$expected" >&2
             exit 2
           fi
           config_path="config.yaml"
           if [[ ! -f "$config_path" ]]; then config_path="config.example.yaml"; fi
+          batch_timeout="75m"
+          if [[ "$ITEMS_PER_BATCH" == "1" ]]; then batch_timeout="40m"; fi
           for ((batch=1; batch<=BATCHES; batch++)); do
             reopen="$(uv run xyz2notion reopen-summary-failures \
-              --limit 2 --confirm REOPEN_2_SUMMARY_FAILURES)"
+              --limit "$ITEMS_PER_BATCH" \
+              --confirm "REOPEN_${ITEMS_PER_BATCH}_SUMMARY_FAILURES")"
             printf 'Batch %s reopen: %s\n' "$batch" "$reopen"
-            if [[ "$reopen" == *"reopened=0"* ]]; then
+            if [[ "$reopen" =~ reopened=([0-9]+) ]]; then
+              reopened_count="${BASH_REMATCH[1]}"
+            else
+              printf 'Missing bounded recovery count.\n' >&2
+              exit 5
+            fi
+            if (( reopened_count == 0 )); then
               audit="$(uv run xyz2notion audit-notion-backlog)"
               printf 'Batch %s audit: %s\n' "$batch" "$audit"
               break
             fi
-            if [[ "$reopen" != *"reopened=1"* && "$reopen" != *"reopened=2"* ]]; then
+            if (( reopened_count > ITEMS_PER_BATCH )); then
               printf 'Unexpected bounded recovery result.\n' >&2
               exit 5
             fi
+            retry_log="$RUNNER_TEMP/final-summary-retry-${batch}.log"
             set +e
-            retry="$(timeout --signal=TERM --kill-after=2m 75m \
+            timeout --signal=TERM --kill-after=2m "$batch_timeout" \
               uv run xyz2notion process-manual-retries \
-              --config "$config_path" --limit 2 2>&1)"
-            retry_status=$?
+              --config "$config_path" --limit "$ITEMS_PER_BATCH" 2>&1 | tee "$retry_log"
+            retry_status="${PIPESTATUS[0]}"
             set -e
-            printf 'Batch %s retry: %s\n' "$batch" "$retry"
+            retry="$(<"$retry_log")"
             audit="$(uv run xyz2notion audit-notion-backlog)"
             printf 'Batch %s audit: %s\n' "$batch" "$audit"
             {

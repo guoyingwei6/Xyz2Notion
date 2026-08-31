@@ -473,7 +473,12 @@ def test_run_manual_retry_queue_is_manual_first_and_stage_aware(
         lambda client: preflights.append(client),
     )
 
-    result = queue_module.run_manual_retry_queue(config_path="config.yaml", requested_limit=2)
+    progress: list[str] = []
+    result = queue_module.run_manual_retry_queue(
+        config_path="config.yaml",
+        requested_limit=2,
+        progress=progress.append,
+    )
 
     assert calls == [("final-favorite", False), ("retry-liked", True)]
     assert notion.retrieved == ["final-favorite"]
@@ -487,3 +492,12 @@ def test_run_manual_retry_queue_is_manual_first_and_stage_aware(
     assert result.states == {"ASR_RUNNING": 1, "PUBLISHED": 1}
     assert result.categories == {"favorite": 1, "liked": 1}
     assert preflights == [provider]
+    assert progress == [
+        "Manual retry queue selection (selected=2; available=2)",
+        "Manual retry summary preflight started",
+        "Manual retry summary preflight OK",
+        "Manual retry item 1/2 started (checkpoint=FAILED_FINAL)",
+        "Manual retry item 1/2 finished (action=published; state=PUBLISHED)",
+        "Manual retry item 2/2 started (checkpoint=FAILED_RETRYABLE)",
+        "Manual retry item 2/2 finished (action=pending; state=ASR_RUNNING)",
+    ]
