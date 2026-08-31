@@ -212,6 +212,7 @@ def test_final_summary_recovery_is_bounded_audited_and_asr_free() -> None:
     assert "reopen-summary-failures" in text
     assert "--limit 2 --confirm REOPEN_2_SUMMARY_FAILURES" in text
     assert "process-manual-retries" in text
+    assert "timeout --signal=TERM --kill-after=2m 75m" in text
     assert "audit-notion-backlog" in text
     assert "retry_status" in text
     assert "process-asr" not in text
