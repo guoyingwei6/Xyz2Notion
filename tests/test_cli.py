@@ -1817,6 +1817,7 @@ def test_notion_backlog_audit_reports_only_aggregate_counts(
     assert "asr_models: FunAudioLLM/SenseVoiceSmall=1, legacy=1" in output
     assert "tingwu_checkpoints" not in output
     assert "local_whisper:unsupported=1" in output
+    assert "final_failure_codes: local_whisper:unsupported:none=1" in output
     assert "zero_play_total=2" in output
     assert "zero_play_protected=1" in output
     assert "legacy_zero_play=1" in output
@@ -1851,6 +1852,16 @@ def test_notion_backlog_property_helpers_cover_malformed_values() -> None:
     assert cli_module._cover_storage_kind({}) == "missing"  # type: ignore[attr-defined]
     assert cli_module._cover_storage_kind({"Cover": {}}) == "missing"  # type: ignore[attr-defined]
     assert cli_module._cover_storage_kind({"Cover": {"files": [None]}}) == "missing"  # type: ignore[attr-defined]
+    diagnostic_failure = ProviderFailure(
+        provider="local_qwen_summary",
+        category=ProviderErrorCategory.UNAVAILABLE,
+        message="private fixture detail",
+        code="runtime context/private",
+    )
+    assert (  # type: ignore[attr-defined]
+        cli_module._safe_failure_diagnostic_code(diagnostic_failure)
+        == "local_qwen_summary:unavailable:runtime_context_private"
+    )
     schema_failure = ProviderFailure(
         provider="siliconflow_summary",
         category=ProviderErrorCategory.SCHEMA_CHANGED,

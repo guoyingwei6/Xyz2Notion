@@ -775,6 +775,16 @@ def _safe_failure_reason_code(failure: ProviderFailure) -> str:
     return failure.category.value
 
 
+def _safe_failure_diagnostic_code(failure: ProviderFailure) -> str:
+    """Return one aggregate-safe provider/category/code diagnostic token."""
+    raw_code = failure.code or "none"
+    code = "".join(
+        character if character.isalnum() or character in {".", "_", "-"} else "_"
+        for character in raw_code
+    )[:80]
+    return f"{failure.provider}:{failure.category.value}:{code or 'none'}"
+
+
 def _summary_recovery_priority(reason: str) -> int:
     """Try schema canaries before bulk runtime failures while preserving order."""
     return {
@@ -844,6 +854,7 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
                 or _episode_enrichment_status(page) == "最终失败"
             ]
             failure_categories: Counter[str] = Counter()
+            failure_codes: Counter[str] = Counter()
             with NotionEpisodeStateStore(notion) as state_store:
                 for page in final_pages:
                     properties = page.get("properties")
@@ -865,6 +876,7 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
                     else:
                         reason = _safe_failure_reason_code(failure)
                         failure_categories[f"{failure.provider}:{reason}"] += 1
+                        failure_codes[_safe_failure_diagnostic_code(failure)] += 1
 
             legacy_pages, protected_zero_play, zero_play_total = _legacy_zero_play_pages(episodes)
             legacy_zero_play = len(legacy_pages)
@@ -892,6 +904,10 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
         ", ".join(f"{name}={failure_categories[name]}" for name in sorted(failure_categories))
         or "none=0"
     )
+    failure_code_summary = (
+        ", ".join(f"{name}={failure_codes[name]}" for name in sorted(failure_codes))
+        or "none=0"
+    )
     provider_summary = (
         ", ".join(f"{name}={asr_providers[name]}" for name in sorted(asr_providers)) or "none=0"
     )
@@ -907,6 +923,7 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
         f"statistics_baseline={'set' if baseline_version_set else 'unset'}; "
         f"asr_providers: {provider_summary}; asr_models: {model_summary}; "
         f"final_failure_categories: {failure_summary}; "
+        f"final_failure_codes: {failure_code_summary}; "
         f"zero_play_total={zero_play_total}; "
         f"zero_play_protected={protected_zero_play}; "
         f"legacy_zero_play={legacy_zero_play}; "
