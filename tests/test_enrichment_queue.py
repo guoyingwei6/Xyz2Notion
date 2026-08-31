@@ -536,7 +536,7 @@ def test_enrichment_workflow_is_asr_free_cached_and_mode_gated() -> None:
         {"cron": "41 */2 * * *"},
     ]
     assert workflow[True]["workflow_run"] == {
-        "workflows": ["Transcribe Episode Queue", "Retry Failed Episode AI"],
+        "workflows": ["Transcribe Episode Queue"],
         "types": ["completed"],
     }
     assert "XYZ2NOTION_ENRICHMENT_QUEUE_ENABLED" in text

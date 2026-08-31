@@ -34,7 +34,7 @@ on:
   # Normal lane: start after ASR, with a periodic fallback for persisted transcripts
   # that were left behind when the preceding ASR run consumed its bound.
   workflow_run:
-    workflows: ["Transcribe Episode Queue", "Retry Failed Episode AI"]
+    workflows: ["Transcribe Episode Queue"]
     types: [completed]
 
 permissions:

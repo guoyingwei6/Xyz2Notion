@@ -125,7 +125,7 @@ def test_enrichment_workflow_uses_only_summary_credentials() -> None:
         {"cron": "41 */2 * * *"},
     ]
     assert workflow[True]["workflow_run"] == {  # type: ignore[index]
-        "workflows": ["Transcribe Episode Queue", "Retry Failed Episode AI"],
+        "workflows": ["Transcribe Episode Queue"],
         "types": ["completed"],
     }
     assert "SILICONFLOW_API_KEY" in text
