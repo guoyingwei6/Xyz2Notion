@@ -905,8 +905,7 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
         or "none=0"
     )
     failure_code_summary = (
-        ", ".join(f"{name}={failure_codes[name]}" for name in sorted(failure_codes))
-        or "none=0"
+        ", ".join(f"{name}={failure_codes[name]}" for name in sorted(failure_codes)) or "none=0"
     )
     provider_summary = (
         ", ".join(f"{name}={asr_providers[name]}" for name in sorted(asr_providers)) or "none=0"
