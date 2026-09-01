@@ -303,20 +303,12 @@ def test_manual_retry_selection_skips_unsafe_or_incomplete_rows() -> None:
     assert select_manual_retry_work(pages, StoreWithGaps(states)) == ()
 
 
-@pytest.mark.parametrize(
-    ("config", "message"),
-    [
-        (AppConfig(summary=SummaryConfig(enabled=False)), "summary.enabled"),
-        (AppConfig(summary=SummaryConfig(local_qwen_fallback=False)), "local_qwen_fallback"),
-    ],
-)
 def test_manual_retry_queue_rejects_disabled_summary(
     monkeypatch: pytest.MonkeyPatch,
-    config: AppConfig,
-    message: str,
 ) -> None:
+    config = AppConfig(summary=SummaryConfig(enabled=False))
     monkeypatch.setattr(queue_module, "load_config", lambda _path: config)
-    with pytest.raises(ConfigurationError, match=message):
+    with pytest.raises(ConfigurationError, match="summary.enabled"):
         queue_module.run_manual_retry_queue(config_path="config.yaml")
 
 

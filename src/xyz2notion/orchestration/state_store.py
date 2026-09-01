@@ -68,7 +68,12 @@ _ENRICHMENT_STATUS_NAMES = {
     "final": "最终失败",
 }
 _SUMMARY_PROVIDER_NAMES = frozenset(
-    {"siliconflow_summary", "local_qwen_summary", SUMMARY_FALLBACK_PROVIDER}
+    {
+        "dashscope_summary",
+        "siliconflow_summary",
+        "local_qwen_summary",
+        SUMMARY_FALLBACK_PROVIDER,
+    }
 )
 
 

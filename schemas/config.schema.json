@@ -4,6 +4,21 @@
       "additionalProperties": false,
       "description": "Free speech recognition provider policy.",
       "properties": {
+        "dashscope_fallback_models": {
+          "default": [
+            "paraformer-v2",
+            "paraformer-mtl-v1"
+          ],
+          "items": {
+            "enum": [
+              "paraformer-v2",
+              "paraformer-mtl-v1"
+            ],
+            "type": "string"
+          },
+          "title": "Dashscope Fallback Models",
+          "type": "array"
+        },
         "dashscope_model": {
           "const": "paraformer-v1",
           "default": "paraformer-v1",
@@ -91,7 +106,7 @@
     },
     "SummaryConfig": {
       "additionalProperties": false,
-      "description": "Free SiliconFlow summary generation settings.",
+      "description": "Remote-first summary generation settings.",
       "properties": {
         "chunk_minutes": {
           "default": 30,
@@ -101,11 +116,17 @@
           "type": "integer"
         },
         "chunk_tokens": {
-          "default": 24000,
+          "default": 12000,
           "maximum": 100000,
           "minimum": 1000,
           "title": "Chunk Tokens",
           "type": "integer"
+        },
+        "dashscope_model": {
+          "const": "qwen-flash",
+          "default": "qwen-flash",
+          "title": "Dashscope Model",
+          "type": "string"
         },
         "enabled": {
           "default": true,
@@ -113,12 +134,12 @@
           "type": "boolean"
         },
         "local_qwen_fallback": {
-          "default": true,
+          "default": false,
           "title": "Local Qwen Fallback",
           "type": "boolean"
         },
         "max_output_tokens": {
-          "default": 8192,
+          "default": 4096,
           "maximum": 32768,
           "minimum": 512,
           "title": "Max Output Tokens",

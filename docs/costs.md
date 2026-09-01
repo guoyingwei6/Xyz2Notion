@@ -8,11 +8,11 @@ Xyz2Notion 本身免费、MIT 开源，不收激活费，也不经过项目作�
 - Notion API：使用用户自己的 Integration；
 - 小宇宙：只读取用户自己的订阅、历史和进度；
 - 阿里云百炼：按 `paraformer-v1 → paraformer-v2 → paraformer-mtl-v1` 使用用户自己的
-  ASR 额度；每个模型是否仍有免费额度以百炼控制台为准；
-- SiliconFlow：使用同一个用户 Key 调用免费 ASR 降级和免费摘要模型；
+  ASR 额度，并优先使用 `qwen-flash` 生成摘要；是否免费及实际费用以百炼控制台为准；
+- SiliconFlow：使用同一个用户 Key 调用 ASR 和摘要降级模型；
 - 本地 Whisper：使用 GitHub Actions CPU，只在前两条 ASR 通道失败时运行；
-- 本地 Qwen3-1.7B：使用 GitHub Actions CPU，只在 SiliconFlow 摘要失败时运行；
-- 付费 Provider：不实现，配置和客户端只接受已核对的免费模型白名单。
+- 本地 Qwen3-1.7B：生产默认关闭，只在显式启用且两条远程摘要通道失败时运行；
+- 自动模型切换：只在代码批准的模型名之间降级，不会自行选择其他模型或充值。
 
 “免费模型”或“免费额度”由服务商决定，可能随时调整。Xyz2Notion 不承诺永久免费，
 也不会绕过配额、风控或付费规则。
@@ -24,10 +24,11 @@ ASR Task ID、文字稿和摘要在每个外部 AI 边界后先保存到 Notion�
 模型不可用时，依次尝试下一个 Paraformer；一旦 task ID 已创建，就不再创建第二个
 百炼任务。三个模型都不可用后才降级到 SiliconFlow；SiliconFlow ASR 最终失败后
 才运行本地 Whisper；成功检查点会阻止重复转写。
-SiliconFlow 摘要失败后才运行本地 Qwen3。两个本地模型及其运行时使用 GitHub
-Actions 缓存，缓存命中时不重复下载；缓存被回收或校验失败时才重新获取。
+DashScope 摘要失败后才尝试 SiliconFlow。默认配置不会运行本地 Qwen；显式启用后，
+只有两条远程摘要通道都失败才运行本地模型。
 
-免费摘要保存输入 Token、输出 Token、实际模型和 Prompt 版本，估算费用记录为 0。
+摘要保存输入 Token、输出 Token、实际 Provider、模型和 Prompt 版本；实际账单以服务商
+控制台为准。
 
 ## 建议
 

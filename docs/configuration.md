@@ -39,18 +39,18 @@ asr:
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `enabled` | `true` | 是否在已有文字稿后调用免费摘要 |
-| `siliconflow_models` | Qwen3-8B | 唯一允许的远程免费摘要模型 |
-| `local_qwen_fallback` | `true` | 远程失败后启用 GitHub Actions 本地 Qwen3-1.7B |
+| `enabled` | `true` | 是否在已有文字稿后调用摘要 |
+| `dashscope_model` | `qwen-flash` | 首选百炼兼容摘要模型；thinking 固定关闭 |
+| `siliconflow_models` | Qwen3-8B | 次级 SiliconFlow 摘要模型 |
+| `local_qwen_fallback` | `false` | 是否显式启用 GitHub Actions 本地 Qwen3-1.7B |
 | `prompt_version` | `summary-v1` | 版本化 Prompt |
 | `chunk_tokens` | `12000` | 单块最大估算 Token；为 Actions 本地 Qwen 预留上下文余量 |
 | `chunk_minutes` | `30` | 单块最大时长 |
 | `max_output_tokens` | `4096` | 单次最大输出 |
 
-配置验证仅接受当前版本核对过的三个百炼 Paraformer 模型、两个 SiliconFlow ASR 模型
-和一个免费摘要模型。远程摘要
-失败后只降级到本地 Qwen3-1.7B，不自动切换其他远程模型或付费模型。本地模型与
-运行时由 GitHub Actions 缓存，正常情况下不会每次下载。
+配置验证仅接受当前版本核对过的三个百炼 Paraformer 模型、两个 SiliconFlow ASR 模型、
+`qwen-flash` 和 `Qwen/Qwen3-8B`。摘要固定按 DashScope → SiliconFlow → 可选本地 Qwen
+降级，不自动切换其他模型。默认关闭本地 Qwen，避免 GitHub Actions CPU 长时间运行。
 
 关闭摘要后，单集会停在已转写状态，不会丢失文字稿，也不会重复执行 ASR。
 

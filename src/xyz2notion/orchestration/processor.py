@@ -13,7 +13,8 @@ from xyz2notion.asr.dashscope import DashScopeParaformerClient
 from xyz2notion.asr.local_whisper import LocalWhisperClient
 from xyz2notion.asr.pipeline import transcribe_siliconflow_episode
 from xyz2notion.asr.siliconflow import SiliconFlowClient
-from xyz2notion.enrichment.client import FallbackSummaryClient, StructuredSummaryClient
+from xyz2notion.enrichment.client import StructuredSummaryClient, chain_summary_clients
+from xyz2notion.enrichment.dashscope import DashScopeSummaryClient
 from xyz2notion.enrichment.local_qwen import LocalQwenSummaryClient
 from xyz2notion.enrichment.pipeline import SummaryPolicy, TranscriptEnricher
 from xyz2notion.enrichment.siliconflow import SiliconFlowSummaryClient
@@ -521,11 +522,43 @@ class EpisodeAIProcessor:
             return self._fail(candidate, state, exc)
 
 
+def build_summary_client(
+    *,
+    dashscope_api_key: SecretStr | None,
+    dashscope_model: str,
+    siliconflow_api_key: SecretStr | None,
+    siliconflow_models: tuple[str, ...],
+    local_qwen_summary: bool,
+    local_summary_progress: Callable[[str], None] | None = None,
+) -> StructuredSummaryClient | None:
+    """Build the shared DashScope -> SiliconFlow -> optional local route."""
+    dashscope_summary = (
+        DashScopeSummaryClient(dashscope_api_key, model=dashscope_model)
+        if dashscope_api_key is not None
+        else None
+    )
+    siliconflow_summary = (
+        SiliconFlowSummaryClient(siliconflow_api_key, models=siliconflow_models)
+        if siliconflow_api_key is not None
+        else None
+    )
+    local_summary = (
+        LocalQwenSummaryClient(progress=local_summary_progress) if local_qwen_summary else None
+    )
+    return chain_summary_clients(
+        dashscope_summary,
+        siliconflow_summary,
+        local_summary,
+    )
+
+
 def build_provider_clients(
     *,
     dashscope_api_key: SecretStr | None = None,
     dashscope_model: str = "paraformer-v1",
     dashscope_models: tuple[str, ...] | None = None,
+    dashscope_summary_api_key: SecretStr | None = None,
+    dashscope_summary_model: str = "qwen-flash",
     siliconflow_asr_api_key: SecretStr | None,
     siliconflow_summary_api_key: SecretStr | None,
     siliconflow_asr_models: tuple[str, ...],
@@ -540,24 +573,14 @@ def build_provider_clients(
     StructuredSummaryClient | None,
 ]:
     """Construct only explicitly configured user-owned providers."""
-    remote_summary = (
-        SiliconFlowSummaryClient(
-            siliconflow_summary_api_key,
-            models=siliconflow_summary_models,
-        )
-        if siliconflow_summary_api_key is not None
-        else None
+    summary_client = build_summary_client(
+        dashscope_api_key=dashscope_summary_api_key,
+        dashscope_model=dashscope_summary_model,
+        siliconflow_api_key=siliconflow_summary_api_key,
+        siliconflow_models=siliconflow_summary_models,
+        local_qwen_summary=local_qwen_summary,
+        local_summary_progress=local_summary_progress,
     )
-    local_summary = (
-        LocalQwenSummaryClient(progress=local_summary_progress) if local_qwen_summary else None
-    )
-    if local_summary is not None:
-        summary_client: StructuredSummaryClient | None = FallbackSummaryClient(
-            remote_summary,
-            local_summary,
-        )
-    else:
-        summary_client = remote_summary
     return (
         DashScopeParaformerClient(
             dashscope_api_key,

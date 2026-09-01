@@ -35,8 +35,9 @@ def test_example_config_is_valid_and_secret_free() -> None:
         "paraformer-v2",
         "paraformer-mtl-v1",
     )
+    assert config.summary.dashscope_model == "qwen-flash"
     assert config.summary.siliconflow_models == ("Qwen/Qwen3-8B",)
-    assert config.summary.local_qwen_fallback is True
+    assert config.summary.local_qwen_fallback is False
     assert config.summary.prompt_version == "summary-v1"
     assert config.summary.chunk_tokens == 12_000
     assert config.summary.chunk_minutes == 60

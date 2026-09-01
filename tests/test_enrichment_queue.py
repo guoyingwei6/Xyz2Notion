@@ -270,7 +270,7 @@ def test_status_parser_and_candidate_skip_malformed_pages() -> None:
     assert select_enrichment_work([malformed], limit=2) == ()
 
 
-def test_summary_policy_and_remote_to_local_client_wiring(
+def test_summary_policy_and_shared_remote_client_wiring(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = AppConfig()
@@ -280,42 +280,36 @@ def test_summary_policy_and_remote_to_local_client_wiring(
     assert policy.chunk_minutes == config.summary.chunk_minutes
     assert policy.max_output_tokens == config.summary.max_output_tokens
 
-    calls: list[tuple[str, object]] = []
+    calls: list[dict[str, object]] = []
 
-    def remote(api_key: SecretStr, *, models: tuple[str, ...]) -> str:
-        calls.append(("remote", (api_key.get_secret_value(), models)))
-        return "remote-client"
+    def build(**kwargs: object) -> str:
+        calls.append(kwargs)
+        return "summary-client"
 
-    def local() -> str:
-        calls.append(("local", None))
-        return "local-client"
-
-    def fallback(primary: object, secondary: object) -> tuple[object, object]:
-        calls.append(("fallback", (primary, secondary)))
-        return primary, secondary
-
-    monkeypatch.setattr(queue_module, "SiliconFlowSummaryClient", remote)
-    monkeypatch.setattr(queue_module, "LocalQwenSummaryClient", local)
-    monkeypatch.setattr(queue_module, "FallbackSummaryClient", fallback)
-    secret = SecretStr("safe-test-key")
-    assert queue_module._summary_client(config, secret) == (  # type: ignore[attr-defined]
-        "remote-client",
-        "local-client",
+    monkeypatch.setattr(queue_module, "build_summary_client", build)
+    dashscope = SecretStr("dashscope-test")
+    siliconflow = SecretStr("siliconflow-test")
+    assert (
+        queue_module._summary_client(  # type: ignore[attr-defined]
+            config,
+            dashscope,
+            siliconflow,
+        )
+        == "summary-client"
     )
     assert calls == [
-        ("remote", ("safe-test-key", ("Qwen/Qwen3-8B",))),
-        ("local", None),
-        ("fallback", ("remote-client", "local-client")),
+        {
+            "dashscope_api_key": dashscope,
+            "dashscope_model": "qwen-flash",
+            "siliconflow_api_key": siliconflow,
+            "siliconflow_models": ("Qwen/Qwen3-8B",),
+            "local_qwen_summary": False,
+        }
     ]
-    calls.clear()
-    assert queue_module._summary_client(config, None) == (  # type: ignore[attr-defined]
-        None,
-        "local-client",
-    )
-    assert calls == [
-        ("local", None),
-        ("fallback", (None, "local-client")),
-    ]
+
+    monkeypatch.setattr(queue_module, "build_summary_client", lambda **_kwargs: None)
+    with pytest.raises(MissingCredentialError, match="DASHSCOPE_API_KEY"):
+        queue_module._summary_client(config, None, None)  # type: ignore[attr-defined]
 
 
 def test_summary_preflight_is_notion_free_and_validates_configuration(
@@ -336,16 +330,10 @@ def test_summary_preflight_is_notion_free_and_validates_configuration(
     assert queue_module.run_summary_preflight(config_path="config.yaml") is report
     assert calls == ["summary-client"]
 
-    for config, message in (
-        (AppConfig(summary=SummaryConfig(enabled=False)), "summary.enabled"),
-        (
-            AppConfig(summary=SummaryConfig(local_qwen_fallback=False)),
-            "local_qwen_fallback",
-        ),
-    ):
-        monkeypatch.setattr(queue_module, "load_config", lambda _path, value=config: value)
-        with pytest.raises(ConfigurationError, match=message):
-            queue_module.run_summary_preflight(config_path="config.yaml")
+    config = AppConfig(summary=SummaryConfig(enabled=False))
+    monkeypatch.setattr(queue_module, "load_config", lambda _path: config)
+    with pytest.raises(ConfigurationError, match="summary.enabled"):
+        queue_module.run_summary_preflight(config_path="config.yaml")
 
 
 def test_run_enrichment_queue_uses_only_summary_clients(
@@ -420,11 +408,6 @@ def test_run_enrichment_queue_uses_only_summary_clients(
             AppConfig(summary=SummaryConfig(enabled=False)),
             None,
             "summary.enabled",
-        ),
-        (
-            AppConfig(summary=SummaryConfig(local_qwen_fallback=False)),
-            None,
-            "local_qwen_fallback",
         ),
         (
             AppConfig(),
@@ -553,5 +536,6 @@ def test_enrichment_workflow_is_asr_free_cached_and_mode_gated() -> None:
     assert "preflight_only" in text
     assert "--preflight-only" in text
     assert 'exit "$status"' in text
-    assert "~/.cache/xyz2notion" in text
-    assert "llama_cpp_python-0.3.35-py3-none-manylinux2014_x86_64" in text
+    assert "DASHSCOPE_API_KEY" in text
+    assert "llama_cpp_python" not in text
+    assert "timeout-minutes: 45" in text

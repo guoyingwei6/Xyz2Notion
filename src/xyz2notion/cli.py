@@ -752,11 +752,13 @@ def _safe_failure_reason_code(failure: ProviderFailure) -> str:
     ):
         return "legacy_local_schema"
     if failure.message in {
+        "DashScope JSON repair did not satisfy the summary schema",
         "SiliconFlow JSON repair did not satisfy the summary schema",
         "Local Qwen JSON repair did not satisfy the summary schema",
     }:
         return "summary_schema"
     if failure.message in {
+        "DashScope JSON repair did not satisfy timeline constraints",
         "SiliconFlow JSON repair did not satisfy timeline constraints",
         "Local Qwen JSON repair did not satisfy timeline constraints",
     }:
@@ -1115,6 +1117,7 @@ def _run_reopen_all_summary_failures(args: argparse.Namespace) -> int:
         args,
         allowed_providers=frozenset(
             {
+                "dashscope_summary",
                 "siliconflow_summary",
                 "local_qwen_summary",
                 SUMMARY_FALLBACK_PROVIDER,

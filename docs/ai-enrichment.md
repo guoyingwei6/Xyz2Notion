@@ -51,33 +51,32 @@ ASR 或摘要模型；发布器仍采用先完成新托管内容、再归档旧�
 不再沿用 `ASR Status` 或 `ASR Provider`。打开视图中的 Episode 页面可查看全文转写和全部
 AI 内容。
 
-## 默认免费模型
+## 默认摘要模型
 
 摘要、章节和思维导图固定按以下顺序生成：
 
-1. SiliconFlow 免费模型 `Qwen/Qwen3-8B`；
-2. GitHub Actions 本地 `Qwen3-1.7B-Q4_K_M`。
+1. 阿里云百炼兼容接口 `qwen-flash`；
+2. SiliconFlow `Qwen/Qwen3-8B`；
+3. 可选的 GitHub Actions 本地 `Qwen3-1.7B-Q4_K_M`，生产默认关闭。
 
-远程客户端只接受 `Qwen/Qwen3-8B`，不会因误填而调用其他远程模型或付费模型。
-免费政策属于服务商外部状态，未来可能变化：
+远程客户端只接受这两个经过验证的模型名，不会因误填而自动切换其他模型。
+额度和计费政策属于服务商外部状态，未来可能变化：
 
+- <https://help.aliyun.com/zh/model-studio/models>
 - <https://siliconflow.cn/pricing>
 - <https://docs.siliconflow.cn/cn/userguide/rate-limits/rate-limit-and-upgradation>
 
-SiliconFlow 限流、暂时不可用、下线，或“原始生成 + 一次 JSON 修复”后仍不符合
-Schema 时，才启动本地模型。本地模型和 `llama-cpp-python` 运行时均进入
-GitHub Actions 缓存；有效缓存会直接复用，只有首次运行、缓存被 GitHub 回收或
-完整性校验失败时才重新下载。本地模型文件固定版本、大小和 SHA256，校验通过后
-才原子替换缓存文件。
+DashScope 失败后才尝试 SiliconFlow。两条远程通道都失败时，只有显式设置
+`local_qwen_fallback: true` 才启动本地模型；默认配置会快速保存可定位的失败，
+不会进入数十分钟的 CPU 推理。
 
-两个通道都失败后才保存失败状态。每个 `SummaryResult` 仍记录最终成功的实际模型、
-Prompt 版本和远程尝试累计的输入/输出 Token，估算费用固定为 0。
+所有已配置通道都失败后才保存失败状态。每个 `SummaryResult` 仍记录最终成功的实际
+Provider、模型、Prompt 版本和输入/输出 Token。项目不会代替服务商账单计算实际费用。
 
 处理真实文字稿前会先用固定短文本执行一次结构化 JSON preflight。远程失败时会立即
-验证本地 Qwen 能否加载并输出 JSON；若两个通道都失败，`Failure Reason` 会同时保留
-两层经过脱敏的 Provider、错误类别和短错误码，不记录 Key、请求正文或服务响应正文。
-本地运行时采用 24576 上下文和 128 batch，并把默认分块/输出限制收紧为
-12000/4096 Token，以降低 GitHub Actions 内存与上下文溢出风险。
+尝试下一条远程通道；若全部失败，`Failure Reason` 会保留经过脱敏的 Provider、错误类别
+和短错误码，不记录 Key、请求正文或服务响应正文。显式启用本地模型时仍采用 24576
+上下文和 128 batch，并把分块/输出限制收紧为 12000/4096 Token。
 
 ## 长文字稿
 
@@ -111,14 +110,16 @@ Prompt 设计记录见 [`prompts/summary-v1.md`](../prompts/summary-v1.md)。结
 
 ## JSON 修复
 
-调用使用 SiliconFlow 官方兼容端点：
+远程调用使用以下兼容端点：
+
+`https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`
+
+以及
 
 `https://api.siliconflow.cn/v1/chat/completions`
 
 并设置 `response_format={"type":"json_object"}`。远程模型的首次结果若有
 JSON 语法、字段类型、缺失字段、章节越界或脑图 ID 重复，只允许额外执行一次
-JSON 修复；修复 Prompt 不会重新调用 ASR，也不访问音频。修复后仍不合格时，
-切换本地 Qwen3，再允许一次本地 JSON 修复；仍失败才保存 `schema_changed`。
-远程 Qwen3 使用 `enable_thinking=false`，避免 SiliconFlow 的 thinking 与
-JSON-object 模式组合被接口拒绝；本地 Qwen3 使用约束 JSON 和 `/no_think`，
-优先保证结构化输出稳定。
+JSON 修复；修复 Prompt 不会重新调用 ASR，也不访问音频。修复后仍不合格时切换
+下一条配置通道，全部失败才保存 `schema_changed`。DashScope 和 SiliconFlow 都固定
+使用 `enable_thinking=false`；显式启用的本地 Qwen3 使用约束 JSON 和 `/no_think`。

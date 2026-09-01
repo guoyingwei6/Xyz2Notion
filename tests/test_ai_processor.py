@@ -1,7 +1,10 @@
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from pydantic import SecretStr
+
 from xyz2notion.enrichment.client import FallbackSummaryClient
+from xyz2notion.enrichment.dashscope import DashScopeSummaryClient
 from xyz2notion.enrichment.local_qwen import LocalQwenSummaryClient
 from xyz2notion.enrichment.schema import EnrichmentPayload
 from xyz2notion.enrichment.siliconflow import CompletionUsage
@@ -580,8 +583,24 @@ def test_build_provider_clients_supports_local_summary_only() -> None:
     assert dashscope is None
     assert siliconflow is None
     assert local_whisper is None
+    assert isinstance(summary, LocalQwenSummaryClient)
+    summary.close()
+
+
+def test_build_provider_clients_prefers_dashscope_then_siliconflow() -> None:
+    _dashscope, _siliconflow, _local_whisper, summary = build_provider_clients(
+        dashscope_summary_api_key=SecretStr("dashscope-test"),
+        siliconflow_asr_api_key=None,
+        siliconflow_summary_api_key=SecretStr("siliconflow-test"),
+        siliconflow_asr_models=("FunAudioLLM/SenseVoiceSmall",),
+        siliconflow_summary_models=("Qwen/Qwen3-8B",),
+        local_whisper_model=None,
+        local_qwen_summary=False,
+    )
     assert isinstance(summary, FallbackSummaryClient)
-    assert isinstance(summary.fallback, LocalQwenSummaryClient)
+    assert isinstance(summary.primary, DashScopeSummaryClient)
+    assert summary.fallback.active_provider == "siliconflow_summary"
+    assert summary.models == ("qwen-flash", "Qwen/Qwen3-8B")
     summary.close()
 
 

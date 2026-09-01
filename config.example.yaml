@@ -18,9 +18,13 @@ asr:
 
 summary:
   enabled: true
+  # Fast shared summary route.  Reasoning is always disabled by the client.
+  dashscope_model: qwen-flash
   siliconflow_models:
     - Qwen/Qwen3-8B
-  local_qwen_fallback: true
+  # GitHub-hosted CPU generation is intentionally off in production because a
+  # single item can take far longer than the bounded remote recovery window.
+  local_qwen_fallback: false
   prompt_version: summary-v1
   chunk_tokens: 12000
   chunk_minutes: 60

@@ -192,8 +192,6 @@ def run_manual_retry_queue(
     config = load_config(config_path)
     if not config.summary.enabled:
         raise ConfigurationError("summary.enabled must be true for manual retries")
-    if not config.summary.local_qwen_fallback:
-        raise ConfigurationError("summary.local_qwen_fallback must be true for manual retries")
     credentials = load_runtime_credentials()
     credentials.require("notion_token")
     page_id = page_id_override or credentials.notion_page_id
@@ -225,6 +223,8 @@ def run_manual_retry_queue(
             ),
             dashscope_model=config.asr.dashscope_model,
             dashscope_models=config.asr.dashscope_models,
+            dashscope_summary_api_key=credentials.dashscope_api_key,
+            dashscope_summary_model=config.summary.dashscope_model,
             siliconflow_asr_api_key=(
                 credentials.siliconflow_api_key if AsrProvider.SILICONFLOW in providers else None
             ),

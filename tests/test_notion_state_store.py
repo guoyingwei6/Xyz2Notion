@@ -121,6 +121,15 @@ def test_enrichment_metadata_tracks_the_independent_pipeline() -> None:
     )
     assert _enrichment_status(summary_final) == "最终失败"
     assert _enrichment_provider(EpisodeAIState(record=summary_final)) == ("siliconflow_summary")
+    dashscope_final = summary_final.model_copy(
+        update={
+            "failure": summary_final.failure.model_copy(  # type: ignore[union-attr]
+                update={"provider": "dashscope_summary"}
+            )
+        }
+    )
+    assert _enrichment_status(dashscope_final) == "最终失败"
+    assert _enrichment_provider(EpisodeAIState(record=dashscope_final)) == "dashscope_summary"
     assert _enrichment_provider(EpisodeAIState(record=asr_retry)) == ""
     old_local = SummaryResult(
         summary="摘要",

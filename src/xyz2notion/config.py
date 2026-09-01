@@ -110,11 +110,12 @@ class LimitConfig(StrictConfigModel):
 
 
 class SummaryConfig(StrictConfigModel):
-    """Free SiliconFlow summary generation settings."""
+    """Remote-first summary generation settings."""
 
     enabled: bool = True
+    dashscope_model: Literal["qwen-flash"] = "qwen-flash"
     siliconflow_models: tuple[str, ...] = ("Qwen/Qwen3-8B",)
-    local_qwen_fallback: bool = True
+    local_qwen_fallback: bool = False
     prompt_version: str = Field(default="summary-v1", min_length=1)
     chunk_tokens: int = Field(default=12_000, ge=1_000, le=100_000)
     chunk_minutes: int = Field(default=30, ge=5, le=120)

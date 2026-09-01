@@ -20,14 +20,11 @@ from xyz2notion.config import (
     load_runtime_credentials,
 )
 from xyz2notion.enrichment.client import (
-    FallbackSummaryClient,
     StructuredSummaryClient,
     SummaryPreflightResult,
     preflight_summary_client,
 )
-from xyz2notion.enrichment.local_qwen import LocalQwenSummaryClient
 from xyz2notion.enrichment.pipeline import SummaryPolicy
-from xyz2notion.enrichment.siliconflow import SiliconFlowSummaryClient
 from xyz2notion.models import ProviderError
 from xyz2notion.notion.client import JsonObject, NotionAPIError, NotionClient
 from xyz2notion.notion.initializer import NotionInitializer
@@ -37,6 +34,7 @@ from xyz2notion.orchestration.processor import (
     ProcessingOutcome,
     ai_category_label,
     ai_category_priority,
+    build_summary_client,
     episode_candidates,
 )
 from xyz2notion.orchestration.state_store import NotionEpisodeStateStore
@@ -251,18 +249,21 @@ def _summary_policy(config: AppConfig) -> SummaryPolicy:
 
 def _summary_client(
     config: AppConfig,
-    api_key: SecretStr | None,
+    dashscope_api_key: SecretStr | None,
+    siliconflow_api_key: SecretStr | None,
 ) -> StructuredSummaryClient:
-    remote = (
-        SiliconFlowSummaryClient(
-            api_key,
-            models=config.summary.siliconflow_models,
-        )
-        if api_key is not None
-        else None
+    client = build_summary_client(
+        dashscope_api_key=dashscope_api_key,
+        dashscope_model=config.summary.dashscope_model,
+        siliconflow_api_key=siliconflow_api_key,
+        siliconflow_models=config.summary.siliconflow_models,
+        local_qwen_summary=config.summary.local_qwen_fallback,
     )
-    local = LocalQwenSummaryClient()
-    return FallbackSummaryClient(remote, local)
+    if client is None:
+        raise MissingCredentialError(
+            "Missing summary route: set DASHSCOPE_API_KEY or SILICONFLOW_API_KEY"
+        )
+    return client
 
 
 def run_summary_preflight(*, config_path: str) -> SummaryPreflightResult:
@@ -270,10 +271,12 @@ def run_summary_preflight(*, config_path: str) -> SummaryPreflightResult:
     config = load_config(config_path)
     if not config.summary.enabled:
         raise ConfigurationError("summary.enabled must be true for summary preflight")
-    if not config.summary.local_qwen_fallback:
-        raise ConfigurationError("summary.local_qwen_fallback must be true for summary preflight")
     credentials = load_runtime_credentials()
-    with _summary_client(config, credentials.siliconflow_api_key) as summary_client:
+    with _summary_client(
+        config,
+        credentials.dashscope_api_key,
+        credentials.siliconflow_api_key,
+    ) as summary_client:
         return preflight_summary_client(summary_client)
 
 
@@ -288,10 +291,6 @@ def run_enrichment_queue(
     config = load_config(config_path)
     if not config.summary.enabled:
         raise ConfigurationError("summary.enabled must be true for transcript enrichment")
-    if not config.summary.local_qwen_fallback:
-        raise ConfigurationError(
-            "summary.local_qwen_fallback must be true for the enrichment queue"
-        )
     credentials = load_runtime_credentials()
     credentials.require("notion_token")
     page_id = page_id_override or credentials.notion_page_id
@@ -309,7 +308,11 @@ def run_enrichment_queue(
             {"page_size": 100},
         )
         summary_client = stack.enter_context(
-            _summary_client(config, credentials.siliconflow_api_key)
+            _summary_client(
+                config,
+                credentials.dashscope_api_key,
+                credentials.siliconflow_api_key,
+            )
         )
         state_store = stack.enter_context(NotionEpisodeStateStore(notion))
         retryable_page_ids: set[str] = set()

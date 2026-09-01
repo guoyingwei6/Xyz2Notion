@@ -14,6 +14,17 @@
 
 下一版本的变更记录会继续放在这里，发布时再归入对应版本。
 
+### 2026-09-01
+
+- 摘要、章节和思维导图改为优先使用百炼兼容接口的 `qwen-flash`，失败后再尝试
+  SiliconFlow `Qwen/Qwen3-8B`；两条远程通道均固定关闭 thinking 并使用 JSON-object
+  输出。GitHub Actions 本地 Qwen 仍可显式启用，但生产默认关闭，避免单条 CPU 推理
+  长时间占用工作流。
+- 摘要 preflight、普通增强、失败重试和最终失败恢复现在共用同一条 Provider 路由。
+  最终成功的实际 Provider 会继续写入 `增强 Provider`，已有文字稿检查点不会重新执行 ASR。
+- 摘要与重试工作流移除默认本地 Qwen 运行时下载，并把单批恢复限制收紧为 1 条 15 分钟、
+  2 条 25 分钟；超时会保持失败可见，不静默报告成功。
+
 ### 2026-08-08
 
 - 新增 `audit-view-configurations --details` 及独立的 `Audit Notion View Configurations` 工作流。

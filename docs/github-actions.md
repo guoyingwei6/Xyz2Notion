@@ -49,18 +49,19 @@ OAuth 回调或作者生成的 Token。
 ### 阿里云百炼 Paraformer
 
 `DASHSCOPE_API_KEY` 来自用户自己的阿里云百炼账号，用于优先调用
-Paraformer 录音文件识别额度。项目只把该 Key 发送到
+Paraformer 录音文件识别额度，并调用兼容接口的 `qwen-flash` 生成摘要。项目只把该 Key 发送到
 `dashscope.aliyuncs.com`，并且只允许 `paraformer-v1`、`paraformer-v2` 和
-`paraformer-mtl-v1` 作为自动 ASR 模型，顺序固定为 v1 → v2 → mtl-v1。
+`paraformer-mtl-v1` 作为自动 ASR 模型，摘要只允许 `qwen-flash`；所有摘要请求固定关闭
+thinking。ASR 顺序固定为 v1 → v2 → mtl-v1。
 请使用中国内地百炼的通用 API Key；不需要另设 URL、Workspace ID 或模型 Secret。
 当前代码使用 `POST /api/v1/services/audio/asr/transcription` 提交，使用
 `GET /api/v1/tasks/{task_id}` 查询异步任务。
 
 ### SiliconFlow
 
-`SILICONFLOW_API_KEY` 来自用户自己的 SiliconFlow 账户，用于调用配置中的免费
-ASR 降级模型和免费文本摘要模型。项目只接受代码已核对的免费模型白名单，
-不实现付费 ASR。免费模型清单可能调整，升级项目版本前应重新核对价格页。
+`SILICONFLOW_API_KEY` 来自用户自己的 SiliconFlow 账户，用于调用配置中的 ASR 和摘要
+降级模型。项目只接受代码已核对的模型白名单，不会自动选择其他模型；额度和计费政策
+可能调整，升级项目前应重新核对控制台。
 
 ## 工作流
 

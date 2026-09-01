@@ -69,20 +69,20 @@ uv run xyz2notion audit-view-configurations --details
 - 时间轴：免费接口只返回文本时，切片时间是粗粒度，不是逐句精确时间。
 
 SiliconFlow ASR 最终失败时会自动转到本地 `faster-whisper small`。首次使用需要
-下载公开模型，日志暂时停留在下载或加载阶段不一定表示卡死。摘要仍依赖
-SiliconFlow 文本接口；若整个 Key 或网络不可用，本地文字稿检查点会保留，接口恢复后
-继续摘要，不会重复转写。
+下载公开模型，日志暂时停留在下载或加载阶段不一定表示卡死。摘要优先使用 DashScope
+`qwen-flash`，再降级到 SiliconFlow；两条接口均不可用时，本地文字稿检查点会保留，
+接口恢复后继续摘要，不会重复转写。
 
 ### 已有文字稿但没有摘要
 
-通常是未配置 `SILICONFLOW_API_KEY`、摘要被关闭，或免费文本模型正在限流。文字稿
-已经保存在 Notion 检查点中；补 Key 或稍后重试不会重复 ASR。
+通常是未配置 `DASHSCOPE_API_KEY`/`SILICONFLOW_API_KEY`、摘要被关闭，或远程模型正在
+限流。文字稿已经保存在 Notion 检查点中；补 Key 或稍后重试不会重复 ASR。
 
 先在 `Enrich Transcribed Episodes` 手动运行中勾选 `preflight_only`。它只用固定短文本
-检测 `SiliconFlow -> 本地 Qwen` 摘要路由，不读取或修改 Notion。输出会区分远程
-`authentication`、`quota_exhausted`、`rate_limited`、`unavailable` 等类别，以及本地
-`runtime_load`、`runtime_memory`、`runtime_context`、`runtime_inference`；两个通道都失败
-时会同时显示两层脱敏原因。
+检测 `DashScope -> SiliconFlow -> 可选本地 Qwen` 摘要路由，不读取或修改 Notion。
+输出会区分 `authentication`、`quota_exhausted`、`rate_limited`、`unavailable` 等类别；
+显式启用本地通道时还会区分 `runtime_load`、`runtime_memory`、`runtime_context` 和
+`runtime_inference`。
 
 已有文字稿即使摘要失败，`ASR Status` 仍保持 `已转写`，失败只写入 `增强状态`。旧记录会在
 下一次保存其 AI 检查点时自动纠正，不会因此重新转写音频。

@@ -41,7 +41,11 @@ class SummaryPreflightResult:
             if self.primary_failure is not None
             else ("not_configured" if self.provider == "local_qwen_summary" else "ok")
         )
-        fallback = "ok" if self.provider == "local_qwen_summary" else "not_tested"
+        fallback = (
+            "ok"
+            if self.primary_failure is not None or self.provider == "local_qwen_summary"
+            else "not_tested"
+        )
         return (
             "Summary route preflight OK "
             f"(active_provider={self.provider}; active_model={self.model}; "
@@ -196,6 +200,19 @@ class FallbackSummaryClient:
             getattr(self.fallback, "active_provider", None) or "local_qwen_summary"
         )
         return result
+
+
+def chain_summary_clients(
+    *clients: StructuredSummaryClient | None,
+) -> StructuredSummaryClient | None:
+    """Build a deterministic provider chain while ignoring unconfigured clients."""
+    configured = [client for client in clients if client is not None]
+    if not configured:
+        return None
+    chain: StructuredSummaryClient = configured[-1]
+    for client in reversed(configured[:-1]):
+        chain = FallbackSummaryClient(client, chain)
+    return chain
 
 
 def preflight_summary_client(client: StructuredSummaryClient) -> SummaryPreflightResult:

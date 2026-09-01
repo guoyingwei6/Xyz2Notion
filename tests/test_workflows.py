@@ -110,6 +110,7 @@ def test_transcribe_workflow_uses_only_current_asr_providers() -> None:
         "workflows": ["Sync Podcast Metadata"],
         "types": ["completed"],
     }
+    assert "DASHSCOPE_API_KEY" in text
     assert "SILICONFLOW_API_KEY" in text
     assert "TINGWU_COOKIE" not in text
     assert "process-asr" in text
@@ -127,10 +128,12 @@ def test_enrichment_workflow_uses_only_summary_credentials() -> None:
         "workflows": ["Transcribe Episode Queue"],
         "types": ["completed"],
     }
+    assert "DASHSCOPE_API_KEY" in text
     assert "SILICONFLOW_API_KEY" in text
     assert "TINGWU_COOKIE" not in text
     assert "process-ai" not in text
-    assert "llama_cpp_python-0.3.35-py3-none-manylinux2014_x86_64" in text
+    assert "llama_cpp_python" not in text
+    assert "timeout-minutes: 45" in text
     assert "github.event.workflow_run.conclusion == 'success'" in text
     assert "github.event_name == 'workflow_run'" in text
     assert "xyz2notion.orchestration.summary_diagnostic" in text
@@ -221,13 +224,13 @@ def test_final_summary_recovery_is_bounded_audited_and_asr_free() -> None:
     assert inputs["mode"]["options"] == ["reopen-final", "resume-existing"]  # type: ignore[index]
     assert inputs["batches"]["options"] == ["1", "2", "3", "4", "5", "6"]  # type: ignore[index]
     assert inputs["items_per_batch"]["options"] == ["1", "2"]  # type: ignore[index]
-    assert "timeout-minutes: 360" in text
+    assert "timeout-minutes: 130" in text
     assert "reopen-summary-failures" in text
     assert '--limit "$ITEMS_PER_BATCH"' in text
     assert "REOPEN_${ITEMS_PER_BATCH}_SUMMARY_FAILURES" in text
     assert "process-manual-retries" in text
-    assert 'batch_timeout="40m"' in text
-    assert 'batch_timeout="75m"' in text
+    assert 'batch_timeout="15m"' in text
+    assert 'batch_timeout="25m"' in text
     assert 'tee "$retry_log"' in text
     assert 'action="RESUME"' in text
     assert '[[ "$MODE" == "reopen-final" ]]' in text
