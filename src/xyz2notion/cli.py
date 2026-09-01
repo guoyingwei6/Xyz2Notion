@@ -58,6 +58,24 @@ from xyz2notion.xiaoyuzhou.client import XiaoyuzhouAPIError, XiaoyuzhouClient
 
 ASR_INTER_EPISODE_SECONDS = 60
 ARCHIVE_INTER_PAGE_SECONDS = 0.4
+_SUMMARY_SCHEMA_REASON_CODES = frozenset(
+    {
+        "summary_schema",
+        "timeline_constraints",
+        "normalization_constraints",
+        "completion_schema",
+    }
+)
+_SUMMARY_FALLBACK_ROUTE_PAIRS = frozenset(
+    {
+        ("dashscope_summary", "siliconflow_summary"),
+        ("dashscope_summary", "local_qwen_summary"),
+        ("dashscope_summary", SUMMARY_FALLBACK_PROVIDER),
+        ("siliconflow_summary", "local_qwen_summary"),
+    }
+)
+_SUMMARY_PRIMARY_PROVIDERS = frozenset(primary for primary, _ in _SUMMARY_FALLBACK_ROUTE_PAIRS)
+_PROVIDER_ERROR_CATEGORY_VALUES = frozenset(category.value for category in ProviderErrorCategory)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -738,19 +756,25 @@ def _cover_storage_kind(properties: Mapping[str, object]) -> str:
 
 def _safe_failure_reason_code(failure: ProviderFailure) -> str:
     """Reduce known static failures to non-identifying aggregate reason codes."""
-    if failure.code in {
-        "summary_schema",
-        "timeline_constraints",
-        "normalization_constraints",
-        "completion_schema",
-    }:
+    if failure.provider == SUMMARY_FALLBACK_PROVIDER:
+        fallback_route = _safe_summary_fallback_route(failure)
+        if fallback_route is None:
+            return "unknown_summary_fallback_route"
+        primary_provider = _safe_summary_failure_token_parts(fallback_route[0])
+        if primary_provider is not None and primary_provider[0] == "dashscope_summary":
+            primary_reason = _safe_summary_failure_token_reason(fallback_route[0])
+            return primary_reason or "unknown_summary_fallback_route"
+        if failure.code in _SUMMARY_SCHEMA_REASON_CODES:
+            return failure.code
+        if (
+            failure.category is ProviderErrorCategory.SCHEMA_CHANGED
+            and "fallback=local_qwen_summary:schema_changed" in failure.message
+        ):
+            return "legacy_local_schema"
+        primary_reason = _safe_summary_failure_token_reason(fallback_route[0])
+        return primary_reason or "unknown_summary_fallback_route"
+    if failure.code in _SUMMARY_SCHEMA_REASON_CODES:
         return failure.code
-    if (
-        failure.provider == SUMMARY_FALLBACK_PROVIDER
-        and failure.category is ProviderErrorCategory.SCHEMA_CHANGED
-        and "fallback=local_qwen_summary:schema_changed" in failure.message
-    ):
-        return "legacy_local_schema"
     if failure.message in {
         "DashScope JSON repair did not satisfy the summary schema",
         "SiliconFlow JSON repair did not satisfy the summary schema",
@@ -775,6 +799,64 @@ def _safe_failure_reason_code(failure: ProviderFailure) -> str:
             return f"request_http_400_{code}"
         return "request_http_400"
     return failure.category.value
+
+
+def _safe_summary_fallback_route(failure: ProviderFailure) -> tuple[str, str] | None:
+    """Extract the already-sanitized primary/fallback tokens from our own error format."""
+    if failure.provider != SUMMARY_FALLBACK_PROVIDER:
+        return None
+    prefix = "Summary providers failed: primary="
+    if not failure.message.startswith(prefix):
+        return None
+    route = failure.message.removeprefix(prefix)
+    if "; fallback=" not in route:
+        return None
+    primary, fallback = route.split("; fallback=", maxsplit=1)
+    primary_parts = _safe_summary_failure_token_parts(primary)
+    fallback_parts = _safe_summary_failure_token_parts(fallback)
+    if primary_parts is None or fallback_parts is None:
+        return None
+    if (primary_parts[0], fallback_parts[0]) not in _SUMMARY_FALLBACK_ROUTE_PAIRS:
+        return None
+    return primary, fallback
+
+
+def _safe_summary_failure_token_parts(token: str) -> tuple[str, str, str | None] | None:
+    """Parse one sanitized provider failure token without accepting unknown categories."""
+    parts = token.split(":")
+    if not 2 <= len(parts) <= 3:
+        return None
+    if any(
+        not part
+        or any(not (character.isalnum() or character in {".", "_", "-"}) for character in part)
+        for part in parts
+    ):
+        return None
+    provider, category = parts[:2]
+    if category not in _PROVIDER_ERROR_CATEGORY_VALUES:
+        return None
+    return provider, category, parts[2] if len(parts) == 3 else None
+
+
+def _safe_summary_failure_token_reason(token: str) -> str | None:
+    """Recover the primary safe reason without trusting the fallback's top-level category."""
+    parts = _safe_summary_failure_token_parts(token)
+    if parts is None:
+        return None
+    provider, category, code = parts
+    if provider not in _SUMMARY_PRIMARY_PROVIDERS:
+        return None
+    if code in _SUMMARY_SCHEMA_REASON_CODES:
+        return code
+    if category == ProviderErrorCategory.INVALID_INPUT.value and code is not None:
+        return f"request_http_400_{code}"
+    return category
+
+
+def _safe_summary_fallback_route_code(failure: ProviderFailure) -> str | None:
+    """Return one aggregate-safe provider route for backlog diagnostics."""
+    route = _safe_summary_fallback_route(failure)
+    return "->".join(route) if route is not None else None
 
 
 def _safe_failure_diagnostic_code(failure: ProviderFailure) -> str:
@@ -859,6 +941,7 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
             ]
             failure_categories: Counter[str] = Counter()
             failure_codes: Counter[str] = Counter()
+            failure_routes: Counter[str] = Counter()
             with NotionEpisodeStateStore(notion) as state_store:
                 for page in final_pages:
                     properties = page.get("properties")
@@ -881,6 +964,9 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
                         reason = _safe_failure_reason_code(failure)
                         failure_categories[f"{failure.provider}:{reason}"] += 1
                         failure_codes[_safe_failure_diagnostic_code(failure)] += 1
+                        route = _safe_summary_fallback_route_code(failure)
+                        if route is not None:
+                            failure_routes[route] += 1
 
             legacy_pages, protected_zero_play, zero_play_total = _legacy_zero_play_pages(episodes)
             legacy_zero_play = len(legacy_pages)
@@ -911,6 +997,9 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
     failure_code_summary = (
         ", ".join(f"{name}={failure_codes[name]}" for name in sorted(failure_codes)) or "none=0"
     )
+    failure_route_summary = (
+        ", ".join(f"{name}={failure_routes[name]}" for name in sorted(failure_routes)) or "none=0"
+    )
     provider_summary = (
         ", ".join(f"{name}={asr_providers[name]}" for name in sorted(asr_providers)) or "none=0"
     )
@@ -927,6 +1016,7 @@ def _run_notion_backlog_audit(args: argparse.Namespace) -> int:
         f"asr_providers: {provider_summary}; asr_models: {model_summary}; "
         f"final_failure_categories: {failure_summary}; "
         f"final_failure_codes: {failure_code_summary}; "
+        f"final_failure_routes: {failure_route_summary}; "
         f"zero_play_total={zero_play_total}; "
         f"zero_play_protected={protected_zero_play}; "
         f"legacy_zero_play={legacy_zero_play}; "

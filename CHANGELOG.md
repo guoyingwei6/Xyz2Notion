@@ -16,6 +16,9 @@
 
 ### 2026-09-01
 
+- 最终失败审计会安全拆分摘要回退链的 primary/fallback Provider、类别和非敏感错误码，
+  恢复筛选按 primary 首因判断，不再被余额不足的次级回退码覆盖；未知或不安全的组合消息
+  仍保持不可自动重开。
 - 摘要、章节和思维导图改为优先使用百炼兼容接口的 `qwen-flash`，失败后再尝试
   SiliconFlow `Qwen/Qwen3-8B`；两条远程通道均固定关闭 thinking 并使用 JSON-object
   输出。GitHub Actions 本地 Qwen 仍可显式启用，但生产默认关闭，避免单条 CPU 推理

@@ -1738,6 +1738,7 @@ def test_notion_backlog_audit_reports_only_aggregate_counts(
             provider="siliconflow",
             model="FunAudioLLM/SenseVoiceSmall",
         ),
+        episode("final-route", played=300, status="最终失败"),
         episode("retry", played=300, status="可重试失败"),
     ]
     podcasts = [
@@ -1795,12 +1796,24 @@ def test_notion_backlog_audit_reports_only_aggregate_counts(
             pass
 
         def load(self, _page: object, eid: str) -> object:
-            assert eid == "final"
-            failure = ProviderFailure(
-                provider="local_whisper",
-                category=ProviderErrorCategory.UNSUPPORTED,
-                message="safe fixture failure",
-            )
+            if eid == "final-route":
+                failure = ProviderFailure(
+                    provider="summary_fallback_chain",
+                    category=ProviderErrorCategory.QUOTA_EXHAUSTED,
+                    message=(
+                        "Summary providers failed: "
+                        "primary=dashscope_summary:schema_changed:summary_schema; "
+                        "fallback=siliconflow_summary:quota_exhausted:30001"
+                    ),
+                    code="30001",
+                )
+            else:
+                assert eid == "final"
+                failure = ProviderFailure(
+                    provider="local_whisper",
+                    category=ProviderErrorCategory.UNSUPPORTED,
+                    message="safe fixture failure",
+                )
             return SimpleNamespace(record=SimpleNamespace(failure=failure))
 
     monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
@@ -1817,7 +1830,16 @@ def test_notion_backlog_audit_reports_only_aggregate_counts(
     assert "asr_models: FunAudioLLM/SenseVoiceSmall=1, legacy=1" in output
     assert "tingwu_checkpoints" not in output
     assert "local_whisper:unsupported=1" in output
-    assert "final_failure_codes: local_whisper:unsupported:none=1" in output
+    assert "summary_fallback_chain:summary_schema=1" in output
+    assert (
+        "final_failure_codes: local_whisper:unsupported:none=1, "
+        "summary_fallback_chain:quota_exhausted:30001=1" in output
+    )
+    assert (
+        "final_failure_routes: "
+        "dashscope_summary:schema_changed:summary_schema->"
+        "siliconflow_summary:quota_exhausted:30001=1" in output
+    )
     assert "zero_play_total=2" in output
     assert "zero_play_protected=1" in output
     assert "legacy_zero_play=1" in output
@@ -1922,6 +1944,88 @@ def test_notion_backlog_property_helpers_cover_malformed_values() -> None:
     )
     assert (  # type: ignore[attr-defined]
         cli_module._safe_failure_reason_code(legacy_fallback_failure) == "legacy_local_schema"
+    )
+    primary_schema_fallback_quota = coded_fallback_failure.model_copy(
+        update={
+            "category": ProviderErrorCategory.QUOTA_EXHAUSTED,
+            "message": (
+                "Summary providers failed: "
+                "primary=dashscope_summary:schema_changed:summary_schema; "
+                "fallback=siliconflow_summary:quota_exhausted:30001"
+            ),
+            "code": "30001",
+        }
+    )
+    assert (  # type: ignore[attr-defined]
+        cli_module._safe_failure_reason_code(primary_schema_fallback_quota) == "summary_schema"
+    )
+    assert (  # type: ignore[attr-defined]
+        cli_module._safe_summary_fallback_route_code(primary_schema_fallback_quota)
+        == (
+            "dashscope_summary:schema_changed:summary_schema->"
+            "siliconflow_summary:quota_exhausted:30001"
+        )
+    )
+    unsafe_fallback_route = primary_schema_fallback_quota.model_copy(
+        update={
+            "message": (
+                "Summary providers failed: primary=dashscope_summary:invalid_input:private code; "
+                "fallback=siliconflow_summary:quota_exhausted:30001"
+            )
+        }
+    )
+    assert (  # type: ignore[attr-defined]
+        cli_module._safe_summary_fallback_route_code(unsafe_fallback_route) is None
+    )
+    unknown_provider_route = primary_schema_fallback_quota.model_copy(
+        update={
+            "message": (
+                "Summary providers failed: primary=unknown_summary:schema_changed:summary_schema; "
+                "fallback=siliconflow_summary:quota_exhausted:30001"
+            )
+        }
+    )
+    assert (  # type: ignore[attr-defined]
+        cli_module._safe_summary_fallback_route_code(unknown_provider_route) is None
+    )
+    assert (  # type: ignore[attr-defined]
+        cli_module._safe_failure_reason_code(unknown_provider_route)
+        == "unknown_summary_fallback_route"
+    )
+    unknown_provider_schema_code = unknown_provider_route.model_copy(
+        update={
+            "category": ProviderErrorCategory.SCHEMA_CHANGED,
+            "code": "summary_schema",
+        }
+    )
+    assert (  # type: ignore[attr-defined]
+        cli_module._safe_failure_reason_code(unknown_provider_schema_code)
+        == "unknown_summary_fallback_route"
+    )
+    unknown_provider_unavailable = unknown_provider_route.model_copy(
+        update={
+            "category": ProviderErrorCategory.UNAVAILABLE,
+            "code": None,
+        }
+    )
+    assert (  # type: ignore[attr-defined]
+        cli_module._safe_failure_reason_code(unknown_provider_unavailable)
+        == "unknown_summary_fallback_route"
+    )
+    unknown_category_route = primary_schema_fallback_quota.model_copy(
+        update={
+            "message": (
+                "Summary providers failed: primary=dashscope_summary:new_category:summary_schema; "
+                "fallback=siliconflow_summary:quota_exhausted:30001"
+            )
+        }
+    )
+    assert (  # type: ignore[attr-defined]
+        cli_module._safe_summary_fallback_route_code(unknown_category_route) is None
+    )
+    assert (  # type: ignore[attr-defined]
+        cli_module._safe_failure_reason_code(unknown_category_route)
+        == "unknown_summary_fallback_route"
     )
 
 
