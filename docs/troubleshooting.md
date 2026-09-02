@@ -73,6 +73,10 @@ SiliconFlow ASR 最终失败时会自动转到本地 `faster-whisper small`。�
 `qwen-flash`，再降级到 SiliconFlow；两条接口均不可用时，本地文字稿检查点会保留，
 接口恢复后继续摘要，不会重复转写。
 
+如果摘要请求返回 `DataInspectionFailed` 或 `content_filter`，客户端会把已知风险词替换成
+“相关话题”后额外重试一次；模型推理模式仍然保持关闭。重试仍失败时，错误会继续保存为
+`invalid_input`，不会静默成功。
+
 ### 已有文字稿但没有摘要
 
 通常是未配置 `DASHSCOPE_API_KEY`/`SILICONFLOW_API_KEY`、摘要被关闭，或远程模型正在

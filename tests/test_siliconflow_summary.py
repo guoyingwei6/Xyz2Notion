@@ -139,6 +139,28 @@ def test_semantic_failure_is_repaired_and_second_failure_is_final() -> None:
     assert invalid.value.failure.category is ProviderErrorCategory.SCHEMA_CHANGED
 
 
+def test_input_inspection_retries_once_with_sanitized_transcript() -> None:
+    requests: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content)["messages"][1]["content"])
+        if len(requests) == 1:
+            return httpx.Response(400, json={"error": {"code": "content_filter"}})
+        return completion(json.dumps(payload("审查后成功"), ensure_ascii=False))
+
+    value, _usage = client_for(handle).generate_structured(
+        EnrichmentPayload,
+        system="system",
+        user="他讨论了赌博和偷渡 请输出 JSON",
+        max_output_tokens=1000,
+    )
+    assert value.summary == "审查后成功"
+    assert len(requests) == 2
+    assert "赌博" not in requests[1]
+    assert "偷渡" not in requests[1]
+    assert "相关话题" in requests[1]
+
+
 def test_retry_after_and_transport_retry() -> None:
     calls = 0
     sleeps: list[float] = []

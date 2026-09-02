@@ -152,6 +152,48 @@ def test_api_failures_are_classified_without_leaking_responses(
     assert "private body" not in str(caught.value)
 
 
+def test_input_inspection_retries_once_with_sanitized_transcript() -> None:
+    requests: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content)["messages"][1]["content"])
+        if len(requests) == 1:
+            return httpx.Response(
+                400,
+                json={"error": {"code": "DataInspectionFailed"}},
+            )
+        return completion(json.dumps(payload("审查后成功"), ensure_ascii=False))
+
+    value, _usage = client_for(handle).generate_structured(
+        EnrichmentPayload,
+        system="system",
+        user="他讨论了毒品和枪支 请输出 JSON",
+        max_output_tokens=1000,
+    )
+    assert value.summary == "审查后成功"
+    assert len(requests) == 2
+    assert "毒品" in requests[0]
+    assert "枪支" in requests[0]
+    assert "毒品" not in requests[1]
+    assert "枪支" not in requests[1]
+    assert "相关话题" in requests[1]
+
+
+def test_input_inspection_without_sanitized_risk_term_stays_visible() -> None:
+    def handle(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"error": {"code": "DataInspectionFailed"}})
+
+    with pytest.raises(ProviderError) as caught:
+        client_for(handle).generate_structured(
+            EnrichmentPayload,
+            system="system",
+            user="没有已知风险词的内容。",
+            max_output_tokens=1000,
+        )
+    assert caught.value.failure.category is ProviderErrorCategory.INVALID_INPUT
+    assert caught.value.failure.code == "DataInspectionFailed"
+
+
 def test_retry_and_client_validation_are_bounded() -> None:
     calls = 0
     sleeps: list[float] = []

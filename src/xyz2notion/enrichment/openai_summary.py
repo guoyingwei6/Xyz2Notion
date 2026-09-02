@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -21,6 +22,23 @@ from xyz2notion.models import (
 from xyz2notion.security import CredentialKind, validate_credential_destination
 
 StructuredModel = TypeVar("StructuredModel", bound=BaseModel)
+
+_DATA_INSPECTION_CODES = frozenset(
+    {
+        "data_inspection_failed",
+        "datainspectionfailed",
+        "content_filter",
+        "content_filter_error",
+        "sensitive_content_detected",
+        "safety_risk",
+    }
+)
+
+_RISK_TERM = re.compile(
+    r"(?:杀生|杀人|自杀|自尽|吸毒|贩毒|毒品|海洛因|可卡因|大麻|鸦片|芬太尼|"
+    r"枪支|开枪|枪击|弹药|炸药|爆炸|炸弹|假证|偷渡|走私|绑架|贩运|贩子|黑帮|"
+    r"尸体|死人|死尸|亡者|凶杀|凶手|血腥|色情|裸体|嫖娼|赌博|赌场|缅甸)"
+)
 
 
 @dataclass(frozen=True)
@@ -156,6 +174,13 @@ class OpenAICompatibleSummaryClient:
             )
         )
 
+    @staticmethod
+    def _code_marks_input_inspection(code: str | None) -> bool:
+        if not code:
+            return False
+        normalized = code.lower()
+        return any(marker in normalized for marker in _DATA_INSPECTION_CODES)
+
     def _delay(self, response: httpx.Response | None, attempt: int) -> float:
         if response is not None and response.headers.get("Retry-After"):
             try:
@@ -172,19 +197,22 @@ class OpenAICompatibleSummaryClient:
         user: str,
         max_output_tokens: int,
     ) -> tuple[str, CompletionUsage]:
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
         payload: dict[str, object] = {
             "model": model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            "messages": messages,
             "response_format": {"type": "json_object"},
             "temperature": 0.1,
             self._completion_limit_field: max_output_tokens,
         }
         if self._enable_thinking is not None:
             payload["enable_thinking"] = self._enable_thinking
-        for attempt in range(self.max_retries + 1):
+        normal_attempts = 0
+        inspection_retry_attempted = False
+        while True:
             response: httpx.Response | None = None
             try:
                 response = self._client.post(
@@ -193,8 +221,9 @@ class OpenAICompatibleSummaryClient:
                     json=payload,
                 )
             except (httpx.TimeoutException, httpx.TransportError) as exc:
-                if attempt < self.max_retries:
-                    self._sleep(self._delay(None, attempt))
+                if normal_attempts < self.max_retries:
+                    self._sleep(self._delay(None, normal_attempts))
+                    normal_attempts += 1
                     continue
                 raise self._error(
                     ProviderErrorCategory.NETWORK,
@@ -202,8 +231,9 @@ class OpenAICompatibleSummaryClient:
                 ) from exc
             code = _response_code(response)
             if response.status_code in self._retryable_statuses:
-                if attempt < self.max_retries:
-                    self._sleep(self._delay(response, attempt))
+                if normal_attempts < self.max_retries:
+                    self._sleep(self._delay(response, normal_attempts))
+                    normal_attempts += 1
                     continue
                 category = (
                     ProviderErrorCategory.RATE_LIMITED
@@ -250,6 +280,18 @@ class OpenAICompatibleSummaryClient:
                     code=code or "404",
                 )
             if response.is_error:
+                if (
+                    response.status_code == 400
+                    and self._code_marks_input_inspection(code)
+                    and not inspection_retry_attempted
+                    and _RISK_TERM.search(user)
+                ):
+                    sanitized_user = _RISK_TERM.sub("相关话题", user)
+                    if sanitized_user != user:
+                        inspection_retry_attempted = True
+                        user = sanitized_user
+                        messages[1]["content"] = user
+                        continue
                 raise self._error(
                     ProviderErrorCategory.INVALID_INPUT,
                     f"{self._service_name} rejected the summary request "
