@@ -77,6 +77,9 @@ SiliconFlow ASR 最终失败时会自动转到本地 `faster-whisper small`。�
 “相关话题”后额外重试一次；模型推理模式仍然保持关闭。重试仍失败时，错误会继续保存为
 `invalid_input`，不会静默成功。
 
+转写提交或任务返回同类内容审查错误时，处理器会立即标记为 `最终失败`，不会把同一音频
+继续提交给 SiliconFlow 或本地 Whisper；后续需要忽略这类单集时，可手动勾选 `Skip AI`。
+
 ### 已有文字稿但没有摘要
 
 通常是未配置 `DASHSCOPE_API_KEY`/`SILICONFLOW_API_KEY`、摘要被关闭，或远程模型正在

@@ -244,6 +244,16 @@ class EpisodeAIProcessor:
             )
         return self.dashscope.transcribe_url(candidate.audio_url)
 
+    @staticmethod
+    def _is_sensitive_asr_failure(error: ProviderError) -> bool:
+        """Detect provider input inspection so the episode stops without fallback."""
+        normalized_code = (error.failure.code or "").lower().replace("_", "").replace("-", "")
+        normalized_message = error.failure.message.lower().replace("_", "").replace("-", "")
+        return any(
+            marker in normalized_code or marker in normalized_message
+            for marker in ("datainspectionfailed", "contentfilter", "sensitivecontent")
+        )
+
     def _local_whisper(self, candidate: EpisodeCandidate) -> TranscriptResult:
         if self.local_whisper is None:
             raise _failure(
@@ -337,7 +347,9 @@ class EpisodeAIProcessor:
         if state.provider in {None, "dashscope"} and self.dashscope is not None:
             try:
                 transcript = self._dashscope(candidate)
-            except ProviderError:
+            except ProviderError as exc:
+                if self._is_sensitive_asr_failure(exc):
+                    raise
                 if self.siliconflow is None and self.local_whisper is None:
                     raise
             else:

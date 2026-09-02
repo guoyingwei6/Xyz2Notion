@@ -202,6 +202,19 @@ class DashScopeProcessor(SiliconProcessor):
         return transcript("dashscope")
 
 
+class SensitiveDashScopeProcessor(DashScopeProcessor):
+    def _dashscope(self, _candidate: EpisodeCandidate) -> TranscriptResult:
+        self.dashscope_calls += 1
+        raise ProviderError(
+            ProviderFailure(
+                provider="dashscope",
+                category=ProviderErrorCategory.INVALID_INPUT,
+                message="DashScope rejected the audio",
+                code="DataInspectionFailed",
+            )
+        )
+
+
 CANDIDATE = EpisodeCandidate("page", "episode", "标题", "https://cdn.example/audio")
 
 
@@ -441,6 +454,25 @@ def test_dashscope_failure_falls_back_to_siliconflow() -> None:
     assert processor.dashscope_calls == 1
     assert processor.asr_calls == 1
     assert store.state.provider == "siliconflow"
+
+
+def test_sensitive_dashscope_failure_does_not_fallback_to_siliconflow() -> None:
+    store = FakeStateStore()
+    processor = SensitiveDashScopeProcessor(
+        FakeNotion(),
+        store,
+        dashscope=object(),  # type: ignore[arg-type]
+        siliconflow=object(),
+        summary_client=FakeSummaryClient(),
+    )
+    outcome = processor.process(CANDIDATE, {})
+    assert outcome.state is PipelineState.FAILED_FINAL
+    assert outcome.detail == "invalid_input"
+    assert processor.dashscope_calls == 1
+    assert processor.asr_calls == 0
+    assert store.state.provider is None
+    assert store.state.record.failure is not None
+    assert store.state.record.failure.code == "DataInspectionFailed"
 
 
 def test_local_whisper_can_run_without_remote_asr_provider() -> None:
