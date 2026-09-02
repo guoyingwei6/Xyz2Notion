@@ -1221,6 +1221,7 @@ def _run_reopen_all_summary_failures(args: argparse.Namespace) -> int:
                 "completion_schema",
                 "legacy_local_schema",
                 "request_http_400_20015",
+                "request_http_400_data_inspection_failed",
                 "unavailable",
             }
         ),

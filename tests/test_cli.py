@@ -2152,6 +2152,15 @@ def test_summary_recovery_prioritizes_schema_canaries() -> None:
     assert priority("unavailable") < priority("unknown")
 
 
+def test_summary_failure_reason_is_recoverable_after_inspection_retry() -> None:
+    assert (
+        cli_module._summary_recovery_priority(  # type: ignore[attr-defined]
+            "request_http_400_data_inspection_failed"
+        )
+        == 20
+    )
+
+
 def test_reopen_timeline_failures_requires_bound_confirmation(
     capsys: object,
 ) -> None:
