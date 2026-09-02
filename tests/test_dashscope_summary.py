@@ -204,6 +204,31 @@ def test_input_inspection_sanitizes_compound_risk_phrases() -> None:
     assert "屠刀" not in requests[1]
 
 
+def test_input_inspection_sanitizes_police_context() -> None:
+    requests: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content)["messages"][1]["content"])
+        if len(requests) == 1:
+            return httpx.Response(
+                400,
+                json={"error": {"code": "DataInspectionFailed"}},
+            )
+        return completion(json.dumps(payload(), ensure_ascii=False))
+
+    value, _usage = client_for(handle).generate_structured(
+        EnrichmentPayload,
+        system="system",
+        user="边境警察 被杀 冷兵器 请输出 JSON",
+        max_output_tokens=1000,
+    )
+    assert value.summary == "摘要"
+    assert len(requests) == 2
+    assert "警察" not in requests[1]
+    assert "被杀" not in requests[1]
+    assert "冷兵器" not in requests[1]
+
+
 def test_input_inspection_without_sanitized_risk_term_stays_visible() -> None:
     def handle(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(400, json={"error": {"code": "DataInspectionFailed"}})
