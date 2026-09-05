@@ -6,7 +6,7 @@ Actions 摘要只显示聚合数量。转写状态在 Notion Episode 的 `ASR St
 摘要/章节/思维导图状态在 `增强状态`、`增强 Provider`；检查点仍在 `Failure Reason` 和
 `AI State File`。不要为了排错打印 Secret、完整请求头或服务商响应正文。
 
-只要本次选中的条目出现处理失败，摘要命令就返回非零，Actions 会显示红色；摘要区仍会
+只要本次选中的条目出现处理失败，ASR、摘要和封面修复命令就返回非零，Actions 会显示红色；摘要区仍会
 写出 `failure_categories` 聚合。绿色只表示这次队列没有失败，不能再被单纯的命令退出码
 误报为成功。
 
@@ -56,10 +56,23 @@ uv run xyz2notion audit-view-configurations --details
 
 ### 百炼 ASR 没有完成
 
-百炼录音文件识别是异步流程，队列会保存任务 ID 并在后续运行继续轮询。只有任务进入
-明确失败状态才会降级到 SiliconFlow；SiliconFlow 失败后才使用本地 Whisper，避免
-同一音频重复提交。检查 Notion Episode 的 `ASR Status`、`ASR Provider` 和
+百炼录音文件识别是异步流程。队列先保存提交意图，拿到任务 ID 后立即保存，再开始轮询。
+只有明确未接受的提交失败才可能按配置降级；已有任务的轮询超时或结果下载失败会保存
+原任务检查点，不自动改投其他 Provider。检查 Notion Episode 的 `ASR Status`、`ASR Provider` 和
 `Failure Reason`，不要重复手动提交同一单集。
+
+若出现 `ambiguous_submission` 或 `submission_uncertain`，程序无法确认服务端是否
+已接受任务，将停止自动提交。必须先在服务商侧核查任务，再决定是否使用显式重置；
+不要直接重开失败以尝试绕过这一保护。
+
+### Notion 写入结果不确定
+
+创建页面或追加块出现超时、服务端异常或无效成功响应时，不会自动重放写入。
+`ambiguous_write` 表示需要核查服务端实际结果；带稳定键的表行创建会先重新查询确认。
+内容发布无法确认时保持可见失败，避免自动重试造成重复正文。
+
+新安装会把已有播放量计入首次统计，迁移已有非零统计时仍保留历史基线。
+此前已被错误归零且完成基线标记的数据不会自动猜测修复；需另行审计并确认修复范围。
 
 ### SiliconFlow 失败
 
@@ -103,7 +116,10 @@ SiliconFlow ASR 最终失败时会自动转到本地 `faster-whisper small`。�
 
 `最终失败` 不会被定时队列自动重开。对已有文字稿、尚无摘要的历史摘要失败，可用
 `reopen-summary-failures` 按 1–2 条分批重开；命令会保留 transcript 检查点并勾选
-`人工请求重试`，随后由 `Retry Failed Episode AI` 精确消费，不会重新执行 ASR。
+`人工请求重试`。`Recover Final Summary Failures` 为每批添加独立批次标记，并通过
+`process-manual-retries --summary-only --recovery-batch <批次>` 仅消费这一批已有文字稿的
+摘要/发布阶段，不构造 ASR 客户端，也不会顺带处理其他已勾选的 ASR 任务。
+`resume-existing` 模式不限制旧批次，但仍强制限定摘要阶段。
 
 ### 只重试普通失败单集
 

@@ -513,7 +513,7 @@ def test_legacy_heatmap_caption_migrates_once_then_stays_idempotent() -> None:
     assert fake.blocks["root"][0]["image"]["caption"][0]["text"]["content"] == "\u200b"
 
 
-def test_heatmap_publisher_archives_duplicate_unmarked_record_images() -> None:
+def test_heatmap_publisher_preserves_unmarked_and_previous_year_images() -> None:
     fake = FakeStatisticsNotion()
     fake.blocks["root"] = [
         {
@@ -538,26 +538,66 @@ def test_heatmap_publisher_archives_duplicate_unmarked_record_images() -> None:
         {"id": "heatmap-old-1", "type": "image", "image": dict(image)},
         {"id": "heatmap-old-2", "type": "image", "image": dict(image)},
         {"id": "heatmap-keep", "type": "image", "image": dict(image)},
+        {
+            "id": "previous-year",
+            "type": "image",
+            "image": {
+                **image,
+                "caption": [
+                    {
+                        "type": "text",
+                        "text": {
+                            "content": "2025",
+                            "link": {"url": "https://xyz2notion.local/heatmap/2025/old"},
+                        },
+                    }
+                ],
+            },
+        },
     ]
     daily = calculate_statistics(statistics_snapshot(), today=date(2026, 2, 15)).daily
 
     result = HeatmapPublisher(fake, "root").publish(2026, daily)
 
-    assert result.action == "updated"
-    assert result.block_id == "heatmap-keep"
-    assert fake.deleted == ["heatmap-old-1", "heatmap-old-2"]
-    assert [block["id"] for block in fake.blocks["right"] if block["type"] == "image"] == [
-        "heatmap-keep"
-    ]
-    assert "type" not in fake.blocks["right"][-1]["image"]
+    assert result.action == "created"
+    assert fake.deleted == []
+    assert len([block for block in fake.blocks["right"] if block["type"] == "image"]) == 5
     assert fake.blocks["right"][-1]["image"]["file_upload"]["id"] == "upload-1"
     assert "https://xyz2notion.local/heatmap/2026/" in str(
         fake.blocks["right"][-1]["image"]["caption"]
     )
+    assert HeatmapPublisher(fake, "root").publish(2026, daily).action == "unchanged"
+    assert fake.deleted == []
 
 
 def _rich(value: str) -> JsonObject:
     return {"rich_text": [{"plain_text": value}]}
+
+
+def test_heatmap_removes_only_duplicate_managed_current_year_images() -> None:
+    fake = FakeStatisticsNotion()
+    image = {
+        "type": "file_upload",
+        "file_upload": {"id": "upload"},
+        "caption": [
+            {
+                "type": "text",
+                "text": {
+                    "content": "",
+                    "link": {"url": "https://xyz2notion.local/heatmap/2026/old"},
+                },
+            }
+        ],
+    }
+    fake.blocks["root"] = [
+        {"id": "first", "type": "image", "image": image},
+        {"id": "duplicate", "type": "image", "image": image},
+        {"id": "personal", "type": "image", "image": {"caption": []}},
+    ]
+    daily = calculate_statistics(statistics_snapshot(), today=date(2026, 2, 15)).daily
+    result = HeatmapPublisher(fake, "root").publish(2026, daily)
+    assert result.block_id == "first"
+    assert fake.deleted == ["duplicate"]
 
 
 def _period_page(
@@ -580,6 +620,36 @@ def _period_page(
             "Statistics Source": _rich("legacy"),
         },
     }
+
+
+def test_fresh_statistics_counts_existing_playback_once() -> None:
+    fake = FakeStatisticsNotion()
+    fake.pages["ds-podcast"] = [
+        {
+            "id": "podcast-page",
+            "properties": {"PID": _rich("p1"), "Total Listening Seconds": {"number": 0}},
+        }
+    ]
+    fake.pages["ds-episode"] = [
+        {
+            "id": "episode-page",
+            "properties": {
+                "EID": _rich("e1"),
+                "Played Seconds": {"number": 120},
+                "Last Played At": {"date": {"start": "2026-02-15T08:00:00Z"}},
+                "Podcast": {"relation": [{"id": "podcast-page"}]},
+            },
+        }
+    ]
+    for _ in range(2):
+        synchronizer = NotionIncrementalStatistics(
+            fake,
+            notion_resources(),
+            root_page_id="root",
+        )
+        synchronizer.sync(today=date(2026, 2, 15))
+        assert fake.pages["ds-all"][0]["properties"]["Exact Listening Seconds"]["number"] == 120
+        assert fake.pages["ds-podcast"][0]["properties"]["Total Listening Seconds"]["number"] == 120
 
 
 def test_notion_incremental_statistics_preserves_baseline_and_never_double_counts() -> None:

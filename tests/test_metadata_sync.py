@@ -2,7 +2,9 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from xyz2notion.notion.client import JsonObject
+import pytest
+
+from xyz2notion.notion.client import JsonObject, NotionAPIError
 from xyz2notion.notion.schema import NotionResource
 from xyz2notion.sync.metadata import MetadataSynchronizer
 from xyz2notion.sync.normalizer import MetadataSnapshot, build_metadata_snapshot
@@ -370,6 +372,8 @@ def test_metadata_sync_preserves_notion_hosted_file_properties() -> None:
                 }
             ]
         }
+        page["icon"] = {"type": "file", "file": {"url": "https://notion.example/icon"}}
+        page["cover"] = {"type": "file_upload", "file_upload": {"id": "internal-cover"}}
 
     fake.updates.clear()
     report = synchronizer.sync(snapshot)
@@ -380,6 +384,9 @@ def test_metadata_sync_preserves_notion_hosted_file_properties() -> None:
     assert podcast["properties"]["Cover"]["files"][0]["type"] == "file"
     assert episode["properties"]["Cover"]["files"][0]["type"] == "file"
     assert author["properties"]["Avatar"]["files"][0]["type"] == "file"
+    for page in (author, podcast, episode):
+        assert page["icon"]["type"] == "file"
+        assert page["cover"]["type"] == "file_upload"
 
 
 def test_removed_playlist_and_favorite_flags_are_cleared_without_deleting_page() -> None:
@@ -524,3 +531,26 @@ def test_notion_table_rejects_duplicate_stable_keys() -> None:
         assert "Duplicate Notion key" in str(exc)
     else:
         raise AssertionError("duplicate key was not rejected")
+
+
+@pytest.mark.parametrize("accepted", [True, False])
+def test_ambiguous_create_is_reconciled_by_stable_key_without_replay(accepted: bool) -> None:
+    class AmbiguousRows(FakeRows):
+        attempts = 0
+
+        def create_data_source_page(self, *args, **kwargs):
+            self.attempts += 1
+            if accepted:
+                super().create_data_source_page(*args, **kwargs)
+            raise NotionAPIError("response lost", code="ambiguous_write")
+
+    fake = AmbiguousRows()
+    table = NotionTable(fake, "ds-custom", "Key")
+    properties = {"Key": {"rich_text": [{"text": {"content": "stable"}}]}}
+    if accepted:
+        assert table.upsert("stable", properties).action == "unchanged"
+        assert table.upsert("stable", properties).action == "unchanged"
+    else:
+        with pytest.raises(NotionAPIError, match="response lost"):
+            table.upsert("stable", properties)
+    assert fake.attempts == 1

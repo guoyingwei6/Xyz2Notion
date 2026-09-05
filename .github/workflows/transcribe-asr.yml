@@ -101,8 +101,11 @@ jobs:
           elif [[ "$EVENT_SCHEDULE" == "13 */2 * * *" ]]; then
             mode="backlog"
           fi
+          set +e
           result="$(uv run xyz2notion process-asr \
-            --config "$config_path" --mode "$mode" --limit "$limit")"
+            --config "$config_path" --mode "$mode" --limit "$limit" 2>&1)"
+          status=$?
+          set -e
           printf '%s\n' "$result"
           printf 'mode=%s\n' "$mode" >> "$GITHUB_OUTPUT"
           if [[ "$result" == *"remaining=0;"* ]]; then
@@ -114,3 +117,4 @@ jobs:
             printf '## Xyz2Notion ASR-only queue\n\n'
             printf '```text\n%s\n```\n' "$result"
           } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"

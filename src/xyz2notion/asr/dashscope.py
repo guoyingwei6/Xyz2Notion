@@ -319,12 +319,23 @@ class DashScopeParaformerClient:
             try:
                 response = self._client.request(method, url, headers=headers, json=json_body)
             except (httpx.TimeoutException, httpx.TransportError) as exc:
+                if method.upper() == "POST":
+                    raise DashScopeAPIError(
+                        "DashScope submission outcome is unknown; do not resubmit",
+                        code="ambiguous_submission",
+                    ) from exc
                 if attempt >= self.max_retries:
                     raise DashScopeAPIError(
                         f"DashScope transport failure: {type(exc).__name__}",
                         retryable=True,
                     ) from exc
             else:
+                if method.upper() == "POST" and response.status_code >= 500:
+                    raise DashScopeAPIError(
+                        "DashScope submission outcome is unknown; do not resubmit",
+                        status_code=response.status_code,
+                        code="ambiguous_submission",
+                    )
                 if response.status_code in self._retryable_statuses:
                     if attempt >= self.max_retries:
                         payload = _json(response)
@@ -342,7 +353,16 @@ class DashScopeParaformerClient:
                         code=str(payload.get("code")) if payload.get("code") else None,
                     )
                 else:
-                    return _json(response)
+                    try:
+                        return _json(response)
+                    except DashScopeAPIError as exc:
+                        if method.upper() == "POST":
+                            raise DashScopeAPIError(
+                                "DashScope submission response is invalid; "
+                                "audit before resubmitting",
+                                code="ambiguous_submission",
+                            ) from exc
+                        raise
             self._sleep(min(30.0, 2.0**attempt))
         raise AssertionError("DashScope retry loop exhausted unexpectedly")
 
@@ -382,7 +402,11 @@ class DashScopeParaformerClient:
             raise ProviderError(
                 ProviderFailure(
                     provider="dashscope",
-                    category=_status_category(exc.status_code, exc.code),
+                    category=(
+                        ProviderErrorCategory.UNKNOWN
+                        if exc.code == "ambiguous_submission"
+                        else _status_category(exc.status_code, exc.code)
+                    ),
                     message=str(exc),
                     code=exc.code or (str(exc.status_code) if exc.status_code else None),
                 )
@@ -390,7 +414,9 @@ class DashScopeParaformerClient:
         try:
             return _extract_task_id(payload)
         except DashScopeAPIError as exc:
-            raise _failure(ProviderErrorCategory.SCHEMA_CHANGED, str(exc), code=exc.code) from exc
+            raise _failure(
+                ProviderErrorCategory.SCHEMA_CHANGED, str(exc), code="ambiguous_submission"
+            ) from exc
 
     def wait_result_url(self, task_id: str) -> str:
         """Poll DashScope until the task succeeds or reaches a terminal failure."""
@@ -398,7 +424,13 @@ class DashScopeParaformerClient:
         for attempt in range(self.poll_attempts):
             # The current recorded-speech REST/SDK examples query task status
             # with GET; only task submission uses POST.
-            payload = self._request_json("GET", task_url)
+            try:
+                payload = self._request_json("GET", task_url)
+            except DashScopeAPIError as exc:
+                category = _status_category(exc.status_code, exc.code)
+                if exc.retryable and category is ProviderErrorCategory.UNKNOWN:
+                    category = ProviderErrorCategory.NETWORK
+                raise _failure(category, str(exc), code=exc.code) from exc
             try:
                 output = _output(payload)
             except DashScopeAPIError as exc:
@@ -458,8 +490,8 @@ class DashScopeParaformerClient:
         except DashScopeAPIError as exc:
             raise _failure(ProviderErrorCategory.SCHEMA_CHANGED, str(exc), code=exc.code) from exc
 
-    def transcribe_url(self, audio_url: str) -> TranscriptResult:
-        """Submit, poll, fetch, and normalize one public audio URL."""
+    def submit_with_fallback(self, audio_url: str) -> tuple[str, str]:
+        """Return the task ID and selected model before any polling begins."""
         last_failure: ProviderError | None = None
         for index, model in enumerate(self.models):
             try:
@@ -472,14 +504,16 @@ class DashScopeParaformerClient:
                 if index + 1 >= len(self.models) or not _can_fallback_to_next_model(exc):
                     raise
                 continue
-            # Do not catch failures after submission: the task is already in
-            # DashScope and must be resumed/marked failed instead of creating
-            # another task for the same episode.
-            result_url = self.wait_result_url(task_id)
-            return self.fetch_transcript(result_url, task_id=task_id, model=model)
+            return task_id, model
         if last_failure is not None:
             raise last_failure
         raise AssertionError("DashScope model fallback loop had no models")
+
+    def transcribe_url(self, audio_url: str) -> TranscriptResult:
+        """Convenience API; durable callers use submit_with_fallback then checkpoint."""
+        task_id, model = self.submit_with_fallback(audio_url)
+        result_url = self.wait_result_url(task_id)
+        return self.fetch_transcript(result_url, task_id=task_id, model=model)
 
 
 def _can_fallback_to_next_model(error: ProviderError) -> bool:

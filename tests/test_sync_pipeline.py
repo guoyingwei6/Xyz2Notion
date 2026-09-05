@@ -105,6 +105,17 @@ def test_collect_metadata_defaults_to_listened_history_only() -> None:
     assert {episode.eid for episode in snapshot.episodes} == {"history-episode"}
 
 
+def test_history_wrapper_played_at_survives_collection() -> None:
+    class DatedHistory(FakeXiaoyuzhou):
+        def play_history(self, *, limit: int = 25) -> list[JsonObject]:
+            rows = super().play_history(limit=limit)
+            rows[0]["playedAt"] = "2026-09-04T08:00:00Z"
+            return rows
+
+    snapshot = collect_metadata(DatedHistory())
+    assert snapshot.episodes[0].last_played_at == datetime(2026, 9, 4, 8, tzinfo=UTC)
+
+
 def test_collect_metadata_drops_history_rows_without_playback_progress() -> None:
     fake = FakeXiaoyuzhou()
     fake.playback_progress = lambda _eids, batch_size=25: []  # type: ignore[method-assign]

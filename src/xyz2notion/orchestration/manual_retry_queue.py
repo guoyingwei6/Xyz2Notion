@@ -21,6 +21,7 @@ from xyz2notion.enrichment.client import preflight_summary_client
 from xyz2notion.enrichment.pipeline import SummaryPolicy
 from xyz2notion.notion.client import JsonObject, NotionAPIError, NotionClient
 from xyz2notion.notion.initializer import NotionInitializer
+from xyz2notion.orchestration.asr_budget import AsrBudget
 from xyz2notion.orchestration.processor import (
     EpisodeAIProcessor,
     EpisodeCandidate,
@@ -37,7 +38,7 @@ MANUAL_RETRY_PROPERTY = "人工请求重试"
 MANUAL_RETRY_LIMIT = 2
 MANUAL_RETRY_INTER_EPISODE_SECONDS = 60
 _MANUAL_REQUEST_INCOMPLETE_ACTIONS = frozenset(
-    {"pending", "paused", "waiting_summary_key", "summary_paused"}
+    {"pending", "paused", "waiting_summary_key", "summary_paused", "budget_paused"}
 )
 
 
@@ -128,6 +129,8 @@ def select_manual_retry_work(
     state_store: ManualRetryStateStore,
     *,
     limit: int | None = None,
+    summary_only: bool = False,
+    recovery_batch: str | None = None,
 ) -> tuple[ManualRetryItem, ...]:
     """Select checked rows in favorite→liked→heard→listening→to-listen order.
 
@@ -159,6 +162,15 @@ def select_manual_retry_work(
                 continue
         elif state.record.state is PipelineState.FAILED_FINAL and state.record.failure is None:
             continue
+        if recovery_batch is not None and state.recovery_batch != recovery_batch:
+            continue
+        if summary_only:
+            stage = state.record.resume_state or state.record.state
+            if state.transcript is None or stage not in {
+                PipelineState.TRANSCRIBED,
+                PipelineState.ENRICHED,
+            }:
+                continue
         found.append(ManualRetryItem(candidate, page, state))
     found.sort(key=_manual_item_sort_key)
     return tuple(found if limit is None else found[: max(0, limit)])
@@ -187,6 +199,8 @@ def run_manual_retry_queue(
     requested_limit: int | None = None,
     page_id_override: str | None = None,
     progress: Callable[[str], None] | None = None,
+    summary_only: bool = False,
+    recovery_batch: str | None = None,
 ) -> ManualRetryQueueResult:
     """Process checked rows, reopening failures from the exact stage."""
     config = load_config(config_path)
@@ -208,21 +222,27 @@ def run_manual_retry_queue(
             {"page_size": 100},
         )
         state_store = stack.enter_context(NotionEpisodeStateStore(notion))
-        all_items = select_manual_retry_work(pages, state_store)
-        selected = all_items[: _limit(requested_limit)]
+        all_items = select_manual_retry_work(
+            pages,
+            state_store,
+            summary_only=summary_only,
+            recovery_batch=recovery_batch,
+        )
+        selected = all_items[: min(_limit(requested_limit), config.limits.episodes_per_run)]
         if progress is not None:
             progress(
                 "Manual retry queue selection "
                 f"(selected={len(selected)}; available={len(all_items)})"
             )
 
-        providers = set(config.asr.provider_order)
+        providers = set() if summary_only else set(config.asr.provider_order)
         dashscope, siliconflow, local_whisper, summary_client = build_provider_clients(
             dashscope_api_key=(
                 credentials.dashscope_api_key if AsrProvider.DASHSCOPE in providers else None
             ),
             dashscope_model=config.asr.dashscope_model,
             dashscope_models=config.asr.dashscope_models,
+            provider_poll_attempts=config.limits.provider_poll_attempts,
             dashscope_summary_api_key=credentials.dashscope_api_key,
             dashscope_summary_model=config.summary.dashscope_model,
             siliconflow_asr_api_key=(
@@ -257,6 +277,8 @@ def run_manual_retry_queue(
             summary_policy=_summary_policy(config),
             summary_enabled=True,
             mindmap_data_source_id=initialization.resources["mindmap"].data_source_id,
+            provider_order=() if summary_only else config.asr.provider_order,
+            asr_budget=None if summary_only else AsrBudget(notion, pages, config.limits),
         )
         outcomes: list[ProcessingOutcome] = []
         for index, item in enumerate(selected):

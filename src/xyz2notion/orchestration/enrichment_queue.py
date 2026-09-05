@@ -298,7 +298,7 @@ def run_enrichment_queue(
         raise MissingCredentialError("Missing target page: set NOTION_PAGE_ID or pass --page-id")
     if credentials.notion_token is None:
         raise AssertionError("credential requirement did not narrow notion_token")
-    limit = resolve_queue_limit(mode, requested_limit)
+    limit = min(resolve_queue_limit(mode, requested_limit), config.limits.episodes_per_run)
 
     with ExitStack() as stack:
         notion = stack.enter_context(NotionClient(credentials.notion_token))

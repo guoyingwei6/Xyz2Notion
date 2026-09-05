@@ -42,6 +42,33 @@ def test_request_sets_current_version_and_auth_header() -> None:
         client.close()
 
 
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("POST", "/pages"),
+        ("PATCH", "/blocks/page/children"),
+    ],
+)
+@pytest.mark.parametrize("failure", ["timeout", "server", "invalid_json"])
+def test_non_idempotent_write_is_never_replayed(method: str, path: str, failure: str) -> None:
+    requests = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if failure == "timeout":
+            raise httpx.ReadTimeout("accepted but response lost")
+        if failure == "server":
+            return httpx.Response(503, json={"message": "unavailable"})
+        return httpx.Response(200, text="not json")
+
+    client = client_for(httpx.MockTransport(handle))
+    with pytest.raises(NotionAPIError) as error:
+        client.request(method, path)
+    assert error.value.code == "ambiguous_write"
+    assert not error.value.retryable
+    assert len(requests) == 1
+
+
 def test_create_data_source_page_uses_2026_parent_contract() -> None:
     def handle(request: httpx.Request) -> httpx.Response:
         payload = request.read().decode()

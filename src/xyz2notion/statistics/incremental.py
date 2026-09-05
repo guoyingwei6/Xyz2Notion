@@ -679,11 +679,36 @@ class NotionIncrementalStatistics:
         period_pages = self._period_pages()
         podcast_pages = self._podcast_pages()
         if not self._is_initialized(period_pages):
-            return self._establish_baseline(
-                episodes,
-                period_pages,
-                podcast_pages,
-                today=current_day,
+            historical_totals = any(
+                _number(_page_properties(page), name) > 0
+                for pages in period_pages.values()
+                for page in pages.values()
+                for name in ("Exact Listening Seconds", "Statistics Baseline Seconds")
+            ) or any(
+                _number(_page_properties(page), name) > 0
+                for page in podcast_pages.values()
+                for name in ("Total Listening Seconds", "Statistics Baseline Seconds")
+            )
+            if historical_totals:
+                return self._establish_baseline(
+                    episodes,
+                    period_pages,
+                    podcast_pages,
+                    today=current_day,
+                )
+            if any(episode.baseline_seconds or episode.baseline_day for episode in episodes):
+                raise ValueError(
+                    "Statistics baseline is incomplete; audit existing data before initializing"
+                )
+            # Mark the fresh ledger mode before capturing deltas, so an interrupted
+            # first run resumes reconciliation rather than baselining those deltas away.
+            NotionTable(self.api, self.resources["all"].data_source_id, "Period Key").upsert(
+                "all",
+                {
+                    "Name": _title("全部"),
+                    "Period Key": _text("all"),
+                    "Statistics Baseline Version": _text(BASELINE_VERSION),
+                },
             )
         ledger_episodes, delta_seconds = self._capture_deltas(episodes, today=current_day)
         return self._reconcile(

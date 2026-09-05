@@ -355,12 +355,12 @@ class HeatmapPublisher:
         marker = f"{marker_prefix}{content_hash}"
         managed_block: JsonObject | None = None
         managed_marker: JsonObject | None = None
-        record_column_images: list[JsonObject] = []
+        managed_images: list[JsonObject] = []
         target_parent = self.root_page_id
         visited: set[str] = set()
 
         def walk(parent_id: str) -> None:
-            nonlocal managed_block, managed_marker, target_parent, record_column_images
+            nonlocal managed_block, managed_marker, target_parent
             if parent_id in visited:
                 return
             visited.add(parent_id)
@@ -371,36 +371,36 @@ class HeatmapPublisher:
             )
             if is_record_column:
                 target_parent = parent_id
-            for index, block in enumerate(blocks):
+            for block in blocks:
                 caption = _caption_text(block)
-                if is_record_column and block.get("type") == "image":
-                    record_column_images.append(block)
+                marker_url = _block_marker_url(block)
+                owned_image = block.get("type") == "image" and (
+                    caption.startswith(marker_prefix)
+                    or bool(_heatmap_hash_from_url(marker_url, year))
+                )
+                if owned_image:
+                    managed_images.append(block)
                 if (
                     managed_block is None
                     and block.get("type") == "image"
                     and caption.startswith(marker_prefix)
                 ):
                     managed_block = block
-                marker_url = _block_marker_url(block)
-                if managed_marker is None and _heatmap_hash_from_url(marker_url, year):
+                if (
+                    owned_image
+                    and managed_marker is None
+                    and _heatmap_hash_from_url(marker_url, year)
+                ):
                     managed_marker = block
-                    if block.get("type") == "image":
-                        managed_block = block
-                    else:
-                        for sibling in blocks[index + 1 :]:
-                            if sibling.get("type") == "image":
-                                managed_block = sibling
-                                break
+                    managed_block = block
                 child_id = block.get("id")
                 if block.get("has_children") and child_id:
                     walk(str(child_id))
 
         walk(self.root_page_id)
-        if managed_block is None and record_column_images:
-            managed_block = record_column_images[-1]
         self._archive_duplicate_images(
             keep_block_id=str(managed_block.get("id") or "") if managed_block else "",
-            candidates=record_column_images,
+            candidates=managed_images,
         )
         marker_hash = (
             _heatmap_hash_from_url(_block_marker_url(managed_marker), year)

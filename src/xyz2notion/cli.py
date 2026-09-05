@@ -9,6 +9,7 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
 from pathlib import Path
+from uuid import uuid4
 
 from pydantic import SecretStr
 
@@ -38,6 +39,7 @@ from xyz2notion.notion.client import JsonObject, NotionAPIError, NotionClient
 from xyz2notion.notion.cover_localizer import NotionCoverLocalizer
 from xyz2notion.notion.initializer import DATA_PAGE_TITLE, HOME_MARKER_URL, NotionInitializer
 from xyz2notion.notion.published_ai import PublishedAIReconciler
+from xyz2notion.orchestration.asr_budget import AsrBudget
 from xyz2notion.orchestration.manual_retry_queue import run_manual_retry_queue
 from xyz2notion.orchestration.processor import (
     EpisodeAIProcessor,
@@ -226,6 +228,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="process checked Episode retries from the persisted failed stage",
     )
     manual_retry.add_argument("--config", default="config.yaml", help="path to config.yaml")
+    manual_retry.add_argument("--summary-only", action="store_true")
+    manual_retry.add_argument("--recovery-batch")
     manual_retry.add_argument(
         "--page-id",
         help="target root page ID; defaults to NOTION_PAGE_ID",
@@ -286,6 +290,7 @@ def build_parser() -> argparse.ArgumentParser:
     reopen_summary.add_argument("--limit", type=int, default=1)
     reopen_summary.add_argument("--confirm", required=True)
     reopen_summary.add_argument("--page-id")
+    reopen_summary.add_argument("--recovery-batch")
     migrate = subparsers.add_parser(
         "migrate",
         help="adopt and map a legacy Podcast2Notion template in place",
@@ -461,11 +466,12 @@ def _run_asr_queue(args: argparse.Namespace) -> int:
                     key=_ai_page_priority,
                 )
             all_candidates = episode_candidates(eligible_pages)
-            candidates = all_candidates[: args.limit]
+            candidates = all_candidates[: min(args.limit, config.limits.episodes_per_run)]
             dashscope, siliconflow, local_whisper, _summary_client = build_provider_clients(
                 dashscope_api_key=dashscope_api_key,
                 dashscope_model=config.asr.dashscope_model,
                 dashscope_models=config.asr.dashscope_models,
+                provider_poll_attempts=config.limits.provider_poll_attempts,
                 siliconflow_asr_api_key=siliconflow_asr_api_key,
                 siliconflow_summary_api_key=None,
                 siliconflow_asr_models=config.asr.siliconflow_models,
@@ -483,6 +489,8 @@ def _run_asr_queue(args: argparse.Namespace) -> int:
                 siliconflow=siliconflow,
                 local_whisper=local_whisper,
                 summary_enabled=False,
+                provider_order=config.asr.provider_order,
+                asr_budget=AsrBudget(notion, pages, config.limits),
             )
             page_by_id = {str(page.get("id")): page for page in pages}
             outcomes = []
@@ -519,15 +527,22 @@ def _run_asr_queue(args: argparse.Namespace) -> int:
     )
     remaining = max(0, len(all_candidates) - len(candidates)) + sum(
         outcome.state in {PipelineState.ASR_SUBMITTED, PipelineState.ASR_RUNNING}
+        or outcome.state is PipelineState.FAILED_RETRYABLE
+        or outcome.action in {"budget_paused", "paused"}
         for outcome in outcomes
     )
+    status = "OK"
+    if actions["failed"]:
+        status = "FAILED"
+    elif actions["budget_paused"] or actions["paused"]:
+        status = "PAUSED"
     print(
-        f"Episode ASR queue OK (mode={args.mode}; selected={len(candidates)}; "
+        f"Episode ASR queue {status} (mode={args.mode}; selected={len(candidates)}; "
         f"remaining={remaining}; interval_seconds={ASR_INTER_EPISODE_SECONDS}; "
         f"actions: {action_summary}; states: {state_summary}; categories: {category_summary}; "
         f"providers: {provider_summary})"
     )
-    return 0
+    return 5 if actions["failed"] else 0
 
 
 def _run_manual_retry_queue(args: argparse.Namespace) -> int:
@@ -541,6 +556,8 @@ def _run_manual_retry_queue(args: argparse.Namespace) -> int:
             requested_limit=args.limit,
             page_id_override=args.page_id,
             progress=lambda message: print(message, flush=True),
+            summary_only=args.summary_only,
+            recovery_batch=args.recovery_batch,
         )
     except (ConfigurationError, MissingCredentialError) as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
@@ -597,12 +614,13 @@ def _run_cover_repair(args: argparse.Namespace) -> int:
     except NotionAPIError as exc:
         print(f"Notion error: {exc}", file=sys.stderr)
         return 4
+    status = "FAILED" if report.failed else "OK"
     print(
-        "Notion cover repair OK "
+        f"Notion cover repair {status} "
         f"(limit={args.limit}; repaired={report.repaired}; "
         f"skipped={report.skipped}; failed={report.failed})"
     )
-    return 0
+    return 5 if report.failed else 0
 
 
 def _run_published_ai_reconciliation(args: argparse.Namespace) -> int:
@@ -1135,6 +1153,7 @@ def _run_reopen_summary_failures(
                 },
             )
             reopened = skipped = 0
+            recovery_batch = getattr(args, "recovery_batch", None) or str(uuid4())
             candidates: list[tuple[int, JsonObject, EpisodeAIState]] = []
             with NotionEpisodeStateStore(notion) as state_store:
                 for page in pages:
@@ -1174,7 +1193,12 @@ def _run_reopen_summary_failures(
                     )
                     state_store.save(
                         str(page["id"]),
-                        state.model_copy(update={"record": record}),
+                        state.model_copy(
+                            update={
+                                "record": record,
+                                "recovery_batch": recovery_batch,
+                            }
+                        ),
                     )
                     notion.update_page(
                         str(page["id"]),

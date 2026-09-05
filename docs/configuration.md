@@ -63,8 +63,18 @@ asr:
 | `asr_minutes_per_month` | `3000` | 每月计划处理分钟上限 |
 | `provider_poll_attempts` | `60` | 异步任务轮询上限 |
 
-`episodes_per_run` 已由运行编排强制执行。分钟字段只控制任务吞吐量，不涉及金额、
-计费估算或付费模型。
+`episodes_per_run` 与命令自身上限取较小值；`provider_poll_attempts` 控制每次恢复时的
+百炼轮询次数。实际 ASR 路由遵循 `provider_order` 的顺序。
+
+每日/月分钟限额按 UTC+8 统计，使用 Episode 的 `ASR Usage Ledger` 持久保存。
+每次进入一个 ASR Provider 前按 `Duration Seconds` 预留整集时长，失败和结果不确定的
+尝试不退还预留；切换 Provider 再次预留，恢复已有百炼任务只轮询、不重复预留。
+未知时长或额度不足时显示 `budget_paused`，不发起新 ASR。
+
+这是计划吞吐量限制，不是账单硬上限：Provider 内部模型切换、HTTP 重试和音频切片
+不逐次计账，历史无账本记录仅在可读取完成日期和时长时计入。
+所有队列写入须串行运行；仓库工作流共用 `xyz2notion-runtime` 并发组，本地不要同时启动
+多个队列，否则读写账本存在竞争。
 
 ## AI 处理门槛
 

@@ -237,3 +237,27 @@ def test_final_summary_recovery_is_bounded_audited_and_asr_free() -> None:
     assert "audit-notion-backlog" in text
     assert "retry_status" in text
     assert "process-asr" not in text
+    assert '--summary-only "${batch_args[@]}"' in text
+    assert 'batch_args=(--recovery-batch "$recovery_batch")' in text
+    assert 'recovery_batch="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${batch}"' in text
+
+
+def test_failed_asr_and_cover_steps_report_before_returning_failure() -> None:
+    for name in ("transcribe-asr.yml", "sync-metadata.yml", "retry-failed-ai.yml"):
+        _, workflow = _workflow(name)
+        matched = 0
+        for job in workflow["jobs"].values():
+            for step in job["steps"]:
+                script = step.get("run", "")
+                if (
+                    "xyz2notion process-asr" in script
+                    or "xyz2notion repair-notion-covers" in script
+                ):
+                    matched += 1
+                    assert "set +e" in script
+                    assert "status=$?" in script
+                    assert script.index("GITHUB_STEP_SUMMARY") < script.index('exit "$status"')
+        assert matched
+    text, _ = _workflow("notion-repair.yml")
+    assert "|| result_status=$?" in text
+    assert text.index("GITHUB_STEP_SUMMARY") < text.index('exit "$result_status"')

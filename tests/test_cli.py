@@ -1175,9 +1175,11 @@ def test_notion_only_repair_reports_missing_target_page(
     assert "Missing target page" in capsys.readouterr().err  # type: ignore[attr-defined]
 
 
+@pytest.mark.parametrize("failures", [0, 1])
 def test_notion_cover_repair_runs_without_xiaoyuzhou_credentials(
     capsys: object,
     monkeypatch: object,
+    failures: int,
 ) -> None:
     monkeypatch.setenv("NOTION_TOKEN", "secret_fixture_token")  # type: ignore[attr-defined]
     monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
@@ -1216,26 +1218,24 @@ def test_notion_cover_repair_runs_without_xiaoyuzhou_credentials(
 
         def repair(self, *, limit: int) -> object:
             assert limit == 1
-            return SimpleNamespace(repaired=1, skipped=2, failed=0)
+            return SimpleNamespace(repaired=1 - failures, skipped=2, failed=failures)
 
     monkeypatch.setattr(cli_module, "NotionClient", FakeNotion)  # type: ignore[attr-defined]
     monkeypatch.setattr(cli_module, "NotionInitializer", FakeInitializer)  # type: ignore[attr-defined]
     monkeypatch.setattr(cli_module, "NotionCoverLocalizer", FakeLocalizer)  # type: ignore[attr-defined]
-    assert (
-        main(
-            [
-                "repair-notion-covers",
-                "--limit",
-                "1",
-                "--confirm",
-                "REPAIR_1_NOTION_COVERS",
-            ]
-        )
-        == 0
-    )
+    assert main(
+        [
+            "repair-notion-covers",
+            "--limit",
+            "1",
+            "--confirm",
+            "REPAIR_1_NOTION_COVERS",
+        ]
+    ) == (5 if failures else 0)
     output = capsys.readouterr().out  # type: ignore[attr-defined]
-    assert "repaired=1" in output
-    assert "failed=0" in output
+    assert f"repaired={1 - failures}" in output
+    assert f"failed={failures}" in output
+    assert ("FAILED" if failures else "OK") in output
 
 
 def test_published_ai_reconciliation_runs_notion_only(

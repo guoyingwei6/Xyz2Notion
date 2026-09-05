@@ -314,7 +314,7 @@ def test_wait_result_url_polls_running_then_succeeds() -> None:
     [
         (401, "InvalidApiKey", ProviderErrorCategory.AUTHENTICATION),
         (400, "BadRequest", ProviderErrorCategory.INVALID_INPUT),
-        (503, "InternalError", ProviderErrorCategory.UNAVAILABLE),
+        (503, "InternalError", ProviderErrorCategory.UNKNOWN),
     ],
 )
 def test_transcribe_url_maps_dashscope_status_categories(
@@ -465,7 +465,7 @@ def test_request_json_rejects_non_mapping_payload(response: httpx.Response) -> N
     }
 
 
-def test_request_json_retries_transport_error_then_fails_safely() -> None:
+def test_submission_transport_error_is_not_replayed() -> None:
     sleeps: list[float] = []
 
     def handle(_request: httpx.Request) -> httpx.Response:
@@ -481,8 +481,27 @@ def test_request_json_retries_transport_error_then_fails_safely() -> None:
     with pytest.raises(ProviderError) as caught:
         client.transcribe_url("https://example.com/audio.mp3")
 
-    assert sleeps == [1.0]
+    assert sleeps == []
     assert caught.value.failure.category is ProviderErrorCategory.UNKNOWN
+
+
+@pytest.mark.parametrize("body", ["not json", "[]", "{}"])
+def test_invalid_submission_response_requires_audit(body: str) -> None:
+    requests = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, text=body)
+
+    client = DashScopeParaformerClient(
+        "fixture-key",
+        client=httpx.Client(transport=httpx.MockTransport(handle)),
+        models=("paraformer-v1", "paraformer-v2"),
+    )
+    with pytest.raises(ProviderError) as error:
+        client.submit_with_fallback("https://example.com/audio.mp3")
+    assert error.value.failure.code == "ambiguous_submission"
+    assert len(requests) == 1
 
 
 @pytest.mark.parametrize(

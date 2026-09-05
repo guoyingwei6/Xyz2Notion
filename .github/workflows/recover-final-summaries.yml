@@ -88,9 +88,13 @@ jobs:
           batch_timeout="25m"
           if [[ "$ITEMS_PER_BATCH" == "1" ]]; then batch_timeout="15m"; fi
           for ((batch=1; batch<=BATCHES; batch++)); do
+            batch_args=()
             if [[ "$MODE" == "reopen-final" ]]; then
+              recovery_batch="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${batch}"
+              batch_args=(--recovery-batch "$recovery_batch")
               reopen="$(uv run xyz2notion reopen-summary-failures \
                 --limit "$ITEMS_PER_BATCH" \
+                "${batch_args[@]}" \
                 --confirm "REOPEN_${ITEMS_PER_BATCH}_SUMMARY_FAILURES")"
               printf 'Batch %s reopen: %s\n' "$batch" "$reopen"
               if [[ "$reopen" =~ reopened=([0-9]+) ]]; then
@@ -117,6 +121,7 @@ jobs:
             set +e
             timeout --signal=TERM --kill-after=2m "$batch_timeout" \
               uv run xyz2notion process-manual-retries \
+              --summary-only "${batch_args[@]}" \
               --config "$config_path" --limit "$ITEMS_PER_BATCH" 2>&1 | tee "$retry_log"
             retry_status="${PIPESTATUS[0]}"
             set -e

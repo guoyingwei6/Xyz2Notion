@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from xyz2notion.notion.client import JsonObject
+from xyz2notion.notion.client import JsonObject, NotionAPIError
 
 
 class NotionRowsAPI(Protocol):
@@ -121,6 +121,14 @@ def _external_url(value: object) -> str | None:
     return None
 
 
+def _internal_file(value: object) -> bool:
+    return isinstance(value, Mapping) and (
+        value.get("type") in {"file", "file_upload"}
+        or isinstance(value.get("file"), Mapping)
+        or isinstance(value.get("file_upload"), Mapping)
+    )
+
+
 class NotionTable:
     """Cached stable-key index that only writes changed managed fields."""
 
@@ -203,12 +211,27 @@ class NotionTable:
         if existing is None:
             create_properties = dict(properties)
             create_properties.update(create_only_properties or {})
-            page = self.api.create_data_source_page(
-                self.data_source_id,
-                create_properties,
-                icon=icon,
-                cover=cover,
-            )
+            try:
+                page = self.api.create_data_source_page(
+                    self.data_source_id,
+                    create_properties,
+                    icon=icon,
+                    cover=cover,
+                )
+            except NotionAPIError as exc:
+                if exc.code != "ambiguous_write":
+                    raise
+                self._pages = self._load_pages()
+                recovered = self._pages.get(key)
+                if recovered is None:
+                    raise
+                current = recovered.get("properties", {})
+                if not isinstance(current, Mapping) or any(
+                    _canonical_property(current.get(name)) != _canonical_property(value)
+                    for name, value in create_properties.items()
+                ):
+                    raise
+                return UpsertResult(str(recovered["id"]), "unchanged")
             page_id = str(page["id"])
             self._pages[key] = {
                 **page,
@@ -234,9 +257,17 @@ class NotionTable:
         payload: JsonObject = {}
         if changed:
             payload["properties"] = changed
-        if icon is not None and _external_url(existing.get("icon")) != _external_url(icon):
+        if (
+            icon is not None
+            and not _internal_file(existing.get("icon"))
+            and _external_url(existing.get("icon")) != _external_url(icon)
+        ):
             payload["icon"] = dict(icon)
-        if cover is not None and _external_url(existing.get("cover")) != _external_url(cover):
+        if (
+            cover is not None
+            and not _internal_file(existing.get("cover"))
+            and _external_url(existing.get("cover")) != _external_url(cover)
+        ):
             payload["cover"] = dict(cover)
         if not payload:
             return UpsertResult(page_id=page_id, action="unchanged")

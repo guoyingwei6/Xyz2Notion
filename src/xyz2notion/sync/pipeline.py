@@ -87,6 +87,8 @@ def collect_metadata(
         wrapper = dict(item)
         raw = wrapper.get("episode")
         episode = dict(raw) if isinstance(raw, Mapping) else dict(wrapper)
+        if wrapper.get("playedAt") and not episode.get("playedAt"):
+            episode["playedAt"] = wrapper["playedAt"]
         eid = str(episode.get("eid") or "").strip()
         if not eid:
             continue

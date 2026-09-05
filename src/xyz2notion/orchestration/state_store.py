@@ -30,10 +30,13 @@ class EpisodeAIState(ContractModel):
     record: PipelineRecord
     provider: str | None = None
     provider_task_id: str | None = None
+    provider_model: str | None = None
+    submission_uncertain: bool = False
     source_task_id: str | None = None
     transcript: TranscriptResult | None = None
     summary: SummaryResult | None = None
     content_version: str | None = None
+    recovery_batch: str | None = None
     state_revision: int = Field(default=0, ge=0)
 
 

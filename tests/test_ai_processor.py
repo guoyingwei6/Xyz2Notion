@@ -1,8 +1,11 @@
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+import pytest
 from pydantic import SecretStr
 
+from xyz2notion.asr.audio import AudioPreparationError
+from xyz2notion.config import AsrProvider
 from xyz2notion.enrichment.client import FallbackSummaryClient
 from xyz2notion.enrichment.dashscope import DashScopeSummaryClient
 from xyz2notion.enrichment.local_qwen import LocalQwenSummaryClient
@@ -19,6 +22,7 @@ from xyz2notion.models import (
     TranscriptTimingQuality,
 )
 from xyz2notion.notion.client import JsonObject
+from xyz2notion.orchestration.asr_budget import AsrDeferredError
 from xyz2notion.orchestration.processor import (
     MAX_RETRY_ATTEMPTS,
     EpisodeAIProcessor,
@@ -188,8 +192,9 @@ class DashScopeProcessor(SiliconProcessor):
         super().__init__(*args, **kwargs)
         self.dashscope_failures = dashscope_failures
         self.dashscope_calls = 0
+        self.dashscope = self  # type: ignore[assignment]
 
-    def _dashscope(self, _candidate: EpisodeCandidate) -> TranscriptResult:
+    def submit_with_fallback(self, _audio_url: str) -> tuple[str, str]:
         self.dashscope_calls += 1
         if self.dashscope_calls <= self.dashscope_failures:
             raise ProviderError(
@@ -199,11 +204,19 @@ class DashScopeProcessor(SiliconProcessor):
                     message="quota",
                 )
             )
+        return "task", "model"
+
+    def wait_result_url(self, task_id: str) -> str:
+        assert self.state_store.state.provider_task_id == task_id
+        assert not self.state_store.state.submission_uncertain
+        return "https://example.com/result"
+
+    def fetch_transcript(self, _url: str, **_kwargs: object) -> TranscriptResult:
         return transcript("dashscope")
 
 
 class SensitiveDashScopeProcessor(DashScopeProcessor):
-    def _dashscope(self, _candidate: EpisodeCandidate) -> TranscriptResult:
+    def submit_with_fallback(self, _audio_url: str) -> tuple[str, str]:
         self.dashscope_calls += 1
         raise ProviderError(
             ProviderFailure(
@@ -437,6 +450,113 @@ def test_dashscope_is_first_asr_provider() -> None:
     assert processor.dashscope_calls == 1
     assert processor.asr_calls == 0
     assert store.state.provider == "dashscope"
+
+
+def test_poll_timeout_resumes_saved_task_without_fallback_or_resubmit() -> None:
+    class SlowProcessor(DashScopeProcessor):
+        polls = 0
+
+        def wait_result_url(self, task_id: str) -> str:
+            super().wait_result_url(task_id)
+            self.polls += 1
+            if self.polls == 1:
+                raise ProviderError(
+                    ProviderFailure(
+                        provider="dashscope",
+                        category=ProviderErrorCategory.TIMEOUT,
+                        message="still running",
+                    )
+                )
+            return "https://example.com/result"
+
+    store = FakeStateStore()
+    processor = SlowProcessor(FakeNotion(), store, siliconflow=object())
+    first = processor.process_asr_only(CANDIDATE, {})
+    assert first.state is PipelineState.FAILED_RETRYABLE
+    assert store.state.record.resume_state is PipelineState.ASR_SUBMITTED
+    assert store.state.provider_task_id == "task"
+    second = processor.process_asr_only(CANDIDATE, {}, retry_failed=True)
+    assert second.state is PipelineState.TRANSCRIBED
+    assert processor.dashscope_calls == 1
+    assert processor.asr_calls == 0
+
+
+@pytest.mark.parametrize("asr_only", [True, False])
+def test_audio_preparation_failure_is_checkpointed(asr_only: bool) -> None:
+    class BrokenAudio(SiliconProcessor):
+        def _siliconflow(self, _candidate: EpisodeCandidate) -> TranscriptResult:
+            raise AudioPreparationError("ffmpeg failed")
+
+    store = FakeStateStore()
+    processor = BrokenAudio(FakeNotion(), store, siliconflow=object())
+    process = processor.process_asr_only if asr_only else processor.process
+    assert process(CANDIDATE, {}).action == "failed"
+    assert store.state.record.state is PipelineState.FAILED_RETRYABLE
+    assert store.state.record.resume_state is PipelineState.DISCOVERED
+    assert "ffmpeg" in store.state.record.failure.message
+
+
+def test_provider_order_is_respected() -> None:
+    processor = DashScopeProcessor(
+        FakeNotion(),
+        FakeStateStore(),
+        siliconflow=object(),
+        provider_order=(AsrProvider.SILICONFLOW, AsrProvider.DASHSCOPE),
+    )
+    assert processor.process_asr_only(CANDIDATE, {}).state is PipelineState.TRANSCRIBED
+    assert processor.asr_calls == 1
+    assert processor.dashscope_calls == 0
+
+
+def test_uncertain_submission_never_reenters_provider() -> None:
+    store = FakeStateStore(
+        EpisodeAIState(
+            record=PipelineRecord(eid="episode"),
+            submission_uncertain=True,
+        )
+    )
+    processor = DashScopeProcessor(FakeNotion(), store, siliconflow=object())
+    assert processor.process_asr_only(CANDIDATE, {}).state is PipelineState.FAILED_FINAL
+    assert processor.dashscope_calls == processor.asr_calls == 0
+
+
+def test_ambiguous_submission_keeps_durable_intent_and_stops_fallback() -> None:
+    class LostResponse(DashScopeProcessor):
+        def submit_with_fallback(self, _audio_url: str) -> tuple[str, str]:
+            assert self.state_store.state.submission_uncertain
+            raise ProviderError(
+                ProviderFailure(
+                    provider="dashscope",
+                    category=ProviderErrorCategory.UNKNOWN,
+                    message="response lost",
+                    code="ambiguous_submission",
+                )
+            )
+
+    store = FakeStateStore()
+    processor = LostResponse(FakeNotion(), store, siliconflow=object())
+    assert processor.process_asr_only(CANDIDATE, {}).state is PipelineState.FAILED_FINAL
+    assert store.state.submission_uncertain
+    assert processor.asr_calls == 0
+
+
+@pytest.mark.parametrize("asr_only", [True, False])
+def test_budget_pause_starts_no_provider(asr_only: bool) -> None:
+    class ExhaustedBudget:
+        def reserve(self, _page_id: str, _duration: int) -> None:
+            raise AsrDeferredError("daily_limit")
+
+    store = FakeStateStore()
+    processor = DashScopeProcessor(
+        FakeNotion(),
+        store,
+        siliconflow=object(),
+        asr_budget=ExhaustedBudget(),
+    )
+    process = processor.process_asr_only if asr_only else processor.process
+    assert process(CANDIDATE, {}).action == "budget_paused"
+    assert processor.dashscope_calls == processor.asr_calls == 0
+    assert store.saved == []
 
 
 def test_dashscope_failure_falls_back_to_siliconflow() -> None:

@@ -58,13 +58,14 @@ jobs:
           NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
         run: |
           set -euo pipefail
+          result_status=0
           case "$OPERATION" in
             audit-backlog)
               result="$(uv run xyz2notion audit-notion-backlog)"
               ;;
             repair-covers)
               result="$(uv run xyz2notion repair-notion-covers \
-                --limit "$LIMIT" --confirm "$CONFIRMATION")"
+                --limit "$LIMIT" --confirm "$CONFIRMATION" 2>&1)" || result_status=$?
               ;;
             reconcile-published-ai)
               result="$(uv run xyz2notion reconcile-published-ai \
@@ -97,3 +98,4 @@ jobs:
             printf 'Operation: `%s`\n\n' "$OPERATION"
             printf '```text\n%s\n```\n' "$result"
           } >> "$GITHUB_STEP_SUMMARY"
+          exit "$result_status"

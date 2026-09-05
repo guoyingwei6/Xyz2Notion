@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 from pydantic import SecretStr
 
 from xyz2notion.asr.audio import AudioPreparationError, validate_public_audio_url
@@ -13,6 +14,7 @@ from xyz2notion.asr.dashscope import DashScopeParaformerClient
 from xyz2notion.asr.local_whisper import LocalWhisperClient
 from xyz2notion.asr.pipeline import transcribe_siliconflow_episode
 from xyz2notion.asr.siliconflow import SiliconFlowClient
+from xyz2notion.config import AsrProvider
 from xyz2notion.enrichment.client import StructuredSummaryClient, chain_summary_clients
 from xyz2notion.enrichment.dashscope import DashScopeSummaryClient
 from xyz2notion.enrichment.local_qwen import LocalQwenSummaryClient
@@ -31,6 +33,7 @@ from xyz2notion.notion.episode_page import (
     EpisodePageRenderer,
 )
 from xyz2notion.notion.mindmap_database import MindmapDatabaseSynchronizer
+from xyz2notion.orchestration.asr_budget import AsrBudget, AsrDeferredError
 from xyz2notion.orchestration.state_store import (
     EpisodeAIState,
     NotionEpisodeStateStore,
@@ -54,6 +57,7 @@ class EpisodeCandidate:
     eid: str
     title: str
     audio_url: str
+    duration_seconds: int = 0
 
 
 @dataclass(frozen=True)
@@ -185,7 +189,15 @@ def episode_candidates(
                 # A stale/non-public legacy URL must not abort the whole queue;
                 # leave the row pending and let a later metadata sync repair it.
                 continue
-            result.append(EpisodeCandidate(str(page["id"]), eid, title, audio_url))
+            result.append(
+                EpisodeCandidate(
+                    str(page["id"]),
+                    eid,
+                    title,
+                    audio_url,
+                    int(_property_number(properties, "Duration Seconds")),
+                )
+            )
     return tuple(result)
 
 
@@ -214,6 +226,8 @@ class EpisodeAIProcessor:
         summary_policy: SummaryPolicy | None = None,
         summary_enabled: bool = True,
         mindmap_data_source_id: str | None = None,
+        provider_order: tuple[AsrProvider, ...] = tuple(AsrProvider),
+        asr_budget: AsrBudget | None = None,
     ) -> None:
         self.notion = notion
         self.state_store = state_store
@@ -224,9 +238,14 @@ class EpisodeAIProcessor:
         self.summary_policy = summary_policy or SummaryPolicy()
         self.summary_enabled = summary_enabled
         self.mindmap_data_source_id = mindmap_data_source_id
+        self.provider_order = provider_order
+        self.asr_budget = asr_budget
+        self._checkpoint: EpisodeAIState | None = None
 
     def _save(self, page_id: str, state: EpisodeAIState) -> EpisodeAIState:
-        return self.state_store.save(page_id, state)
+        saved = self.state_store.save(page_id, state)
+        self._checkpoint = saved
+        return saved
 
     def _siliconflow(self, candidate: EpisodeCandidate) -> TranscriptResult:
         if self.siliconflow is None:
@@ -235,14 +254,6 @@ class EpisodeAIProcessor:
                 "No usable ASR provider is configured",
             )
         return transcribe_siliconflow_episode(candidate.audio_url, self.siliconflow)
-
-    def _dashscope(self, candidate: EpisodeCandidate) -> TranscriptResult:
-        if self.dashscope is None:
-            raise _failure(
-                ProviderErrorCategory.UNSUPPORTED,
-                "DashScope Paraformer provider is not configured",
-            )
-        return self.dashscope.transcribe_url(candidate.audio_url)
 
     @staticmethod
     def _is_sensitive_asr_failure(error: ProviderError) -> bool:
@@ -299,8 +310,13 @@ class EpisodeAIProcessor:
             raise ProviderError(
                 ProviderFailure(
                     provider="notion_publish",
-                    category=ProviderErrorCategory.UNAVAILABLE,
+                    category=(
+                        ProviderErrorCategory.UNKNOWN
+                        if isinstance(exc, NotionAPIError) and exc.code == "ambiguous_write"
+                        else ProviderErrorCategory.UNAVAILABLE
+                    ),
                     message=f"Notion episode publishing failed: {type(exc).__name__}",
+                    code=exc.code if isinstance(exc, NotionAPIError) else None,
                 )
             ) from exc
 
@@ -310,6 +326,11 @@ class EpisodeAIProcessor:
         state: EpisodeAIState,
     ) -> tuple[EpisodeAIState, bool]:
         """Return updated state and whether the task is still asynchronous."""
+        if state.submission_uncertain:
+            raise _failure(
+                ProviderErrorCategory.UNKNOWN,
+                "ASR submission outcome is unknown; audit the provider before an explicit reset",
+            )
         if state.record.state in {
             PipelineState.ASR_SUBMITTED,
             PipelineState.ASR_RUNNING,
@@ -325,9 +346,17 @@ class EpisodeAIProcessor:
                 and self.dashscope is not None
             ):
                 result_url = self.dashscope.wait_result_url(state.provider_task_id)
-                transcript = self.dashscope.fetch_transcript(
-                    result_url,
-                    task_id=state.provider_task_id,
+                transcript = (
+                    self.dashscope.fetch_transcript(
+                        result_url,
+                        task_id=state.provider_task_id,
+                        model=state.provider_model,
+                    )
+                    if state.provider_model
+                    else self.dashscope.fetch_transcript(
+                        result_url,
+                        task_id=state.provider_task_id,
+                    )
                 )
                 record = state.record.transition(PipelineState.TRANSCRIBED)
                 return (
@@ -344,51 +373,78 @@ class EpisodeAIProcessor:
                 )
             return state, True
 
-        if state.provider in {None, "dashscope"} and self.dashscope is not None:
+        clients = {
+            AsrProvider.DASHSCOPE: self.dashscope,
+            AsrProvider.SILICONFLOW: self.siliconflow,
+            AsrProvider.LOCAL_WHISPER: self.local_whisper,
+        }
+        last_error: ProviderError | None = None
+        for provider in self.provider_order:
+            if clients[provider] is None:
+                continue
+            if self.asr_budget is not None:
+                self.asr_budget.reserve(candidate.page_id, candidate.duration_seconds)
+            if provider is AsrProvider.DASHSCOPE:
+                if self.dashscope is None:
+                    raise AssertionError("DashScope client missing after availability check")
+                # Save intent first: even a crash between acceptance and task-ID
+                # persistence must not silently cause a second paid submission.
+                state = self._save(
+                    candidate.page_id,
+                    state.model_copy(update={"submission_uncertain": True}),
+                )
+                try:
+                    task_id, model = self.dashscope.submit_with_fallback(candidate.audio_url)
+                except ProviderError as exc:
+                    if exc.failure.code != "ambiguous_submission":
+                        state = self._save(
+                            candidate.page_id,
+                            state.model_copy(update={"submission_uncertain": False}),
+                        )
+                    if self._is_sensitive_asr_failure(exc) or state.submission_uncertain:
+                        raise
+                    last_error = exc
+                    continue
+                state = self._save(
+                    candidate.page_id,
+                    state.model_copy(
+                        update={
+                            "record": state.record.transition(PipelineState.ASR_SUBMITTED),
+                            "provider": "dashscope",
+                            "provider_task_id": task_id,
+                            "provider_model": model,
+                            "submission_uncertain": False,
+                        }
+                    ),
+                )
+                return self._advance_asr(candidate, state)
             try:
-                transcript = self._dashscope(candidate)
+                transcript = (
+                    self._siliconflow(candidate)
+                    if provider is AsrProvider.SILICONFLOW
+                    else self._local_whisper(candidate)
+                )
             except ProviderError as exc:
                 if self._is_sensitive_asr_failure(exc):
                     raise
-                if self.siliconflow is None and self.local_whisper is None:
-                    raise
-            else:
-                record = state.record.transition(PipelineState.TRANSCRIBED)
-                return (
-                    state.model_copy(
-                        update={
-                            "record": record,
-                            "provider": transcript.provider,
-                            "provider_task_id": transcript.provider_task_id,
-                            "transcript": transcript,
-                            "summary": None,
-                        }
-                    ),
-                    False,
-                )
-
-        if self.siliconflow is not None:
-            try:
-                transcript = self._siliconflow(candidate)
-            except ProviderError:
-                if self.local_whisper is None:
-                    raise
-                transcript = self._local_whisper(candidate)
-        else:
-            transcript = self._local_whisper(candidate)
-        record = state.record.transition(PipelineState.TRANSCRIBED)
-        return (
-            state.model_copy(
-                update={
-                    "record": record,
-                    "provider": transcript.provider,
-                    "provider_task_id": transcript.provider_task_id,
-                    "transcript": transcript,
-                    "summary": None,
-                }
-            ),
-            False,
-        )
+                last_error = exc
+                continue
+            record = state.record.transition(PipelineState.TRANSCRIBED)
+            return (
+                state.model_copy(
+                    update={
+                        "record": record,
+                        "provider": transcript.provider,
+                        "provider_task_id": transcript.provider_task_id,
+                        "transcript": transcript,
+                        "summary": None,
+                    }
+                ),
+                False,
+            )
+        if last_error is not None:
+            raise last_error
+        return state, True
 
     def _fail(
         self,
@@ -421,6 +477,7 @@ class EpisodeAIProcessor:
         only_failed: bool = False,
     ) -> ProcessingOutcome:
         state = self.state_store.load(page, candidate.eid)
+        self._checkpoint = state
         if only_failed and state.record.state is not PipelineState.FAILED_RETRYABLE:
             return ProcessingOutcome(candidate.eid, "skipped", state.record.state)
         if state.record.state is PipelineState.PUBLISHED:
@@ -492,7 +549,20 @@ class EpisodeAIProcessor:
                 return ProcessingOutcome(candidate.eid, published.action, state.record.state)
             return ProcessingOutcome(candidate.eid, "pending", state.record.state)
         except ProviderError as exc:
-            return self._fail(candidate, state, exc)
+            return self._fail(candidate, self._checkpoint or state, exc)
+        except AsrDeferredError as exc:
+            return ProcessingOutcome(candidate.eid, "budget_paused", state.record.state, str(exc))
+        except (AudioPreparationError, OSError, httpx.HTTPError, ValueError) as exc:
+            return self._fail(
+                candidate,
+                self._checkpoint or state,
+                _failure(
+                    ProviderErrorCategory.UNAVAILABLE,
+                    f"Audio preparation or response validation failed: {type(exc).__name__}: {exc}"
+                    if isinstance(exc, AudioPreparationError)
+                    else f"Audio preparation or response validation failed: {type(exc).__name__}",
+                ),
+            )
 
     def process_asr_only(
         self,
@@ -503,6 +573,7 @@ class EpisodeAIProcessor:
     ) -> ProcessingOutcome:
         """Advance only ASR checkpoints and stop permanently at TRANSCRIBED."""
         state = self.state_store.load(page, candidate.eid)
+        self._checkpoint = state
         asr_states = {
             PipelineState.DISCOVERED,
             PipelineState.ASR_SUBMITTED,
@@ -531,7 +602,20 @@ class EpisodeAIProcessor:
                 detail=state.provider or "unknown",
             )
         except ProviderError as exc:
-            return self._fail(candidate, state, exc)
+            return self._fail(candidate, self._checkpoint or state, exc)
+        except AsrDeferredError as exc:
+            return ProcessingOutcome(candidate.eid, "budget_paused", state.record.state, str(exc))
+        except (AudioPreparationError, OSError, httpx.HTTPError, ValueError) as exc:
+            return self._fail(
+                candidate,
+                self._checkpoint or state,
+                _failure(
+                    ProviderErrorCategory.UNAVAILABLE,
+                    f"Audio preparation or response validation failed: {type(exc).__name__}: {exc}"
+                    if isinstance(exc, AudioPreparationError)
+                    else f"Audio preparation or response validation failed: {type(exc).__name__}",
+                ),
+            )
 
 
 def build_summary_client(
@@ -569,6 +653,7 @@ def build_provider_clients(
     dashscope_api_key: SecretStr | None = None,
     dashscope_model: str = "paraformer-v1",
     dashscope_models: tuple[str, ...] | None = None,
+    provider_poll_attempts: int = 60,
     dashscope_summary_api_key: SecretStr | None = None,
     dashscope_summary_model: str = "qwen-flash",
     siliconflow_asr_api_key: SecretStr | None,
@@ -598,6 +683,7 @@ def build_provider_clients(
             dashscope_api_key,
             model=dashscope_model,
             models=dashscope_models,
+            poll_attempts=provider_poll_attempts,
         )
         if dashscope_api_key is not None
         else None,

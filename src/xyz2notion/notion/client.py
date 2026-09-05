@@ -159,6 +159,11 @@ class NotionClient:
         """Perform one safe request, retrying transient failures."""
         url = f"{self.base_url}/{path.lstrip('/')}"
         validate_credential_destination(url, CredentialKind.NOTION)
+        non_idempotent = (
+            method.upper() == "POST"
+            and path.rstrip("/") != "/search"
+            and not path.rstrip("/").endswith("/query")
+        ) or (method.upper() == "PATCH" and path.rstrip("/").endswith("/children"))
         for attempt in range(self.max_retries + 1):
             response: httpx.Response | None = None
             try:
@@ -170,14 +175,36 @@ class NotionClient:
                     json=json_body,
                 )
             except (httpx.TimeoutException, httpx.TransportError) as exc:
+                if non_idempotent:
+                    raise NotionAPIError(
+                        f"Notion {method.upper()} {path}: write outcome is unknown "
+                        f"after {type(exc).__name__}; reconcile before retrying",
+                        code="ambiguous_write",
+                    ) from exc
                 if attempt >= self.max_retries:
                     raise NotionAPIError(
                         f"Notion transport failure: {type(exc).__name__}",
                         retryable=True,
                     ) from exc
             else:
+                if non_idempotent and response.status_code in self._retryable_statuses - {429}:
+                    raise NotionAPIError(
+                        f"Notion {method.upper()} {path}: write outcome is unknown "
+                        f"after HTTP {response.status_code}; reconcile before retrying",
+                        status_code=response.status_code,
+                        code="ambiguous_write",
+                    )
                 if response.status_code not in self._retryable_statuses:
-                    return self._decode_response(response)
+                    try:
+                        return self._decode_response(response)
+                    except NotionAPIError as exc:
+                        if non_idempotent and not response.is_error:
+                            raise NotionAPIError(
+                                f"Notion {method.upper()} {path}: invalid write response; "
+                                "reconcile before retrying",
+                                code="ambiguous_write",
+                            ) from exc
+                        raise
                 if attempt >= self.max_retries:
                     self._raise_response_error(response, retryable=True)
             self._sleep(self._retry_delay(response, attempt))

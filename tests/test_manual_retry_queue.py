@@ -155,6 +155,31 @@ def retryable_state(eid: str, *, resume_state: PipelineState) -> EpisodeAIState:
     return EpisodeAIState(record=record)
 
 
+def test_summary_recovery_selects_only_the_exact_batch_and_summary_stage() -> None:
+    states = {
+        "asr": normal_state("asr", PipelineState.DISCOVERED),
+        "other": normal_state("other", PipelineState.TRANSCRIBED),
+        "target": normal_state("target", PipelineState.TRANSCRIBED),
+    }
+    for key in ("asr", "target"):
+        states[key] = states[key].model_copy(update={"recovery_batch": "batch"})
+    selected = select_manual_retry_work(
+        [episode(key) for key in states],
+        Store(states),
+        summary_only=True,
+        recovery_batch="batch",
+    )
+    assert [item.candidate.page_id for item in selected] == ["target"]
+    assert {
+        item.candidate.page_id
+        for item in select_manual_retry_work(
+            [episode(key) for key in states],
+            Store(states),
+            summary_only=True,
+        )
+    } == {"other", "target"}
+
+
 def test_manual_retry_selection_is_checked_and_category_ordered() -> None:
     pages = [
         episode("heard", played_seconds=120),
@@ -493,3 +518,25 @@ def test_run_manual_retry_queue_is_manual_first_and_stage_aware(
         "Manual retry item 2/2 started (checkpoint=FAILED_RETRYABLE)",
         "Manual retry item 2/2 finished (action=pending; state=ASR_RUNNING)",
     ]
+    calls.clear()
+    state_context.states["final-favorite"] = normal_state(
+        "final-favorite",
+        PipelineState.TRANSCRIBED,
+    ).model_copy(update={"recovery_batch": "batch"})
+    state_context.states["retry-liked"] = normal_state(
+        "retry-liked",
+        PipelineState.DISCOVERED,
+    )
+    result = queue_module.run_manual_retry_queue(
+        config_path="config.yaml",
+        summary_only=True,
+        recovery_batch="batch",
+    )
+    assert calls == [("final-favorite", False)]
+    provider_kwargs = built_kwargs["provider_kwargs"]
+    assert provider_kwargs["dashscope_api_key"] is None
+    assert provider_kwargs["siliconflow_asr_api_key"] is None
+    assert provider_kwargs["local_whisper_model"] is None
+    assert built_kwargs["provider_order"] == ()
+    assert built_kwargs["asr_budget"] is None
+    assert result.selected == 1

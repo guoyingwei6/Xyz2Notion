@@ -8,6 +8,7 @@ import pytest
 
 import xyz2notion.cli as cli_module
 from xyz2notion.cli import ASR_INTER_EPISODE_SECONDS, build_parser, main
+from xyz2notion.config import AppConfig, LimitConfig
 from xyz2notion.models import (
     ProviderError,
     ProviderErrorCategory,
@@ -220,9 +221,11 @@ def test_process_asr_cli_enforces_bounded_modes_and_limits() -> None:
         parser.parse_args(["process-asr", "--limit", "3"])
 
 
+@pytest.mark.parametrize("failure", [False, True])
 def test_process_asr_cli_runs_two_sequential_candidates_with_safe_aggregate_output(
     capsys: object,
     monkeypatch: object,
+    failure: bool,
 ) -> None:
     monkeypatch.setenv("NOTION_TOKEN", "fixture-notion")  # type: ignore[attr-defined]
     monkeypatch.setenv("NOTION_PAGE_ID", "fixture-page")  # type: ignore[attr-defined]
@@ -263,6 +266,8 @@ def test_process_asr_cli_runs_two_sequential_candidates_with_safe_aggregate_outp
             assert candidate_page in pages
             assert retry_failed is False
             processed.append(candidate.page_id)
+            if failure:
+                return ProcessingOutcome(candidate.eid, "failed", PipelineState.FAILED_FINAL)
             if candidate.page_id == "page-running":
                 return ProcessingOutcome(candidate.eid, "pending", PipelineState.ASR_RUNNING)
             return ProcessingOutcome(candidate.eid, "transcribed", PipelineState.TRANSCRIBED)
@@ -275,34 +280,43 @@ def test_process_asr_cli_runs_two_sequential_candidates_with_safe_aggregate_outp
     monkeypatch.setattr(cli_module, "build_provider_clients", lambda **_kwargs: providers)  # type: ignore[attr-defined]
     monkeypatch.setattr(cli_module.time, "sleep", sleeps.append)  # type: ignore[attr-defined]
 
-    assert (
-        main(
-            [
-                "process-asr",
-                "--config",
-                "config.example.yaml",
-                "--mode",
-                "backlog",
-                "--limit",
-                "2",
-            ]
-        )
-        == 0
-    )
+    assert main(
+        [
+            "process-asr",
+            "--config",
+            "config.example.yaml",
+            "--mode",
+            "backlog",
+            "--limit",
+            "2",
+        ]
+    ) == (5 if failure else 0)
     output = capsys.readouterr().out  # type: ignore[attr-defined]
     assert processed == ["page-running", "page-new"]
     assert sleeps == [60]
     assert "mode=backlog" in output
     assert "selected=2" in output
-    assert "remaining=1" in output
+    assert f"remaining={0 if failure else 1}" in output
     assert "interval_seconds=60" in output
-    assert "pending=1" in output
-    assert "transcribed=1" in output
-    assert "ASR_RUNNING=1" in output
-    assert "TRANSCRIBED=1" in output
+    if failure:
+        assert "queue FAILED" in output
+        assert "failed=2" in output
+    else:
+        assert "pending=1" in output
+        assert "transcribed=1" in output
+        assert "ASR_RUNNING=1" in output
+        assert "TRANSCRIBED=1" in output
     assert "providers: unknown=2" in output
     assert "private title" not in output
     assert "private-eid" not in output
+    processed.clear()
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        cli_module,
+        "load_config",
+        lambda _path: AppConfig(limits=LimitConfig(episodes_per_run=1)),
+    )
+    main(["process-asr", "--config", "config.example.yaml", "--limit", "2"])
+    assert len(processed) == 1
 
 
 def test_process_asr_cli_reports_missing_config(capsys: object) -> None:
