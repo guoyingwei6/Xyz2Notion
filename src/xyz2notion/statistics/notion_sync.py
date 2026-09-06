@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import calendar
 import hashlib
+import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Protocol
+from urllib.parse import unquote, urlsplit
 
 from xyz2notion.models import PeriodKind, local_today
 from xyz2notion.notion.client import JsonObject, rich_text
@@ -337,6 +339,24 @@ def _heatmap_hash_from_url(url: str, year: int) -> str:
     return url.removeprefix(prefix) if url.startswith(prefix) else ""
 
 
+def _legacy_heatmap_image(block: Mapping[str, Any], year: int) -> bool:
+    image = block.get("image")
+    if block.get("type") != "image" or not isinstance(image, Mapping):
+        return False
+    # Only uploaded files use our filename contract; external images are user-owned.
+    file = image.get("file")
+    if image.get("type") != "file" or not isinstance(file, Mapping):
+        return False
+    url = file.get("url")
+    if not isinstance(url, str):
+        return False
+    try:
+        filename = unquote(urlsplit(url).path.rsplit("/", 1)[-1])
+    except ValueError:
+        return False
+    return re.fullmatch(rf"xyz2notion-heatmap-{year}-[0-9a-f]{{16}}\.png", filename) is not None
+
+
 class HeatmapPublisher:
     """Upload and reconcile exactly one image block per calendar year."""
 
@@ -377,6 +397,7 @@ class HeatmapPublisher:
                 owned_image = block.get("type") == "image" and (
                     caption.startswith(marker_prefix)
                     or bool(_heatmap_hash_from_url(marker_url, year))
+                    or _legacy_heatmap_image(block, year)
                 )
                 if owned_image:
                     managed_images.append(block)
@@ -398,16 +419,22 @@ class HeatmapPublisher:
                     walk(str(child_id))
 
         walk(self.root_page_id)
-        self._archive_duplicate_images(
-            keep_block_id=str(managed_block.get("id") or "") if managed_block else "",
-            candidates=managed_images,
-        )
+        if managed_block is None and managed_images:
+            managed_block = managed_images[0]
+
+        def archive_duplicates() -> None:
+            self._archive_duplicate_images(
+                keep_block_id=str(managed_block.get("id") or "") if managed_block else "",
+                candidates=managed_images,
+            )
+
         marker_hash = (
             _heatmap_hash_from_url(_block_marker_url(managed_marker), year)
             if managed_marker is not None
             else ""
         )
         if managed_block is not None and marker_hash == content_hash:
+            archive_duplicates()
             return HeatmapPublishResult(
                 action="unchanged",
                 content_hash=content_hash,
@@ -429,6 +456,7 @@ class HeatmapPublisher:
                         }
                     },
                 )
+                archive_duplicates()
                 return HeatmapPublishResult(
                     action="updated",
                     content_hash=content_hash,
@@ -451,6 +479,7 @@ class HeatmapPublisher:
             image_update = dict(image)
             image_update.pop("type", None)
             self.api.update_block(block_id, {"image": image_update})
+            archive_duplicates()
             return HeatmapPublishResult(
                 action="updated",
                 content_hash=content_hash,

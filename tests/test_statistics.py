@@ -574,6 +574,93 @@ def _rich(value: str) -> JsonObject:
     return {"rich_text": [{"plain_text": value}]}
 
 
+def _legacy_image(block_id: str, filename: str) -> JsonObject:
+    return {
+        "id": block_id,
+        "type": "image",
+        "image": {
+            "type": "file",
+            "file": {"url": f"https://files.example/attachment/{filename}?signature=temporary"},
+            "caption": [],
+        },
+    }
+
+
+@pytest.mark.parametrize("legacy_first", [True, False])
+def test_named_legacy_heatmap_deduplicates_against_marked_image(legacy_first: bool) -> None:
+    fake = FakeStatisticsNotion()
+    publisher = HeatmapPublisher(fake, "root")
+    first = publisher.publish(2026, ())
+    legacy = _legacy_image("legacy", "xyz2notion-heatmap-2026-df068d7abaeea738.png")
+    fake.blocks["root"].insert(0 if legacy_first else 1, legacy)
+    fake.blocks["root"].extend(
+        [
+            _legacy_image("previous", "xyz2notion-heatmap-2025-df068d7abaeea738.png"),
+            _legacy_image("personal", "holiday.png"),
+        ]
+    )
+
+    assert publisher.publish(2026, ()).block_id == first.block_id
+    assert fake.deleted == ["legacy"]
+    assert publisher.publish(2026, ()).action == "unchanged"
+    assert fake.uploads == 1
+    assert len(fake.blocks["root"]) == 3
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "xyz2notion-heatmap-2026-df068d7abaeea738.png",
+        "xyz2notion%2Dheatmap%2D2026%2Ddf068d7abaeea738.png",
+    ],
+)
+def test_named_legacy_heatmap_migrates_in_place(filename: str) -> None:
+    fake = FakeStatisticsNotion()
+    fake.blocks["root"] = [_legacy_image("legacy", filename)]
+    publisher = HeatmapPublisher(fake, "root")
+    assert publisher.publish(2026, ()).block_id == "legacy"
+    assert publisher.publish(2026, ()).action == "unchanged"
+    assert fake.uploads == 1
+    assert len(fake.blocks["root"]) == 1
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "my-xyz2notion-heatmap-2026-df068d7abaeea738.png",
+        "xyz2notion-heatmap-2026-df068d7abaeea738.png.bak",
+        "xyz2notion-heatmap-2026-not-a-hash.png",
+        "xyz2notion-heatmap-2026-df068d7abaeea7380.png",
+        "holiday.png?name=xyz2notion-heatmap-2026-df068d7abaeea738.png",
+    ],
+)
+def test_heatmap_preserves_similarly_named_personal_images(filename: str) -> None:
+    fake = FakeStatisticsNotion()
+    fake.blocks["root"] = [_legacy_image("personal", filename)]
+    assert HeatmapPublisher(fake, "root").publish(2026, ()).action == "created"
+    assert fake.deleted == []
+    assert len(fake.blocks["root"]) == 2
+
+
+def test_heatmap_upload_failure_preserves_legacy_duplicates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeStatisticsNotion()
+    fake.blocks["root"] = [
+        _legacy_image("first", "xyz2notion-heatmap-2026-df068d7abaeea738.png"),
+        _legacy_image("second", "xyz2notion-heatmap-2026-b84d96ca1aa8e66e.png"),
+    ]
+
+    def fail(*args: Any) -> str:
+        raise RuntimeError("upload failed")
+
+    monkeypatch.setattr(fake, "upload_file", fail)
+    with pytest.raises(RuntimeError, match="upload failed"):
+        HeatmapPublisher(fake, "root").publish(2026, ())
+    assert fake.deleted == []
+    assert len(fake.blocks["root"]) == 2
+
+
 def test_heatmap_removes_only_duplicate_managed_current_year_images() -> None:
     fake = FakeStatisticsNotion()
     image = {
