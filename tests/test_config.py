@@ -24,20 +24,21 @@ from xyz2notion.config import (
 def test_example_config_is_valid_and_secret_free() -> None:
     config = load_config("config.example.yaml")
     assert config.schema_version == 1
-    assert config.asr.provider_order == (
-        AsrProvider.DASHSCOPE,
-        AsrProvider.SILICONFLOW,
-        AsrProvider.LOCAL_WHISPER,
-    )
-    assert config.asr.dashscope_model == "paraformer-v1"
+    assert config.asr.provider_order == (AsrProvider.DASHSCOPE,)
+    assert config.asr.dashscope_model == "paraformer-v2"
     assert config.asr.dashscope_models == (
-        "paraformer-v1",
         "paraformer-v2",
+        "fun-asr",
+        "fun-asr-mtl",
+        "qwen-audio-3.0-asr-flash-filetrans",
+        "qwen3-asr-flash-filetrans",
+        "paraformer-v1",
         "paraformer-mtl-v1",
     )
+    assert config.asr.dashscope_free_tier_confirmed_models == ()
     assert config.summary.dashscope_model == "qwen-flash"
     assert config.summary.siliconflow_models == ("Qwen/Qwen3-8B",)
-    assert config.summary.local_qwen_fallback is False
+    assert config.summary.local_qwen_fallback is True
     assert config.summary.prompt_version == "summary-v1"
     assert config.summary.chunk_tokens == 12_000
     assert config.summary.chunk_minutes == 60
@@ -91,6 +92,30 @@ def test_asr_policy_rejects_unsafe_configuration(values: dict[str, object]) -> N
 
 def test_empty_provider_order_intentionally_pauses_asr() -> None:
     assert AsrConfig(provider_order=()).provider_order == ()
+
+
+def test_free_tier_confirmations_are_explicit_and_validated() -> None:
+    from xyz2notion.asr.dashscope import SUPPORTED_MODELS
+
+    config = AsrConfig()
+    assert set(config.dashscope_models) == SUPPORTED_MODELS
+    assert config.dashscope_free_tier_confirmed_models == ()
+    assert AsrConfig(
+        dashscope_free_tier_confirmed_models=("paraformer-v2", "fun-asr")
+    ).dashscope_free_tier_confirmed_models == ("paraformer-v2", "fun-asr")
+    for confirmed in [
+        ["paraformer-v2", "paraformer-v2"],
+        ["not-a-free-model"],
+    ]:
+        with pytest.raises(ValidationError):
+            AsrConfig.model_validate({"dashscope_free_tier_confirmed_models": confirmed})
+    with pytest.raises(ValidationError, match="unique route models"):
+        AsrConfig(
+            dashscope_fallback_models=(),
+            dashscope_free_tier_confirmed_models=("fun-asr",),
+        )
+    with pytest.raises(ValidationError, match="also be a fallback"):
+        AsrConfig(dashscope_fallback_models=("paraformer-v2",))
 
 
 def test_daily_limit_cannot_exceed_monthly_limit() -> None:
@@ -204,5 +229,6 @@ def test_secret_values_are_not_serialized_or_represented() -> None:
 
 def test_generated_schema_is_json() -> None:
     schema = json.loads(config_schema_json())
+    assert json.loads(Path("schemas/config.schema.json").read_text(encoding="utf-8")) == schema
     assert schema["title"] == "AppConfig"
     assert "schema_version" in schema["properties"]

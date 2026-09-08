@@ -10,7 +10,6 @@ from xyz2notion.orchestration.summary_diagnostic import (
     DASHSCOPE_CHAT_URL,
     DASHSCOPE_DIAGNOSTIC_MODEL,
     SILICONFLOW_MODELS_URL,
-    DashScopeSummaryDiagnostic,
     DiagnosticProbe,
     SiliconFlowSummaryDiagnostic,
     diagnose_dashscope_summary,
@@ -135,7 +134,7 @@ def test_diagnostic_main_reports_missing_and_live_route(
         lambda: SimpleNamespace(siliconflow_api_key=None, dashscope_api_key=None),
     )
     assert summary_diagnostic.main() == 2
-    assert "missing SILICONFLOW_API_KEY and DASHSCOPE_API_KEY" in capsys.readouterr().err
+    assert "missing SILICONFLOW_API_KEY" in capsys.readouterr().err
 
     live = SiliconFlowSummaryDiagnostic(
         model=MODEL,
@@ -158,10 +157,6 @@ def test_diagnostic_main_reports_missing_and_live_route(
     assert summary_diagnostic.main() == 0
     assert "model_listed=true" in capsys.readouterr().out
 
-    dashscope_live = DashScopeSummaryDiagnostic(
-        model=DASHSCOPE_DIAGNOSTIC_MODEL,
-        probes=(DiagnosticProbe("minimal", True, "200", "200"),),
-    )
     monkeypatch.setattr(
         summary_diagnostic,
         "load_runtime_credentials",
@@ -170,10 +165,28 @@ def test_diagnostic_main_reports_missing_and_live_route(
             dashscope_api_key=SecretStr(API_KEY),
         ),
     )
+
+    def forbidden(_key: object) -> None:
+        pytest.fail("Diagnostic must not call paid DashScope summaries")
+
+    monkeypatch.setattr(summary_diagnostic, "diagnose_dashscope_summary", forbidden)
+    assert summary_diagnostic.main() == 2
+    assert "missing SILICONFLOW_API_KEY" in capsys.readouterr().err
+
     monkeypatch.setattr(
         summary_diagnostic,
-        "diagnose_dashscope_summary",
-        lambda _key: dashscope_live,
+        "load_runtime_credentials",
+        lambda: SimpleNamespace(
+            siliconflow_api_key=SecretStr(API_KEY), dashscope_api_key=SecretStr(API_KEY)
+        ),
     )
     assert summary_diagnostic.main() == 0
-    assert "DashScope summary diagnostic" in capsys.readouterr().out
+    assert "DashScope summary diagnostic" not in capsys.readouterr().out
+
+
+def test_summary_diagnostics_reject_models_outside_free_allowlist() -> None:
+    assert summary_diagnostic.DIAGNOSTIC_MODELS == ("Qwen/Qwen3-8B",)
+    with pytest.raises(ValueError, match="free-model allowlist"):
+        summary_diagnostic.diagnose_siliconflow_summary(
+            "fixture-key", model="Qwen/Qwen2.5-7B-Instruct"
+        )

@@ -3,14 +3,19 @@ schema_version: 1
 asr:
   provider_order:
     - dashscope
-    - siliconflow
-    - local_whisper
-  # DashScope's internal model fallback order.  The API key is the same for
-  # all three; the account console decides which model still has free quota.
-  dashscope_model: paraformer-v1
+  # Candidates only: each model also needs explicit free-only confirmation below.
+  dashscope_model: paraformer-v2
   dashscope_fallback_models:
-    - paraformer-v2
+    - fun-asr
+    - fun-asr-mtl
+    - qwen-audio-3.0-asr-flash-filetrans
+    - qwen3-asr-flash-filetrans
+    - paraformer-v1
     - paraformer-mtl-v1
+  # First enable "free quota exhausted -> stop" for each model in Alibaba's console.
+  # Then list ONLY those confirmed model names here. Empty means no new ASR.
+  # This attestation cannot read quota balances or change account billing settings.
+  dashscope_free_tier_confirmed_models: []
   siliconflow_models:
     - FunAudioLLM/SenseVoiceSmall
     - TeleAI/TeleSpeechASR
@@ -18,13 +23,11 @@ asr:
 
 summary:
   enabled: true
-  # Fast shared summary route.  Reasoning is always disabled by the client.
-  dashscope_model: qwen-flash
+  # SiliconFlow free model -> local Qwen. No DashScope summary fallback.
   siliconflow_models:
     - Qwen/Qwen3-8B
-  # GitHub-hosted CPU generation is intentionally off in production because a
-  # single item can take far longer than the bounded remote recovery window.
-  local_qwen_fallback: false
+  # Requires: uv sync --locked --extra local-summary
+  local_qwen_fallback: true
   prompt_version: summary-v1
   chunk_tokens: 12000
   chunk_minutes: 60

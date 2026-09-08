@@ -30,7 +30,6 @@ jobs:
 
       - name: Probe fixed non-user summary requests
         env:
-          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
         run: |
           set -euo pipefail

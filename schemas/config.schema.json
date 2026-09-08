@@ -6,22 +6,56 @@
       "properties": {
         "dashscope_fallback_models": {
           "default": [
-            "paraformer-v2",
+            "fun-asr",
+            "fun-asr-mtl",
+            "qwen-audio-3.0-asr-flash-filetrans",
+            "qwen3-asr-flash-filetrans",
+            "paraformer-v1",
             "paraformer-mtl-v1"
           ],
           "items": {
             "enum": [
+              "paraformer-v1",
               "paraformer-v2",
-              "paraformer-mtl-v1"
+              "paraformer-mtl-v1",
+              "fun-asr",
+              "fun-asr-mtl",
+              "qwen-audio-3.0-asr-flash-filetrans",
+              "qwen3-asr-flash-filetrans"
             ],
             "type": "string"
           },
           "title": "Dashscope Fallback Models",
           "type": "array"
         },
+        "dashscope_free_tier_confirmed_models": {
+          "default": [],
+          "items": {
+            "enum": [
+              "paraformer-v1",
+              "paraformer-v2",
+              "paraformer-mtl-v1",
+              "fun-asr",
+              "fun-asr-mtl",
+              "qwen-audio-3.0-asr-flash-filetrans",
+              "qwen3-asr-flash-filetrans"
+            ],
+            "type": "string"
+          },
+          "title": "Dashscope Free Tier Confirmed Models",
+          "type": "array"
+        },
         "dashscope_model": {
-          "const": "paraformer-v1",
-          "default": "paraformer-v1",
+          "default": "paraformer-v2",
+          "enum": [
+            "paraformer-v1",
+            "paraformer-v2",
+            "paraformer-mtl-v1",
+            "fun-asr",
+            "fun-asr-mtl",
+            "qwen-audio-3.0-asr-flash-filetrans",
+            "qwen3-asr-flash-filetrans"
+          ],
           "title": "Dashscope Model",
           "type": "string"
         },
@@ -37,9 +71,7 @@
         },
         "provider_order": {
           "default": [
-            "dashscope",
-            "siliconflow",
-            "local_whisper"
+            "dashscope"
           ],
           "items": {
             "$ref": "#/$defs/AsrProvider"
@@ -134,7 +166,7 @@
           "type": "boolean"
         },
         "local_qwen_fallback": {
-          "default": false,
+          "default": true,
           "title": "Local Qwen Fallback",
           "type": "boolean"
         },

@@ -47,16 +47,17 @@ jobs:
             ~/.cache/uv
             ~/.cache/huggingface
             ~/.cache/xyz2notion
-          key: retry-ai-${{ runner.os }}-py312-llama0.3.35-${{ hashFiles('uv.lock') }}
+          key: retry-ai-${{ runner.os }}-py312-llama0.3.16-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            retry-ai-${{ runner.os }}-py312-llama0.3.35-
+            retry-ai-${{ runner.os }}-py312-llama0.3.16-
 
       - name: Install FFmpeg and locked application
         run: |
           sudo apt-get update
           sudo apt-get install --yes ffmpeg
           python -m pip install uv==0.9.28
-          uv sync --locked
+          uv sync --locked --extra local-summary
+          uv run --no-sync python -c "import llama_cpp"
 
       - name: Process manually requested retries first
         env:
@@ -70,7 +71,7 @@ jobs:
           config_path="config.yaml"
           if [[ ! -f "$config_path" ]]; then config_path="config.example.yaml"; fi
           set +e
-          result="$(uv run xyz2notion process-manual-retries \
+          result="$(uv run --no-sync xyz2notion process-manual-retries \
             --config "$config_path" --limit "${RETRY_LIMIT:-2}" 2>&1)"
           status=$?
           set -e
@@ -96,7 +97,7 @@ jobs:
           config_path="config.yaml"
           if [[ ! -f "$config_path" ]]; then config_path="config.example.yaml"; fi
           set +e
-          result="$(uv run xyz2notion process-asr \
+          result="$(uv run --no-sync xyz2notion process-asr \
             --config "$config_path" --mode retry --limit "${RETRY_LIMIT:-2}" 2>&1)"
           status=$?
           set -e
@@ -123,7 +124,7 @@ jobs:
           config_path="config.yaml"
           if [[ ! -f "$config_path" ]]; then config_path="config.example.yaml"; fi
           set +e
-          result="$(uv run python -m xyz2notion.orchestration.enrichment_queue \
+          result="$(uv run --no-sync python -m xyz2notion.orchestration.enrichment_queue \
             --config "$config_path" --mode retry --limit "${RETRY_LIMIT:-2}" 2>&1)"
           status=$?
           set -e

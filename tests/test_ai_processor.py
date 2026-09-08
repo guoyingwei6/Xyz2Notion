@@ -1,16 +1,17 @@
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+import httpx
 import pytest
 from pydantic import SecretStr
 
 from xyz2notion.asr.audio import AudioPreparationError
+from xyz2notion.asr.dashscope import DashScopeParaformerClient
 from xyz2notion.config import AsrProvider
 from xyz2notion.enrichment.client import FallbackSummaryClient
-from xyz2notion.enrichment.dashscope import DashScopeSummaryClient
 from xyz2notion.enrichment.local_qwen import LocalQwenSummaryClient
 from xyz2notion.enrichment.schema import EnrichmentPayload
-from xyz2notion.enrichment.siliconflow import CompletionUsage
+from xyz2notion.enrichment.siliconflow import CompletionUsage, SiliconFlowSummaryClient
 from xyz2notion.models import (
     MindmapNode,
     ProviderError,
@@ -30,6 +31,7 @@ from xyz2notion.orchestration.processor import (
     ai_category_label,
     ai_category_priority,
     build_provider_clients,
+    build_summary_client,
     episode_candidates,
 )
 from xyz2notion.orchestration.state_store import EpisodeAIState
@@ -559,7 +561,7 @@ def test_budget_pause_starts_no_provider(asr_only: bool) -> None:
     assert store.saved == []
 
 
-def test_dashscope_failure_falls_back_to_siliconflow() -> None:
+def test_dashscope_quota_exhaustion_pauses_without_other_asr() -> None:
     store = FakeStateStore()
     processor = DashScopeProcessor(
         FakeNotion(),
@@ -570,10 +572,11 @@ def test_dashscope_failure_falls_back_to_siliconflow() -> None:
         dashscope_failures=1,
     )
     outcome = processor.process(CANDIDATE, {})
-    assert outcome.state is PipelineState.PUBLISHED
+    assert outcome.action == "free_quota_paused"
+    assert outcome.state is PipelineState.DISCOVERED
     assert processor.dashscope_calls == 1
-    assert processor.asr_calls == 1
-    assert store.state.provider == "siliconflow"
+    assert processor.asr_calls == 0
+    assert store.state.submission_uncertain is False
 
 
 def test_sensitive_dashscope_failure_does_not_fallback_to_siliconflow() -> None:
@@ -739,7 +742,7 @@ def test_build_provider_clients_supports_local_summary_only() -> None:
     summary.close()
 
 
-def test_build_provider_clients_prefers_dashscope_then_siliconflow() -> None:
+def test_build_provider_clients_never_uses_dashscope_for_summary() -> None:
     _dashscope, _siliconflow, _local_whisper, summary = build_provider_clients(
         dashscope_summary_api_key=SecretStr("dashscope-test"),
         siliconflow_asr_api_key=None,
@@ -749,10 +752,9 @@ def test_build_provider_clients_prefers_dashscope_then_siliconflow() -> None:
         local_whisper_model=None,
         local_qwen_summary=False,
     )
-    assert isinstance(summary, FallbackSummaryClient)
-    assert isinstance(summary.primary, DashScopeSummaryClient)
-    assert summary.fallback.active_provider == "siliconflow_summary"
-    assert summary.models == ("qwen-flash", "Qwen/Qwen3-8B")
+    assert isinstance(summary, SiliconFlowSummaryClient)
+    assert summary.active_provider == "siliconflow_summary"
+    assert summary.models == ("Qwen/Qwen3-8B",)
     summary.close()
 
 
@@ -766,3 +768,153 @@ def test_build_provider_clients_can_disable_all_summary_clients() -> None:
         local_qwen_summary=False,
     )
     assert providers == (None, None, None, None)
+
+
+@pytest.mark.parametrize("asr_only", [True, False])
+@pytest.mark.parametrize("confirmed", [True, False])
+def test_guarded_asr_pauses_without_unapproved_fallback(asr_only: bool, confirmed: bool) -> None:
+    calls: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        calls.append(request.method)
+        return httpx.Response(403, json={"code": "AllocationQuota.FreeTierOnly"})
+
+    store = FakeStateStore()
+    with DashScopeParaformerClient(
+        "fixture",
+        models=("paraformer-v2", "fun-asr"),
+        confirmed_free_tier_models=("paraformer-v2", "fun-asr") if confirmed else (),
+        client=httpx.Client(transport=httpx.MockTransport(handle)),
+    ) as client:
+        processor = EpisodeAIProcessor(
+            FakeNotion(),
+            store,
+            dashscope=client,
+            siliconflow=object(),  # type: ignore[arg-type]
+            local_whisper=object(),  # type: ignore[arg-type]
+        )
+        process = processor.process_asr_only if asr_only else processor.process
+        outcome = process(CANDIDATE, {})
+    assert outcome.action == "free_quota_paused"
+    assert outcome.detail.startswith("ASR paused:")
+    assert store.state.record.state is PipelineState.DISCOVERED
+    assert store.state.record.attempts == 0
+    assert store.state.submission_uncertain is False
+    assert calls == (["POST", "POST"] if confirmed else [])
+    if not confirmed:
+        assert store.saved == []
+
+
+def test_unconfirmed_route_can_resume_an_existing_task_without_resubmitting() -> None:
+    requests: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request.method)
+        assert request.method == "GET"
+        if "/tasks/" in request.url.path:
+            return httpx.Response(
+                200,
+                json={
+                    "output": {
+                        "task_status": "SUCCEEDED",
+                        "result": {"transcription_url": "https://example.com/transcript.json"},
+                    }
+                },
+            )
+        return httpx.Response(200, json={"transcripts": [{"text": "saved transcript"}]})
+
+    store = FakeStateStore(
+        EpisodeAIState(
+            record=PipelineRecord(eid=CANDIDATE.eid).transition(PipelineState.ASR_SUBMITTED),
+            provider="dashscope",
+            provider_task_id="existing-task",
+            provider_model="qwen3-asr-flash-filetrans",
+        )
+    )
+    with DashScopeParaformerClient(
+        "fixture", client=httpx.Client(transport=httpx.MockTransport(handle))
+    ) as client:
+        result = EpisodeAIProcessor(
+            FakeNotion(), store, dashscope=client, summary_enabled=False
+        ).process_asr_only(CANDIDATE, {})
+    assert result.action == "transcribed"
+    assert requests == ["GET", "GET"]
+    assert store.state.transcript is not None
+    assert store.state.transcript.model == "qwen3-asr-flash-filetrans"
+
+
+@pytest.mark.parametrize("local_enabled", [True, False])
+def test_dashscope_key_alone_cannot_enable_summary(local_enabled: bool) -> None:
+    client = build_summary_client(
+        dashscope_api_key=SecretStr("fixture-dashscope"),
+        dashscope_model="qwen-flash",
+        siliconflow_api_key=None,
+        siliconflow_models=("Qwen/Qwen3-8B",),
+        local_qwen_summary=local_enabled,
+    )
+    if local_enabled:
+        assert isinstance(client, LocalQwenSummaryClient)
+        client.close()
+    else:
+        assert client is None
+
+
+def test_summary_factory_uses_only_siliconflow_then_local_and_preserves_transcript(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import xyz2notion.orchestration.processor as module
+
+    requests: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(str(request.url))
+        assert request.url.host == "api.siliconflow.cn"
+        return httpx.Response(403, json={"code": "30001", "message": "quota exhausted"})
+
+    remote = SiliconFlowSummaryClient(
+        "fixture-siliconflow",
+        client=httpx.Client(transport=httpx.MockTransport(handle)),
+        max_retries=0,
+    )
+    local = LocalQwenSummaryClient()
+    monkeypatch.setattr(module, "SiliconFlowSummaryClient", lambda *_args, **_kwargs: remote)
+    monkeypatch.setattr(module, "LocalQwenSummaryClient", lambda **_kwargs: local)
+    local_calls: list[bool] = []
+
+    def fail_local(*_args: object, **_kwargs: object) -> Any:
+        local_calls.append(True)
+        raise ProviderError(
+            ProviderFailure(
+                provider="local_qwen_summary",
+                category=ProviderErrorCategory.TIMEOUT,
+                code="local_generation_timeout",
+                message="local time budget exhausted",
+            )
+        )
+
+    monkeypatch.setattr(local, "generate_structured", fail_local)
+    client = build_summary_client(
+        dashscope_api_key=SecretStr("fixture-dashscope"),
+        dashscope_model="qwen-flash",
+        siliconflow_api_key=SecretStr("fixture-siliconflow"),
+        siliconflow_models=("Qwen/Qwen3-8B",),
+        local_qwen_summary=True,
+    )
+    assert isinstance(client, FallbackSummaryClient)
+    assert client.primary is remote
+    assert client.fallback is local
+    saved_transcript = transcript()
+    store = FakeStateStore(
+        EpisodeAIState(
+            record=PipelineRecord(eid=CANDIDATE.eid).transition(PipelineState.TRANSCRIBED),
+            transcript=saved_transcript,
+        )
+    )
+    outcome = EpisodeAIProcessor(FakeNotion(), store, summary_client=client).process(CANDIDATE, {})
+    client.close()
+    assert outcome.action == "failed"
+    assert store.state.transcript == saved_transcript
+    assert store.state.record.resume_state is PipelineState.TRANSCRIBED
+    assert store.state.record.failure is not None
+    assert "local_qwen_summary:timeout" in store.state.record.failure.message
+    assert requests and local_calls == [True]

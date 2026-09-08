@@ -42,6 +42,15 @@ FREE_SILICONFLOW_SUMMARY_MODELS = frozenset(
         "Qwen/Qwen3-8B",
     }
 )
+DashScopeAsrModel = Literal[
+    "paraformer-v1",
+    "paraformer-v2",
+    "paraformer-mtl-v1",
+    "fun-asr",
+    "fun-asr-mtl",
+    "qwen-audio-3.0-asr-flash-filetrans",
+    "qwen3-asr-flash-filetrans",
+]
 
 
 class StrictConfigModel(BaseModel):
@@ -53,16 +62,18 @@ class StrictConfigModel(BaseModel):
 class AsrConfig(StrictConfigModel):
     """Free speech recognition provider policy."""
 
-    provider_order: tuple[AsrProvider, ...] = (
-        AsrProvider.DASHSCOPE,
-        AsrProvider.SILICONFLOW,
-        AsrProvider.LOCAL_WHISPER,
-    )
-    dashscope_model: Literal["paraformer-v1"] = "paraformer-v1"
-    dashscope_fallback_models: tuple[Literal["paraformer-v2", "paraformer-mtl-v1"], ...] = (
-        "paraformer-v2",
+    provider_order: tuple[AsrProvider, ...] = (AsrProvider.DASHSCOPE,)
+    dashscope_model: DashScopeAsrModel = "paraformer-v2"
+    dashscope_fallback_models: tuple[DashScopeAsrModel, ...] = (
+        "fun-asr",
+        "fun-asr-mtl",
+        "qwen-audio-3.0-asr-flash-filetrans",
+        "qwen3-asr-flash-filetrans",
+        "paraformer-v1",
         "paraformer-mtl-v1",
     )
+    # An explicit account-owner attestation, not a live quota/billing check.
+    dashscope_free_tier_confirmed_models: tuple[DashScopeAsrModel, ...] = ()
     siliconflow_models: tuple[str, ...] = (
         "FunAudioLLM/SenseVoiceSmall",
         "TeleAI/TeleSpeechASR",
@@ -75,6 +86,11 @@ class AsrConfig(StrictConfigModel):
             raise ValueError("asr.provider_order cannot contain duplicates")
         if len(set(self.dashscope_fallback_models)) != len(self.dashscope_fallback_models):
             raise ValueError("asr.dashscope_fallback_models cannot contain duplicates")
+        if self.dashscope_model in self.dashscope_fallback_models:
+            raise ValueError("asr.dashscope_model cannot also be a fallback")
+        confirmed = self.dashscope_free_tier_confirmed_models
+        if len(set(confirmed)) != len(confirmed) or set(confirmed) - set(self.dashscope_models):
+            raise ValueError("asr.dashscope_free_tier_confirmed_models must be unique route models")
         if not self.siliconflow_models or any(
             not model.strip() for model in self.siliconflow_models
         ):
@@ -89,7 +105,7 @@ class AsrConfig(StrictConfigModel):
         return self
 
     @property
-    def dashscope_models(self) -> tuple[str, ...]:
+    def dashscope_models(self) -> tuple[DashScopeAsrModel, ...]:
         """DashScope model order before the outer SiliconFlow/local fallback."""
         return (self.dashscope_model, *self.dashscope_fallback_models)
 
@@ -115,7 +131,7 @@ class SummaryConfig(StrictConfigModel):
     enabled: bool = True
     dashscope_model: Literal["qwen-flash"] = "qwen-flash"
     siliconflow_models: tuple[str, ...] = ("Qwen/Qwen3-8B",)
-    local_qwen_fallback: bool = False
+    local_qwen_fallback: bool = True
     prompt_version: str = Field(default="summary-v1", min_length=1)
     chunk_tokens: int = Field(default=12_000, ge=1_000, le=100_000)
     chunk_minutes: int = Field(default=30, ge=5, le=120)

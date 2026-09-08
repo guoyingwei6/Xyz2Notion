@@ -19,10 +19,7 @@ from xyz2notion.security import CredentialKind, validate_credential_destination
 SILICONFLOW_MODELS_URL = "https://api.siliconflow.cn/v1/models"
 DASHSCOPE_CHAT_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 DASHSCOPE_DIAGNOSTIC_MODEL = "qwen-flash"
-DIAGNOSTIC_MODELS = (
-    DEFAULT_SUMMARY_MODELS[0],
-    "Qwen/Qwen2.5-7B-Instruct",
-)
+DIAGNOSTIC_MODELS = DEFAULT_SUMMARY_MODELS
 
 
 def _safe_code(value: object) -> str:
@@ -135,6 +132,8 @@ def diagnose_siliconflow_summary(
     client: httpx.Client | None = None,
 ) -> SiliconFlowSummaryDiagnostic:
     """Test model visibility and request features without logging any response body."""
+    if model not in DEFAULT_SUMMARY_MODELS:
+        raise ValueError("Summary diagnostics only allow the configured free-model allowlist")
     secret = api_key.get_secret_value() if isinstance(api_key, SecretStr) else api_key
     if not secret.strip():
         raise ValueError("SiliconFlow API key cannot be empty")
@@ -276,9 +275,9 @@ def diagnose_dashscope_summary(
 
 def main(_argv: Sequence[str] | None = None) -> int:
     credentials = load_runtime_credentials()
-    if credentials.siliconflow_api_key is None and credentials.dashscope_api_key is None:
+    if credentials.siliconflow_api_key is None:
         print(
-            "Configuration error: missing SILICONFLOW_API_KEY and DASHSCOPE_API_KEY",
+            "Configuration error: missing SILICONFLOW_API_KEY",
             file=sys.stderr,
         )
         return 2
@@ -288,8 +287,6 @@ def main(_argv: Sequence[str] | None = None) -> int:
             diagnose_siliconflow_summary(credentials.siliconflow_api_key, model=model)
             for model in DIAGNOSTIC_MODELS
         )
-    if credentials.dashscope_api_key is not None:
-        diagnostics += (diagnose_dashscope_summary(credentials.dashscope_api_key),)
     print("\n".join(diagnostic.summary() for diagnostic in diagnostics))
     return 0 if any(diagnostic.minimal_accepted for diagnostic in diagnostics) else 5
 

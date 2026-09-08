@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 import yaml
 
 WORKFLOW_DIR = Path(".github/workflows")
@@ -38,7 +39,8 @@ def test_runtime_workflows_use_concurrency_and_private_safe_summaries() -> None:
         text, workflow = _workflow(name)
         assert workflow["concurrency"]["cancel-in-progress"] is False  # type: ignore[index]
         assert "GITHUB_STEP_SUMMARY" in text
-        assert "uv run xyz2notion" in text or "uv run python -m xyz2notion" in text
+        commands = text.replace("uv run --no-sync ", "uv run ")
+        assert "uv run xyz2notion" in commands or "uv run python -m xyz2notion" in commands
         assert "upload-artifact" not in text
 
 
@@ -128,7 +130,8 @@ def test_enrichment_workflow_uses_only_summary_credentials() -> None:
         "workflows": ["Transcribe Episode Queue"],
         "types": ["completed"],
     }
-    assert "DASHSCOPE_API_KEY" in text
+    assert "DASHSCOPE_API_KEY" not in text
+    assert "uv sync --locked --extra local-summary" in text
     assert "SILICONFLOW_API_KEY" in text
     assert "TINGWU_COOKIE" not in text
     assert "process-ai" not in text
@@ -140,10 +143,23 @@ def test_enrichment_workflow_uses_only_summary_credentials() -> None:
     assert "37 22 * * *" not in text
 
 
+@pytest.mark.parametrize(
+    "filename",
+    ["enrich-transcripts.yml", "retry-failed-ai.yml", "recover-final-summaries.yml"],
+)
+def test_summary_workflows_install_and_keep_local_runtime(filename: str) -> None:
+    text, _parsed = _workflow(filename)
+    assert "uv sync --locked --extra local-summary" in text
+    assert 'uv run --no-sync python -c "import llama_cpp"' in text
+    for line in text.splitlines():
+        if "uv run " in line:
+            assert "uv run --no-sync " in line
+
+
 def test_summary_provider_diagnostic_never_receives_notion_credentials() -> None:
     text, workflow = _workflow("diagnose-summary-providers.yml")
     assert workflow[True] == {"workflow_dispatch": None}  # type: ignore[index]
-    assert "DASHSCOPE_API_KEY" in text
+    assert "DASHSCOPE_API_KEY" not in text
     assert "SILICONFLOW_API_KEY" in text
     assert "summary_diagnostic" in text
     assert "NOTION_TOKEN" not in text

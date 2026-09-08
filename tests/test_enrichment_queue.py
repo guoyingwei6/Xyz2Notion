@@ -299,16 +299,16 @@ def test_summary_policy_and_shared_remote_client_wiring(
     )
     assert calls == [
         {
-            "dashscope_api_key": dashscope,
+            "dashscope_api_key": None,
             "dashscope_model": "qwen-flash",
             "siliconflow_api_key": siliconflow,
             "siliconflow_models": ("Qwen/Qwen3-8B",),
-            "local_qwen_summary": False,
+            "local_qwen_summary": True,
         }
     ]
 
     monkeypatch.setattr(queue_module, "build_summary_client", lambda **_kwargs: None)
-    with pytest.raises(MissingCredentialError, match="DASHSCOPE_API_KEY"):
+    with pytest.raises(MissingCredentialError, match="SILICONFLOW_API_KEY"):
         queue_module._summary_client(config, None, None)  # type: ignore[attr-defined]
 
 
@@ -536,6 +536,7 @@ def test_enrichment_workflow_is_asr_free_cached_and_mode_gated() -> None:
     assert "preflight_only" in text
     assert "--preflight-only" in text
     assert 'exit "$status"' in text
-    assert "DASHSCOPE_API_KEY" in text
+    assert "DASHSCOPE_API_KEY" not in text
+    assert "uv sync --locked --extra local-summary" in text
     assert "llama_cpp_python" not in text
     assert "timeout-minutes: 45" in text

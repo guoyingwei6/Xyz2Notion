@@ -29,6 +29,9 @@ dependencies = [
 [project.scripts]
 xyz2notion = "xyz2notion.cli:main"
 
+[project.optional-dependencies]
+local-summary = ["llama-cpp-python==0.3.16"]
+
 [dependency-groups]
 dev = [
   "mypy==1.17.1",

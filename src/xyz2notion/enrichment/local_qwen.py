@@ -6,6 +6,7 @@ import hashlib
 import importlib
 import json
 import os
+import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Annotated, Any, TypeVar, cast
@@ -39,6 +40,7 @@ LOCAL_QWEN_MAX_OUTPUT_TOKENS = 4_096
 LOCAL_QWEN_COMPACT_OUTPUT_TOKENS = 2_048
 LOCAL_QWEN_CHUNK_OUTPUT_TOKENS = 1_024
 LOCAL_QWEN_TRANSCRIPT_CHUNK_TOKENS = 12_000
+LOCAL_QWEN_GENERATION_SECONDS = 180
 StructuredModel = TypeVar("StructuredModel", bound=BaseModel)
 GeneratedModel = TypeVar("GeneratedModel", bound=BaseModel)
 ModelFactory = Callable[[Path], Any]
@@ -208,12 +210,16 @@ class LocalQwenSummaryClient:
         client: httpx.Client | None = None,
         model_factory: ModelFactory = _load_llama,
         progress: Callable[[str], None] | None = None,
+        generation_timeout_seconds: float = LOCAL_QWEN_GENERATION_SECONDS,
     ) -> None:
+        if generation_timeout_seconds <= 0:
+            raise ValueError("Local Qwen generation timeout must be positive")
         self.model_path = Path(model_path) if model_path is not None else _default_model_path()
         self.active_model: str | None = None
         self.active_provider: str | None = "local_qwen_summary"
         self._model_factory = model_factory
         self._progress = progress
+        self.generation_timeout_seconds = generation_timeout_seconds
         self._model: Any | None = None
         self._owns_client = client is None
         self._client = client or httpx.Client(timeout=300, follow_redirects=True)
@@ -307,8 +313,22 @@ class LocalQwenSummaryClient:
         schema: Mapping[str, Any],
         max_output_tokens: int,
     ) -> tuple[str, CompletionUsage]:
+        model = self._llama()
+        deadline = time.monotonic() + self.generation_timeout_seconds
+
+        def check_deadline(_input_ids: Any, _logits: Any) -> bool:
+            # llama.cpp calls this between generated tokens. Prefill/native
+            # work is not interruptible here; the workflow also has a hard cap.
+            if time.monotonic() >= deadline:
+                raise _error(
+                    ProviderErrorCategory.TIMEOUT,
+                    "Local Qwen generation exceeded its time budget",
+                    code="local_generation_timeout",
+                )
+            return False
+
         try:
-            response = self._llama().create_chat_completion(
+            response = model.create_chat_completion(
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": f"{user}\n\n/no_think"},
@@ -316,7 +336,9 @@ class LocalQwenSummaryClient:
                 response_format={"type": "json_object", "schema": dict(schema)},
                 temperature=0.1,
                 max_tokens=min(max_output_tokens, LOCAL_QWEN_MAX_OUTPUT_TOKENS),
+                stopping_criteria=check_deadline,
             )
+            check_deadline(None, None)
         except ProviderError:
             raise
         except Exception as exc:

@@ -253,7 +253,7 @@ def _summary_client(
     siliconflow_api_key: SecretStr | None,
 ) -> StructuredSummaryClient:
     client = build_summary_client(
-        dashscope_api_key=dashscope_api_key,
+        dashscope_api_key=None,
         dashscope_model=config.summary.dashscope_model,
         siliconflow_api_key=siliconflow_api_key,
         siliconflow_models=config.summary.siliconflow_models,
@@ -261,7 +261,7 @@ def _summary_client(
     )
     if client is None:
         raise MissingCredentialError(
-            "Missing summary route: set DASHSCOPE_API_KEY or SILICONFLOW_API_KEY"
+            "Missing summary route: set SILICONFLOW_API_KEY or enable summary.local_qwen_fallback"
         )
     return client
 

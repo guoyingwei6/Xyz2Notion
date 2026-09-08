@@ -242,8 +242,9 @@ def run_manual_retry_queue(
             ),
             dashscope_model=config.asr.dashscope_model,
             dashscope_models=config.asr.dashscope_models,
+            dashscope_free_tier_confirmed_models=config.asr.dashscope_free_tier_confirmed_models,
             provider_poll_attempts=config.limits.provider_poll_attempts,
-            dashscope_summary_api_key=credentials.dashscope_api_key,
+            dashscope_summary_api_key=None,
             dashscope_summary_model=config.summary.dashscope_model,
             siliconflow_asr_api_key=(
                 credentials.siliconflow_api_key if AsrProvider.SILICONFLOW in providers else None

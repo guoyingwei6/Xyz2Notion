@@ -55,28 +55,36 @@ AI 内容。
 
 摘要、章节和思维导图固定按以下顺序生成：
 
-1. 阿里云百炼兼容接口 `qwen-flash`；
-2. SiliconFlow `Qwen/Qwen3-8B`；
-3. 可选的 GitHub Actions 本地 `Qwen3-1.7B-Q4_K_M`，生产默认关闭。
+1. SiliconFlow `Qwen/Qwen3-8B`；
+2. 本地 `Qwen3-1.7B-Q4_K_M`，默认启用；在定时任务中运行于 GitHub Actions。
 
-远程客户端只接受这两个经过验证的模型名，不会因误填而自动切换其他模型。
+摘要路由不再调用阿里云，即使环境中存在 `DASHSCOPE_API_KEY` 也不会启用。
+旧配置中的 `dashscope_model` 仅为兼容读取保留，不参与摘要调用。
+远程客户端仅允许 `Qwen/Qwen3-8B`，不会自动切到收费模型。
 额度和计费政策属于服务商外部状态，未来可能变化：
 
 - <https://help.aliyun.com/zh/model-studio/models>
 - <https://siliconflow.cn/pricing>
 - <https://docs.siliconflow.cn/cn/userguide/rate-limits/rate-limit-and-upgradation>
 
-DashScope 失败后才尝试 SiliconFlow。两条远程通道都失败时，只有显式设置
-`local_qwen_fallback: true` 才启动本地模型；默认配置会快速保存可定位的失败，
-不会进入数十分钟的 CPU 推理。
+SiliconFlow 有界重试后失败，就尝试本地模型。本地运行依赖通过
+`uv sync --locked --extra local-summary` 安装，已接入总结、手动重试和恢复工作流，
+并在启动时验证 `llama_cpp` 可以导入。模型权重仅在首次需要本地总结时下载，
+经过固定大小和 SHA-256 校验后使用。
 
 所有已配置通道都失败后才保存失败状态。每个 `SummaryResult` 仍记录最终成功的实际
 Provider、模型、Prompt 版本和输入/输出 Token。项目不会代替服务商账单计算实际费用。
 
-处理真实文字稿前会先用固定短文本执行一次结构化 JSON preflight。远程失败时会立即
-尝试下一条远程通道；若全部失败，`Failure Reason` 会保留经过脱敏的 Provider、错误类别
-和短错误码，不记录 Key、请求正文或服务响应正文。显式启用本地模型时仍采用 24576
-上下文和 128 batch，并把分块/输出限制收紧为 12000/4096 Token。
+处理真实文字稿前会先用固定短文本执行一次结构化 JSON preflight。远程失败时尝试本地；
+若全部失败，错误保留经过脱敏的 Provider、错误类别和短错误码，不记录 Key、请求正文
+或服务响应正文。单集总结失败时保留转写检查点；preflight 失败则直接终止该次队列，
+不修改单集。总结重试不会重新转写。
+
+本地采用 24576 上下文、256 batch，分块/输出上限为 12000/4096 Token。每次生成有
+180 秒协作式超时检查，超时作为可见失败，不能把截断结果当作成功。检查发生在原生推理
+返回或生成 Token 之间，不能强制中断长时间的首次 prompt 处理；工作流总超时仍是最终
+保护。模型下载、CPU 内存和 Actions 运行时间不是无限资源，不承诺本地总结必定完成或
+Actions 运行时间免费。
 
 ## 长文字稿
 

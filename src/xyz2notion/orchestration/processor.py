@@ -10,13 +10,12 @@ import httpx
 from pydantic import SecretStr
 
 from xyz2notion.asr.audio import AudioPreparationError, validate_public_audio_url
-from xyz2notion.asr.dashscope import DashScopeParaformerClient
+from xyz2notion.asr.dashscope import AsrFreeTierPausedError, DashScopeParaformerClient
 from xyz2notion.asr.local_whisper import LocalWhisperClient
 from xyz2notion.asr.pipeline import transcribe_siliconflow_episode
 from xyz2notion.asr.siliconflow import SiliconFlowClient
 from xyz2notion.config import AsrProvider
 from xyz2notion.enrichment.client import StructuredSummaryClient, chain_summary_clients
-from xyz2notion.enrichment.dashscope import DashScopeSummaryClient
 from xyz2notion.enrichment.local_qwen import LocalQwenSummaryClient
 from xyz2notion.enrichment.pipeline import SummaryPolicy, TranscriptEnricher
 from xyz2notion.enrichment.siliconflow import SiliconFlowSummaryClient
@@ -382,6 +381,10 @@ class EpisodeAIProcessor:
         for provider in self.provider_order:
             if clients[provider] is None:
                 continue
+            if provider is AsrProvider.DASHSCOPE and isinstance(
+                self.dashscope, DashScopeParaformerClient
+            ):
+                self.dashscope.ensure_free_tier()
             if self.asr_budget is not None:
                 self.asr_budget.reserve(candidate.page_id, candidate.duration_seconds)
             if provider is AsrProvider.DASHSCOPE:
@@ -403,6 +406,11 @@ class EpisodeAIProcessor:
                         )
                     if self._is_sensitive_asr_failure(exc) or state.submission_uncertain:
                         raise
+                    if exc.failure.category is ProviderErrorCategory.QUOTA_EXHAUSTED:
+                        raise AsrFreeTierPausedError(
+                            "ASR paused: confirmed DashScope free quotas are exhausted or "
+                            "unavailable; no other ASR provider was called"
+                        ) from exc
                     last_error = exc
                     continue
                 state = self._save(
@@ -550,6 +558,10 @@ class EpisodeAIProcessor:
             return ProcessingOutcome(candidate.eid, "pending", state.record.state)
         except ProviderError as exc:
             return self._fail(candidate, self._checkpoint or state, exc)
+        except AsrFreeTierPausedError as exc:
+            return ProcessingOutcome(
+                candidate.eid, "free_quota_paused", state.record.state, str(exc)
+            )
         except AsrDeferredError as exc:
             return ProcessingOutcome(candidate.eid, "budget_paused", state.record.state, str(exc))
         except (AudioPreparationError, OSError, httpx.HTTPError, ValueError) as exc:
@@ -603,6 +615,10 @@ class EpisodeAIProcessor:
             )
         except ProviderError as exc:
             return self._fail(candidate, self._checkpoint or state, exc)
+        except AsrFreeTierPausedError as exc:
+            return ProcessingOutcome(
+                candidate.eid, "free_quota_paused", state.record.state, str(exc)
+            )
         except AsrDeferredError as exc:
             return ProcessingOutcome(candidate.eid, "budget_paused", state.record.state, str(exc))
         except (AudioPreparationError, OSError, httpx.HTTPError, ValueError) as exc:
@@ -627,12 +643,11 @@ def build_summary_client(
     local_qwen_summary: bool,
     local_summary_progress: Callable[[str], None] | None = None,
 ) -> StructuredSummaryClient | None:
-    """Build the shared DashScope -> SiliconFlow -> optional local route."""
-    dashscope_summary = (
-        DashScopeSummaryClient(dashscope_api_key, model=dashscope_model)
-        if dashscope_api_key is not None
-        else None
-    )
+    """Build SiliconFlow -> optional local Qwen; never use paid DashScope summaries.
+
+    Legacy DashScope arguments are accepted so existing callers/configs remain
+    readable, but cannot enable a billable summary route.
+    """
     siliconflow_summary = (
         SiliconFlowSummaryClient(siliconflow_api_key, models=siliconflow_models)
         if siliconflow_api_key is not None
@@ -642,7 +657,6 @@ def build_summary_client(
         LocalQwenSummaryClient(progress=local_summary_progress) if local_qwen_summary else None
     )
     return chain_summary_clients(
-        dashscope_summary,
         siliconflow_summary,
         local_summary,
     )
@@ -653,6 +667,7 @@ def build_provider_clients(
     dashscope_api_key: SecretStr | None = None,
     dashscope_model: str = "paraformer-v1",
     dashscope_models: tuple[str, ...] | None = None,
+    dashscope_free_tier_confirmed_models: tuple[str, ...] = (),
     provider_poll_attempts: int = 60,
     dashscope_summary_api_key: SecretStr | None = None,
     dashscope_summary_model: str = "qwen-flash",
@@ -683,6 +698,7 @@ def build_provider_clients(
             dashscope_api_key,
             model=dashscope_model,
             models=dashscope_models,
+            confirmed_free_tier_models=dashscope_free_tier_confirmed_models,
             poll_attempts=provider_poll_attempts,
         )
         if dashscope_api_key is not None

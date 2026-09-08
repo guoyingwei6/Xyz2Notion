@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 import httpx
 import pytest
@@ -7,6 +8,7 @@ from pydantic import SecretStr
 from xyz2notion.asr.dashscope import (
     DASHSCOPE_TASK_URL,
     DASHSCOPE_TRANSCRIPTION_URL,
+    AsrFreeTierPausedError,
     DashScopeAPIError,
     DashScopeParaformerClient,
     parse_transcription_result,
@@ -17,6 +19,146 @@ from xyz2notion.security import (
     UnsafeCredentialDestinationError,
     validate_credential_destination,
 )
+
+
+def confirmed_client(api_key: str | SecretStr, **kwargs: Any) -> DashScopeParaformerClient:
+    """Protocol fixtures explicitly attest free-only protection; never use a real key."""
+    return DashScopeParaformerClient(
+        api_key,
+        confirmed_free_tier_models=kwargs.get("models", (kwargs.get("model", "paraformer-v1"),)),
+        **kwargs,
+    )
+
+
+def test_unconfirmed_model_makes_no_http_request() -> None:
+    def forbidden(_request: httpx.Request) -> httpx.Response:
+        pytest.fail("An unconfirmed model must never reach the network")
+
+    with DashScopeParaformerClient(
+        "fixture-key", client=httpx.Client(transport=httpx.MockTransport(forbidden))
+    ) as client:
+        with pytest.raises(AsrFreeTierPausedError, match="no DashScope model"):
+            client.ensure_free_tier()
+        with pytest.raises(ProviderError) as caught:
+            client.submit_with_fallback("https://example.com/audio.mp3")
+        assert caught.value.failure.code == "free_tier_unconfirmed"
+
+    with pytest.raises(ValueError, match="confirmations"):
+        DashScopeParaformerClient(
+            "fixture-key", confirmed_free_tier_models=("not-a-configured-model",)
+        )
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "fun-asr",
+        "fun-asr-mtl",
+        "qwen-audio-3.0-asr-flash-filetrans",
+        "qwen3-asr-flash-filetrans",
+    ],
+)
+def test_new_recorded_models_submit_poll_and_parse(model: str) -> None:
+    calls: list[str] = []
+    audio = "https://example.com/audio.mp3"
+    result_url = "https://example.com/result.json"
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        calls.append(request.method)
+        if request.method == "POST":
+            body = json.loads(request.content)
+            assert body["model"] == model
+            if model == "qwen3-asr-flash-filetrans":
+                assert body["input"] == {"file_url": audio}
+                assert body["parameters"] == {}
+            else:
+                assert body["input"] == {"file_urls": [audio]}
+                assert body["parameters"] == {"channel_id": [0]}
+            return httpx.Response(200, json={"output": {"task_id": "new-task"}})
+        if str(request.url) == DASHSCOPE_TASK_URL.format(task_id="new-task"):
+            result = {"transcription_url": result_url}
+            output = (
+                {"result": result}
+                if model == "qwen3-asr-flash-filetrans"
+                else {"results": [result]}
+            )
+            return httpx.Response(200, json={"output": {"task_status": "SUCCEEDED", **output}})
+        assert str(request.url) == result_url
+        assert "Authorization" not in request.headers
+        return httpx.Response(
+            200,
+            json={
+                "transcripts": [
+                    {
+                        "text": "transcript",
+                        "sentences": [{"begin_time": 0, "end_time": 5000, "text": "transcript"}],
+                    }
+                ]
+            },
+        )
+
+    with confirmed_client(
+        "fixture-key", model=model, client=httpx.Client(transport=httpx.MockTransport(handle))
+    ) as client:
+        result = client.transcribe_url(audio)
+    assert calls == ["POST", "GET", "GET"]
+    assert result.model == model
+    assert result.text == "transcript"
+    assert result.duration_ms == 5000
+    assert result.timing_quality.value == "exact_timestamps"
+
+
+def test_free_quota_fallback_skips_unconfirmed_models() -> None:
+    submitted: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        model = json.loads(request.content)["model"]
+        submitted.append(model)
+        if model == "paraformer-v2":
+            return httpx.Response(403, json={"code": "AllocationQuota.FreeTierOnly"})
+        assert model == "fun-asr-mtl"
+        return httpx.Response(200, json={"output": {"task_id": "last-task"}})
+
+    with DashScopeParaformerClient(
+        "fixture-key",
+        models=("paraformer-v2", "fun-asr", "fun-asr-mtl"),
+        confirmed_free_tier_models=("paraformer-v2", "fun-asr-mtl"),
+        client=httpx.Client(transport=httpx.MockTransport(handle)),
+    ) as client:
+        client.ensure_free_tier()
+        assert client.submit_with_fallback("https://example.com/audio.mp3") == (
+            "last-task",
+            "fun-asr-mtl",
+        )
+    assert submitted == ["paraformer-v2", "fun-asr-mtl"]
+
+
+def test_failed_subtask_keeps_sensitive_error_visible() -> None:
+    def handle(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "output": {
+                    "task_status": "SUCCEEDED",
+                    "results": [
+                        {
+                            "subtask_status": "FAILED",
+                            "code": "DataInspectionFailed",
+                            "message": "Content inspection rejected the audio",
+                        }
+                    ],
+                }
+            },
+        )
+
+    with (
+        confirmed_client(
+            "fixture-key", client=httpx.Client(transport=httpx.MockTransport(handle))
+        ) as client,
+        pytest.raises(ProviderError) as caught,
+    ):
+        client.wait_result_url("task")
+    assert caught.value.failure.code == "DataInspectionFailed"
 
 
 def test_submit_poll_fetch_and_parse_paraformer_result() -> None:
@@ -71,7 +213,7 @@ def test_submit_poll_fetch_and_parse_paraformer_result() -> None:
             )
         raise AssertionError(str(request.url))
 
-    client = DashScopeParaformerClient(
+    client = confirmed_client(
         "dashscope-fixture-secret",
         client=httpx.Client(transport=httpx.MockTransport(handle)),
         sleep=lambda _seconds: None,
@@ -101,7 +243,7 @@ def test_dashscope_failures_are_safe_and_categorized() -> None:
             },
         )
 
-    client = DashScopeParaformerClient(
+    client = confirmed_client(
         "dashscope-fixture-secret",
         client=httpx.Client(transport=httpx.MockTransport(handle)),
         max_retries=0,
@@ -115,22 +257,22 @@ def test_dashscope_failures_are_safe_and_categorized() -> None:
 
 def test_dashscope_model_allowlist_and_unsafe_hosts() -> None:
     with pytest.raises(ValueError, match="cannot be empty"):
-        DashScopeParaformerClient("")
-    client = DashScopeParaformerClient(
+        confirmed_client("")
+    client = confirmed_client(
         "key",
         models=("paraformer-v1", "paraformer-v2", "paraformer-mtl-v1"),
     )
     assert client.models == ("paraformer-v1", "paraformer-v2", "paraformer-mtl-v1")
     with pytest.raises(ValueError, match="safe allowlist"):
-        DashScopeParaformerClient("key", model="not-a-paraformer")
+        confirmed_client("key", model="not-a-paraformer")
     with pytest.raises(ValueError, match="cannot be empty"):
-        DashScopeParaformerClient("key", models=())
+        confirmed_client("key", models=())
     with pytest.raises(ValueError, match="cannot be empty"):
-        DashScopeParaformerClient("key", models=(" ",))
+        confirmed_client("key", models=(" ",))
     with pytest.raises(ValueError, match="duplicates"):
-        DashScopeParaformerClient("key", models=("paraformer-v1", "paraformer-v1"))
+        confirmed_client("key", models=("paraformer-v1", "paraformer-v1"))
     with pytest.raises(ValueError, match="non-negative"):
-        DashScopeParaformerClient("key", max_retries=-1)
+        confirmed_client("key", max_retries=-1)
     with pytest.raises(UnsafeCredentialDestinationError):
         validate_credential_destination(
             "https://evil.example/api/v1/services/audio/asr/transcription",
@@ -180,7 +322,7 @@ def test_dashscope_model_quota_falls_back_before_task_submission() -> None:
             )
         raise AssertionError(str(request.url))
 
-    client = DashScopeParaformerClient(
+    client = confirmed_client(
         "dashscope-fixture-secret",
         models=("paraformer-v1", "paraformer-v2", "paraformer-mtl-v1"),
         client=httpx.Client(transport=httpx.MockTransport(handle)),
@@ -214,7 +356,7 @@ def test_dashscope_does_not_create_second_task_after_submission_failure() -> Non
             )
         raise AssertionError(str(request.url))
 
-    client = DashScopeParaformerClient(
+    client = confirmed_client(
         "dashscope-fixture-secret",
         models=("paraformer-v1", "paraformer-v2"),
         client=httpx.Client(transport=httpx.MockTransport(handle)),
@@ -248,7 +390,7 @@ def test_parse_transcription_result_accepts_sentence_only_payload() -> None:
 
 def test_submit_rejects_private_audio_url_before_request() -> None:
     requests: list[httpx.Request] = []
-    client = DashScopeParaformerClient(
+    client = confirmed_client(
         "dashscope-fixture-secret",
         client=httpx.Client(
             transport=httpx.MockTransport(
@@ -265,7 +407,7 @@ def test_submit_rejects_private_audio_url_before_request() -> None:
 
 
 def test_submit_schema_error_when_task_id_missing() -> None:
-    client = DashScopeParaformerClient(
+    client = confirmed_client(
         "dashscope-fixture-secret",
         client=httpx.Client(
             transport=httpx.MockTransport(lambda _request: httpx.Response(200, json={"output": {}}))
@@ -298,7 +440,7 @@ def test_wait_result_url_polls_running_then_succeeds() -> None:
         assert request.method == "GET"
         return httpx.Response(200, json=next(statuses))
 
-    client = DashScopeParaformerClient(
+    client = confirmed_client(
         "dashscope-fixture-secret",
         client=httpx.Client(transport=httpx.MockTransport(handle)),
         poll_interval_seconds=3,
@@ -322,7 +464,7 @@ def test_transcribe_url_maps_dashscope_status_categories(
     code: str,
     category: ProviderErrorCategory,
 ) -> None:
-    client = DashScopeParaformerClient(
+    client = confirmed_client(
         "dashscope-fixture-secret",
         client=httpx.Client(
             transport=httpx.MockTransport(
@@ -342,7 +484,7 @@ def test_transcribe_url_maps_dashscope_status_categories(
 
 
 def test_wait_result_url_failed_task_maps_quota_category() -> None:
-    client = DashScopeParaformerClient(
+    client = confirmed_client(
         "dashscope-fixture-secret",
         client=httpx.Client(
             transport=httpx.MockTransport(
@@ -368,7 +510,7 @@ def test_wait_result_url_failed_task_maps_quota_category() -> None:
 
 def test_wait_result_url_times_out_after_poll_limit() -> None:
     sleeps: list[float] = []
-    client = DashScopeParaformerClient(
+    client = confirmed_client(
         "dashscope-fixture-secret",
         client=httpx.Client(
             transport=httpx.MockTransport(
@@ -388,7 +530,7 @@ def test_wait_result_url_times_out_after_poll_limit() -> None:
 
 
 def test_fetch_transcript_rejects_non_public_result_url() -> None:
-    client = DashScopeParaformerClient("dashscope-fixture-secret")
+    client = confirmed_client("dashscope-fixture-secret")
 
     with pytest.raises(ProviderError) as caught:
         client.fetch_transcript("http://127.0.0.1/result.json", task_id="task-local")
@@ -436,7 +578,7 @@ def test_parse_transcription_result_accepts_word_segments_and_clamps_end() -> No
 
 
 def test_secretstr_key_context_manager_and_owned_close() -> None:
-    with DashScopeParaformerClient(
+    with confirmed_client(
         SecretStr("dashscope-fixture-secret"),
         timeout_seconds=1,
     ) as client:
@@ -451,7 +593,7 @@ def test_secretstr_key_context_manager_and_owned_close() -> None:
     ],
 )
 def test_request_json_rejects_non_mapping_payload(response: httpx.Response) -> None:
-    client = DashScopeParaformerClient(
+    client = confirmed_client(
         "dashscope-fixture-secret",
         client=httpx.Client(transport=httpx.MockTransport(lambda _request: response)),
     )
@@ -471,7 +613,7 @@ def test_submission_transport_error_is_not_replayed() -> None:
     def handle(_request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("boom")
 
-    client = DashScopeParaformerClient(
+    client = confirmed_client(
         "dashscope-fixture-secret",
         client=httpx.Client(transport=httpx.MockTransport(handle)),
         max_retries=1,
@@ -493,7 +635,7 @@ def test_invalid_submission_response_requires_audit(body: str) -> None:
         requests.append(request)
         return httpx.Response(200, text=body)
 
-    client = DashScopeParaformerClient(
+    client = confirmed_client(
         "fixture-key",
         client=httpx.Client(transport=httpx.MockTransport(handle)),
         models=("paraformer-v1", "paraformer-v2"),
@@ -522,7 +664,7 @@ def test_invalid_submission_response_requires_audit(body: str) -> None:
 def test_wait_result_url_rejects_bad_terminal_payloads(
     payload: dict[str, object],
 ) -> None:
-    client = DashScopeParaformerClient(
+    client = confirmed_client(
         "dashscope-fixture-secret",
         client=httpx.Client(
             transport=httpx.MockTransport(lambda _request: httpx.Response(200, json=payload))
@@ -534,7 +676,7 @@ def test_wait_result_url_rejects_bad_terminal_payloads(
 
 
 def test_fetch_transcript_maps_result_json_schema_error() -> None:
-    client = DashScopeParaformerClient(
+    client = confirmed_client(
         "dashscope-fixture-secret",
         client=httpx.Client(
             transport=httpx.MockTransport(

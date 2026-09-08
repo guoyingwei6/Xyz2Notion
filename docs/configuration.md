@@ -12,9 +12,10 @@ uv run xyz2notion config-check --config config.yaml
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `provider_order` | `dashscope`, `siliconflow`, `local_whisper` | ASR 优先级；空数组表示暂停新 ASR |
-| `dashscope_model` | `paraformer-v1` | 百炼首选录音文件识别模型 |
-| `dashscope_fallback_models` | `paraformer-v2`, `paraformer-mtl-v1` | 百炼额度/模型不可用时的内部 fallback 顺序 |
+| `provider_order` | `dashscope` | 默认只启用带免费保护确认的百炼路径；空数组表示暂停新 ASR |
+| `dashscope_model` | `paraformer-v2` | 百炼首选录音文件识别模型 |
+| `dashscope_fallback_models` | 见 `config.example.yaml` | Fun-ASR、Qwen 文件转写及另外两个 Paraformer 候选 |
+| `dashscope_free_tier_confirmed_models` | `[]` | 仅填写控制台已开启“免费额度用完即停”的候选；空列表阻止新百炼任务 |
 | `siliconflow_models` | SenseVoiceSmall、TeleSpeechASR | 免费白名单模型 404 时依次尝试 |
 | `local_whisper_model` | `small` | 最终本地兜底；仅允许 `tiny`、`base`、`small` |
 
@@ -24,8 +25,7 @@ uv run xyz2notion config-check --config config.yaml
 asr:
   provider_order:
     - dashscope
-    - siliconflow
-    - local_whisper
+  dashscope_free_tier_confirmed_models: []
 ```
 
 暂停所有新 ASR：
@@ -40,17 +40,18 @@ asr:
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `enabled` | `true` | 是否在已有文字稿后调用摘要 |
-| `dashscope_model` | `qwen-flash` | 首选百炼兼容摘要模型；thinking 固定关闭 |
-| `siliconflow_models` | Qwen3-8B | 次级 SiliconFlow 摘要模型 |
-| `local_qwen_fallback` | `false` | 是否显式启用 GitHub Actions 本地 Qwen3-1.7B |
+| `dashscope_model` | `qwen-flash` | 仅兼容旧配置，不再用于摘要 |
+| `siliconflow_models` | Qwen3-8B | 唯一远程摘要模型，不自动切换收费模型 |
+| `local_qwen_fallback` | `true` | SiliconFlow 失败时使用本地 Qwen3-1.7B；需安装 `local-summary` extra |
 | `prompt_version` | `summary-v1` | 版本化 Prompt |
 | `chunk_tokens` | `12000` | 单块最大估算 Token；为 Actions 本地 Qwen 预留上下文余量 |
 | `chunk_minutes` | `30` | 单块最大时长 |
 | `max_output_tokens` | `4096` | 单次最大输出 |
 
-配置验证仅接受当前版本核对过的三个百炼 Paraformer 模型、两个 SiliconFlow ASR 模型、
-`qwen-flash` 和 `Qwen/Qwen3-8B`。摘要固定按 DashScope → SiliconFlow → 可选本地 Qwen
-降级，不自动切换其他模型。默认关闭本地 Qwen，避免 GitHub Actions CPU 长时间运行。
+百炼转写支持七个候选，实际只调用免费保护确认列表中的模型，详情见
+[`dashscope-asr.md`](dashscope-asr.md)。该列表是人工确认，不是实时计费查询；
+“支持的模型”不能等同于“永久免费”。已有异步任务的轮询不受新提交确认门槛影响。
+摘要固定按 SiliconFlow → 本地 Qwen 降级，不调用阿里云。
 
 关闭摘要后，单集会停在已转写状态，不会丢失文字稿，也不会重复执行 ASR。
 

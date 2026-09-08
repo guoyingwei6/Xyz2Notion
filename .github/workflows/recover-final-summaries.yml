@@ -59,7 +59,8 @@ jobs:
       - name: Install locked application
         run: |
           python -m pip install uv==0.9.28
-          uv sync --locked
+          uv sync --locked --extra local-summary
+          uv run --no-sync python -c "import llama_cpp"
 
       - name: Recover bounded final summary batches
         env:
@@ -69,7 +70,6 @@ jobs:
           CONFIRMATION: ${{ inputs.confirmation }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
-          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
         run: |
           set -euo pipefail
@@ -92,7 +92,7 @@ jobs:
             if [[ "$MODE" == "reopen-final" ]]; then
               recovery_batch="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${batch}"
               batch_args=(--recovery-batch "$recovery_batch")
-              reopen="$(uv run xyz2notion reopen-summary-failures \
+              reopen="$(uv run --no-sync xyz2notion reopen-summary-failures \
                 --limit "$ITEMS_PER_BATCH" \
                 "${batch_args[@]}" \
                 --confirm "REOPEN_${ITEMS_PER_BATCH}_SUMMARY_FAILURES")"
@@ -109,7 +109,7 @@ jobs:
               printf 'Batch %s resume: %s\n' "$batch" "$reopen"
             fi
             if (( reopened_count == 0 )); then
-              audit="$(uv run xyz2notion audit-notion-backlog)"
+              audit="$(uv run --no-sync xyz2notion audit-notion-backlog)"
               printf 'Batch %s audit: %s\n' "$batch" "$audit"
               break
             fi
@@ -120,13 +120,13 @@ jobs:
             retry_log="$RUNNER_TEMP/final-summary-retry-${batch}.log"
             set +e
             timeout --signal=TERM --kill-after=2m "$batch_timeout" \
-              uv run xyz2notion process-manual-retries \
+              uv run --no-sync xyz2notion process-manual-retries \
               --summary-only "${batch_args[@]}" \
               --config "$config_path" --limit "$ITEMS_PER_BATCH" 2>&1 | tee "$retry_log"
             retry_status="${PIPESTATUS[0]}"
             set -e
             retry="$(<"$retry_log")"
-            audit="$(uv run xyz2notion audit-notion-backlog)"
+            audit="$(uv run --no-sync xyz2notion audit-notion-backlog)"
             printf 'Batch %s audit: %s\n' "$batch" "$audit"
             {
               printf '## Final summary recovery batch %s\n\n' "$batch"

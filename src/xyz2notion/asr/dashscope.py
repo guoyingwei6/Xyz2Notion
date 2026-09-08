@@ -1,4 +1,4 @@
-"""Alibaba Cloud DashScope Paraformer recorded-audio ASR provider."""
+"""Guarded Alibaba Cloud DashScope recorded-audio ASR provider."""
 
 from __future__ import annotations
 
@@ -34,6 +34,10 @@ SUPPORTED_MODELS = frozenset(
         "paraformer-v1",
         "paraformer-v2",
         "paraformer-mtl-v1",
+        "fun-asr",
+        "fun-asr-mtl",
+        "qwen-audio-3.0-asr-flash-filetrans",
+        "qwen3-asr-flash-filetrans",
     }
 )
 # Backwards-compatible name used by older integrations.  The account's actual
@@ -43,6 +47,10 @@ FREE_MODELS = SUPPORTED_MODELS
 SUCCEEDED_STATUSES = frozenset({"SUCCEEDED"})
 RUNNING_STATUSES = frozenset({"PENDING", "RUNNING"})
 FAILED_STATUSES = frozenset({"FAILED", "UNKNOWN"})
+
+
+class AsrFreeTierPausedError(RuntimeError):
+    """New ASR is blocked until the account's free-only route is usable."""
 
 
 class DashScopeAPIError(RuntimeError):
@@ -131,12 +139,20 @@ def _extract_result_url(payload: Mapping[str, Any]) -> str:
         code = output.get("code")
         message = output.get("message") or "DashScope transcription task failed"
         raise DashScopeAPIError(str(message), code=str(code) if code else status)
+    # Qwen3 Filetrans returns a single result; Paraformer/Fun-ASR return a list.
     results = output.get("results")
+    if isinstance(output.get("result"), Mapping):
+        results = [output["result"]]
     if not isinstance(results, list) or not results:
         raise DashScopeAPIError("DashScope completed task has no results")
     first = results[0]
     if not isinstance(first, Mapping):
         raise DashScopeAPIError("DashScope task result has an unexpected shape")
+    if first.get("subtask_status") in FAILED_STATUSES:
+        raise DashScopeAPIError(
+            str(first.get("message") or "DashScope transcription subtask failed"),
+            code=str(first.get("code") or "subtask_failed"),
+        )
     url = first.get("transcription_url")
     if not isinstance(url, str) or not url.strip():
         raise DashScopeAPIError("DashScope task result has no transcription_url")
@@ -255,6 +271,7 @@ class DashScopeParaformerClient:
         *,
         model: str = DEFAULT_MODEL,
         models: tuple[str, ...] | None = None,
+        confirmed_free_tier_models: tuple[str, ...] = (),
         client: httpx.Client | None = None,
         max_retries: int = 3,
         poll_attempts: int = 60,
@@ -274,10 +291,13 @@ class DashScopeParaformerClient:
             raise ValueError(
                 "DashScope ASR model is not in the safe allowlist: " + ", ".join(sorted(unknown))
             )
+        if set(confirmed_free_tier_models) - set(selected_models):
+            raise ValueError("Free-tier confirmations must name configured DashScope models")
         if max_retries < 0 or poll_attempts < 1 or poll_interval_seconds < 0:
             raise ValueError("DashScope retry and polling limits must be non-negative")
         validate_credential_destination(DASHSCOPE_TRANSCRIPTION_URL, CredentialKind.DASHSCOPE)
         self.models = tuple(selected_models)
+        self.confirmed_free_tier_models = frozenset(confirmed_free_tier_models)
         # Keep the historical attribute for callers that display the default
         # model; each TranscriptResult records the actually used model.
         self.model = self.models[0]
@@ -296,6 +316,14 @@ class DashScopeParaformerClient:
     def close(self) -> None:
         if self._owns_client:
             self._client.close()
+
+    def ensure_free_tier(self) -> None:
+        if not self.confirmed_free_tier_models:
+            raise AsrFreeTierPausedError(
+                "ASR paused: no DashScope model has confirmed free-quota-only protection; "
+                "enable it in the account console, then set "
+                "asr.dashscope_free_tier_confirmed_models"
+            )
 
     def __enter__(self) -> DashScopeParaformerClient:
         return self
@@ -371,6 +399,12 @@ class DashScopeParaformerClient:
         active_model = model or self.model
         if active_model not in SUPPORTED_MODELS:
             raise ValueError("DashScope ASR model is not in the safe allowlist")
+        if active_model not in self.confirmed_free_tier_models:
+            raise _failure(
+                ProviderErrorCategory.QUOTA_EXHAUSTED,
+                f"Free-quota-only protection is not confirmed for {active_model}",
+                code="free_tier_unconfirmed",
+            )
         try:
             safe_audio_url = validate_public_audio_url(audio_url)
         except AudioPreparationError as exc:
@@ -379,10 +413,13 @@ class DashScopeParaformerClient:
                 "Audio URL is not usable by DashScope",
                 code=type(exc).__name__,
             ) from exc
-        parameters: dict[str, Any] = {
-            "channel_id": [0],
-            "disfluency_removal_enabled": False,
-        }
+        parameters: dict[str, Any] = {"channel_id": [0]}
+        audio_input: dict[str, Any] = {"file_urls": [safe_audio_url]}
+        if active_model.startswith("paraformer-"):
+            parameters["disfluency_removal_enabled"] = False
+        elif active_model == "qwen3-asr-flash-filetrans":
+            audio_input = {"file_url": safe_audio_url}
+            parameters = {}
         # v2 exposes the most precise recorded-file alignment option.  Keep it
         # model-specific because older Paraformer variants do not all accept
         # the same parameter set.
@@ -394,7 +431,7 @@ class DashScopeParaformerClient:
                 DASHSCOPE_TRANSCRIPTION_URL,
                 json_body={
                     "model": active_model,
-                    "input": {"file_urls": [safe_audio_url]},
+                    "input": audio_input,
                     "parameters": parameters,
                 },
             )
@@ -443,7 +480,11 @@ class DashScopeParaformerClient:
                     return _extract_result_url(payload)
                 except DashScopeAPIError as exc:
                     raise _failure(
-                        ProviderErrorCategory.SCHEMA_CHANGED,
+                        (
+                            _status_category(None, exc.code)
+                            if exc.code
+                            else ProviderErrorCategory.SCHEMA_CHANGED
+                        ),
                         str(exc),
                         code=exc.code,
                     ) from exc

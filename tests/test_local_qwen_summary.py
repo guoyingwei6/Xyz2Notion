@@ -4,6 +4,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import httpx
 import pytest
@@ -277,6 +278,35 @@ def test_default_model_path_honors_environment_override(
     assert _default_model_path() == configured
     monkeypatch.delenv("XYZ2NOTION_LOCAL_SUMMARY_MODEL_PATH")
     assert _default_model_path().name == "Qwen3-1.7B-Q4_K_M.gguf"
+
+
+def test_local_generation_timeout_never_returns_partial_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, model = local_client(tmp_path, monkeypatch, [])
+    clock = [0.0]
+    monkeypatch.setattr(
+        "xyz2notion.enrichment.local_qwen.time",
+        SimpleNamespace(monotonic=lambda: clock[0]),
+    )
+
+    def slow_completion(**kwargs: Any) -> dict[str, object]:
+        clock[0] = client.generation_timeout_seconds + 1
+        kwargs["stopping_criteria"](None, None)
+        pytest.fail("Timed-out inference must not be accepted")
+
+    monkeypatch.setattr(model, "create_chat_completion", slow_completion)
+    with pytest.raises(ProviderError) as caught:
+        client.generate_structured(
+            EnrichmentPayload, system="system", user="user", max_output_tokens=128
+        )
+    assert caught.value.failure.category is ProviderErrorCategory.TIMEOUT
+    assert caught.value.failure.code == "local_generation_timeout"
+    assert client.active_model is None
+    client.close()
+    with pytest.raises(ValueError, match="positive"):
+        LocalQwenSummaryClient(generation_timeout_seconds=0)
 
 
 def test_load_llama_reports_missing_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
