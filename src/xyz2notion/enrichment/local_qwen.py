@@ -149,9 +149,9 @@ def _grammar_for_schema(schema: Mapping[str, Any]) -> Any:
     if not schema:
         return None
     try:
-        from llama_cpp.llama_grammar import LlamaGrammar
+        llama_grammar = importlib.import_module("llama_cpp.llama_grammar")
 
-        return LlamaGrammar.from_json_schema(
+        return llama_grammar.LlamaGrammar.from_json_schema(
             json.dumps(dict(schema), ensure_ascii=False),
             verbose=False,
         )
@@ -161,9 +161,9 @@ def _grammar_for_schema(schema: Mapping[str, Any]) -> Any:
 
 def _make_stopping_criteria(criteria: Callable[[Any, Any], bool]) -> Any:
     try:
-        from llama_cpp import StoppingCriteriaList
+        llama_cpp = importlib.import_module("llama_cpp")
 
-        return StoppingCriteriaList([criteria])
+        return llama_cpp.StoppingCriteriaList([criteria])
     except Exception:
         return criteria
 
