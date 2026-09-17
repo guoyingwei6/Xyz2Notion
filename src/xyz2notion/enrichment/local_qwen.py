@@ -136,6 +136,38 @@ def _compact_enrichment_prompt(user: str, *, chunk: bool = False) -> str:
     )
 
 
+def _format_qwen_chatml(system: str, user: str) -> tuple[str, list[str]]:
+    prompt = (
+        f"<|im_start|>system\n{system}<|im_end|>\n"
+        f"<|im_start|>user\n{user}\n\n/no_think<|im_end|>\n"
+        "<|im_start|>assistant\n"
+    )
+    return prompt, ["<|im_end|>", "<|endoftext|>"]
+
+
+def _grammar_for_schema(schema: Mapping[str, Any]) -> Any:
+    if not schema:
+        return None
+    try:
+        from llama_cpp.llama_grammar import LlamaGrammar
+
+        return LlamaGrammar.from_json_schema(
+            json.dumps(dict(schema), ensure_ascii=False),
+            verbose=False,
+        )
+    except Exception:
+        return None
+
+
+def _make_stopping_criteria(criteria: Callable[[Any, Any], bool]) -> Any:
+    try:
+        from llama_cpp import StoppingCriteriaList
+
+        return StoppingCriteriaList([criteria])
+    except Exception:
+        return criteria
+
+
 def _error(
     category: ProviderErrorCategory,
     message: str,
@@ -328,16 +360,30 @@ class LocalQwenSummaryClient:
             return False
 
         try:
-            response = model.create_chat_completion(
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": f"{user}\n\n/no_think"},
-                ],
-                response_format={"type": "json_object", "schema": dict(schema)},
-                temperature=0.1,
-                max_tokens=min(max_output_tokens, LOCAL_QWEN_MAX_OUTPUT_TOKENS),
-                stopping_criteria=check_deadline,
-            )
+            prompt, stop = _format_qwen_chatml(system=system, user=user)
+            grammar = _grammar_for_schema(schema)
+            stopping_criteria = _make_stopping_criteria(check_deadline)
+            if hasattr(model, "create_completion"):
+                kwargs: dict[str, Any] = {
+                    "prompt": prompt,
+                    "max_tokens": min(max_output_tokens, LOCAL_QWEN_MAX_OUTPUT_TOKENS),
+                    "temperature": 0.1,
+                    "stop": stop,
+                    "stopping_criteria": stopping_criteria,
+                }
+                if grammar is not None:
+                    kwargs["grammar"] = grammar
+                response = model.create_completion(**kwargs)
+            else:
+                response = model.create_chat_completion(
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": f"{user}\n\n/no_think"},
+                    ],
+                    response_format={"type": "json_object", "schema": dict(schema)},
+                    temperature=0.1,
+                    max_tokens=min(max_output_tokens, LOCAL_QWEN_MAX_OUTPUT_TOKENS),
+                )
             check_deadline(None, None)
         except ProviderError:
             raise
@@ -350,8 +396,12 @@ class LocalQwenSummaryClient:
             ) from exc
         try:
             choice = response["choices"][0]
-            message = choice["message"]
-            content = message["content"]
+            if "text" in choice:
+                content = choice["text"]
+            elif "message" in choice and isinstance(choice["message"], dict):
+                content = choice["message"].get("content")
+            else:
+                raise KeyError("content")
             usage = response.get("usage", {})
             if not isinstance(content, str) or not content.strip():
                 raise KeyError("content")

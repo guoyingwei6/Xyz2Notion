@@ -1,5 +1,6 @@
 import hashlib
 import importlib
+import inspect
 import json
 from collections.abc import Callable
 from pathlib import Path
@@ -56,7 +57,19 @@ class FakeLlama:
         self.responses = iter(responses)
         self.requests: list[dict[str, object]] = []
 
+    def create_completion(self, **kwargs: object) -> dict[str, object]:
+        self.requests.append(dict(kwargs))
+        return {
+            "choices": [{"text": next(self.responses)}],
+            "usage": {"prompt_tokens": 20, "completion_tokens": 10},
+        }
+
     def create_chat_completion(self, **kwargs: object) -> dict[str, object]:
+        if "stopping_criteria" in kwargs:
+            raise TypeError(
+                "Llama.create_chat_completion() got an unexpected keyword argument "
+                "'stopping_criteria'"
+            )
         self.requests.append(dict(kwargs))
         return {
             "choices": [{"message": {"content": next(self.responses)}}],
@@ -113,17 +126,14 @@ def test_local_qwen_generates_schema_constrained_json(
     assert client.active_provider == "local_qwen_summary"
     assert client.max_transcript_chunk_tokens == LOCAL_QWEN_TRANSCRIPT_CHUNK_TOKENS
     assert model.requests[0]["max_tokens"] == LOCAL_QWEN_COMPACT_OUTPUT_TOKENS
-    assert model.requests[0]["response_format"] == {
-        "type": "json_object",
-        "schema": LocalEnrichmentPayload.model_json_schema(),
-    }
+    assert model.requests[0]["stop"] == ["<|im_end|>", "<|endoftext|>"]
+    assert model.requests[0]["grammar"] is not None
     compact_schema = LocalEnrichmentPayload.model_json_schema()
     assert "mindmap" not in compact_schema["properties"]
     assert compact_schema["properties"]["chapters"]["maxItems"] == 8
-    messages = model.requests[0]["messages"]
-    assert isinstance(messages, list)
-    assert "/no_think" in str(messages[-1])
-    assert "不要输出 mindmap" in str(messages[-1])
+    prompt = str(model.requests[0]["prompt"])
+    assert "/no_think" in prompt
+    assert "不要输出 mindmap" in prompt
 
 
 def test_local_qwen_replaces_recursive_prompt_schema(
@@ -155,9 +165,7 @@ def test_local_qwen_replaces_recursive_prompt_schema(
         ),
         max_output_tokens=10_000,
     )
-    messages = model.requests[0]["messages"]
-    assert isinstance(messages, list)
-    request_text = str(messages[-1])
+    request_text = str(model.requests[0]["prompt"])
     assert full_schema not in request_text
     assert compact_schema in request_text
     assert "不要输出 mindmap" in request_text
@@ -191,9 +199,8 @@ def test_local_qwen_uses_smaller_budget_for_map_chunks(
         max_output_tokens=10_000,
     )
     assert model.requests[0]["max_tokens"] == LOCAL_QWEN_CHUNK_OUTPUT_TOKENS
-    messages = model.requests[0]["messages"]
-    assert isinstance(messages, list)
-    assert "分段中间结果必须更短" in str(messages[-1])
+    prompt = str(model.requests[0]["prompt"])
+    assert "分段中间结果必须更短" in prompt
 
 
 def test_local_qwen_repairs_invalid_json_once(
@@ -296,7 +303,7 @@ def test_local_generation_timeout_never_returns_partial_success(
         kwargs["stopping_criteria"](None, None)
         pytest.fail("Timed-out inference must not be accepted")
 
-    monkeypatch.setattr(model, "create_chat_completion", slow_completion)
+    monkeypatch.setattr(model, "create_completion", slow_completion)
     with pytest.raises(ProviderError) as caught:
         client.generate_structured(
             EnrichmentPayload, system="system", user="user", max_output_tokens=128
@@ -434,7 +441,7 @@ def test_local_qwen_rejects_unexpected_completion_schema(
     response: dict[str, object],
 ) -> None:
     client, _model = local_client(tmp_path, monkeypatch, [])
-    client._model = SimpleNamespace(create_chat_completion=lambda **_kwargs: response)
+    client._model = SimpleNamespace(create_completion=lambda **_kwargs: response)
     with pytest.raises(ProviderError) as caught:
         client._complete(system="system", user="user", schema={}, max_output_tokens=100)
     assert caught.value.failure.category is ProviderErrorCategory.SCHEMA_CHANGED
@@ -450,7 +457,7 @@ def test_local_qwen_maps_runtime_failure_to_unavailable(
     def fail(**_kwargs: object) -> object:
         raise RuntimeError("private runtime detail")
 
-    client._model = SimpleNamespace(create_chat_completion=fail)
+    client._model = SimpleNamespace(create_completion=fail)
     with pytest.raises(ProviderError) as caught:
         client._complete(system="system", user="user", schema={}, max_output_tokens=100)
     assert caught.value.failure.category is ProviderErrorCategory.UNAVAILABLE
@@ -496,6 +503,34 @@ def test_local_qwen_repair_failure_is_bounded(
     assert caught.value.failure.category is ProviderErrorCategory.SCHEMA_CHANGED
     assert caught.value.failure.code == "summary_schema"
     assert len(model.requests) == 2
+
+
+def test_llama_runtime_signatures_and_completion_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from llama_cpp import Llama
+
+    chat_params = inspect.signature(Llama.create_chat_completion).parameters
+    completion_params = inspect.signature(Llama.create_completion).parameters
+
+    assert "stopping_criteria" not in chat_params
+    assert "stopping_criteria" in completion_params
+    assert "grammar" in completion_params
+
+    client, _model = local_client(
+        tmp_path,
+        monkeypatch,
+        [json.dumps(compact_payload(), ensure_ascii=False)],
+    )
+    content, usage = client._complete(
+        system="system",
+        user="user",
+        schema=LocalEnrichmentPayload.model_json_schema(),
+        max_output_tokens=500,
+    )
+    assert json.loads(content)["summary"] == "本地摘要"
+    assert usage == CompletionUsage(20, 10)
 
 
 def test_local_qwen_repair_must_pass_semantic_validator(

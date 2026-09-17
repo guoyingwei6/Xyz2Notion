@@ -47,8 +47,9 @@ jobs:
             ~/.cache/uv
             ~/.cache/huggingface
             ~/.cache/xyz2notion
-          key: retry-ai-${{ runner.os }}-py312-llama0.3.16-${{ hashFiles('uv.lock') }}
+          key: ai-${{ runner.os }}-py312-llama0.3.16-${{ hashFiles('uv.lock') }}
           restore-keys: |
+            ai-${{ runner.os }}-py312-llama0.3.16-
             retry-ai-${{ runner.os }}-py312-llama0.3.16-
 
       - name: Install FFmpeg and locked application

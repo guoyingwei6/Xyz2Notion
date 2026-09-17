@@ -151,6 +151,7 @@ def test_summary_workflows_install_and_keep_local_runtime(filename: str) -> None
     text, _parsed = _workflow(filename)
     assert "uv sync --locked --extra local-summary" in text
     assert 'uv run --no-sync python -c "import llama_cpp"' in text
+    assert PINNED_CACHE in text
     for line in text.splitlines():
         if "uv run " in line:
             assert "uv run --no-sync " in line
