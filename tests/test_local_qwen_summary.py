@@ -1,5 +1,6 @@
 import hashlib
 import importlib
+import importlib.util
 import inspect
 import json
 from collections.abc import Callable
@@ -127,7 +128,8 @@ def test_local_qwen_generates_schema_constrained_json(
     assert client.max_transcript_chunk_tokens == LOCAL_QWEN_TRANSCRIPT_CHUNK_TOKENS
     assert model.requests[0]["max_tokens"] == LOCAL_QWEN_COMPACT_OUTPUT_TOKENS
     assert model.requests[0]["stop"] == ["<|im_end|>", "<|endoftext|>"]
-    assert model.requests[0]["grammar"] is not None
+    if importlib.util.find_spec("llama_cpp") is not None:
+        assert model.requests[0].get("grammar") is not None
     compact_schema = LocalEnrichmentPayload.model_json_schema()
     assert "mindmap" not in compact_schema["properties"]
     assert compact_schema["properties"]["chapters"]["maxItems"] == 8
@@ -509,7 +511,10 @@ def test_llama_runtime_signatures_and_completion_dispatch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from llama_cpp import Llama
+    try:
+        from llama_cpp import Llama
+    except ImportError:
+        pytest.skip("llama_cpp runtime is not installed in this environment")
 
     chat_params = inspect.signature(Llama.create_chat_completion).parameters
     completion_params = inspect.signature(Llama.create_completion).parameters
