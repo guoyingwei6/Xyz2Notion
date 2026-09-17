@@ -62,7 +62,11 @@ class StrictConfigModel(BaseModel):
 class AsrConfig(StrictConfigModel):
     """Free speech recognition provider policy."""
 
-    provider_order: tuple[AsrProvider, ...] = (AsrProvider.DASHSCOPE,)
+    provider_order: tuple[AsrProvider, ...] = (
+        AsrProvider.DASHSCOPE,
+        AsrProvider.SILICONFLOW,
+        AsrProvider.LOCAL_WHISPER,
+    )
     dashscope_model: DashScopeAsrModel = "paraformer-v2"
     dashscope_fallback_models: tuple[DashScopeAsrModel, ...] = (
         "fun-asr",
@@ -79,6 +83,7 @@ class AsrConfig(StrictConfigModel):
         "TeleAI/TeleSpeechASR",
     )
     local_whisper_model: Literal["tiny", "base", "small"] = "small"
+    fallback_on_quota_exhaustion: bool = True
 
     @model_validator(mode="after")
     def validate_provider_policy(self) -> Self:

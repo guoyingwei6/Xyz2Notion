@@ -492,6 +492,7 @@ def _run_asr_queue(args: argparse.Namespace) -> int:
                 summary_enabled=False,
                 provider_order=config.asr.provider_order,
                 asr_budget=AsrBudget(notion, pages, config.limits),
+                fallback_on_quota_exhaustion=config.asr.fallback_on_quota_exhaustion,
             )
             page_by_id = {str(page.get("id")): page for page in pages}
             outcomes = []

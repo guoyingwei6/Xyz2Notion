@@ -24,7 +24,12 @@ from xyz2notion.config import (
 def test_example_config_is_valid_and_secret_free() -> None:
     config = load_config("config.example.yaml")
     assert config.schema_version == 1
-    assert config.asr.provider_order == (AsrProvider.DASHSCOPE,)
+    assert config.asr.provider_order == (
+        AsrProvider.DASHSCOPE,
+        AsrProvider.SILICONFLOW,
+        AsrProvider.LOCAL_WHISPER,
+    )
+    assert config.asr.fallback_on_quota_exhaustion is True
     assert config.asr.dashscope_model == "paraformer-v2"
     assert config.asr.dashscope_models == (
         "paraformer-v2",

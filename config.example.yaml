@@ -3,6 +3,8 @@ schema_version: 1
 asr:
   provider_order:
     - dashscope
+    - siliconflow
+    - local_whisper
   # Candidates only: each model also needs explicit free-only confirmation below.
   dashscope_model: paraformer-v2
   dashscope_fallback_models:
@@ -20,6 +22,7 @@ asr:
     - FunAudioLLM/SenseVoiceSmall
     - TeleAI/TeleSpeechASR
   local_whisper_model: small
+  fallback_on_quota_exhaustion: true
 
 summary:
   enabled: true

@@ -280,6 +280,7 @@ def run_manual_retry_queue(
             mindmap_data_source_id=initialization.resources["mindmap"].data_source_id,
             provider_order=() if summary_only else config.asr.provider_order,
             asr_budget=None if summary_only else AsrBudget(notion, pages, config.limits),
+            fallback_on_quota_exhaustion=config.asr.fallback_on_quota_exhaustion,
         )
         outcomes: list[ProcessingOutcome] = []
         for index, item in enumerate(selected):

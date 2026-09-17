@@ -918,3 +918,22 @@ def test_summary_factory_uses_only_siliconflow_then_local_and_preserves_transcri
     assert store.state.record.failure is not None
     assert "local_qwen_summary:timeout" in store.state.record.failure.message
     assert requests and local_calls == [True]
+
+
+def test_dashscope_quota_exhaustion_falls_back_when_enabled() -> None:
+    store = FakeStateStore()
+    processor = DashScopeProcessor(
+        FakeNotion(),
+        store,
+        dashscope=object(),  # type: ignore[arg-type]
+        siliconflow=object(),
+        summary_client=FakeSummaryClient(),
+        dashscope_failures=1,
+        fallback_on_quota_exhaustion=True,
+    )
+    outcome = processor.process_asr_only(CANDIDATE, {})
+    assert outcome.action == "transcribed"
+    assert outcome.state is PipelineState.TRANSCRIBED
+    assert processor.dashscope_calls == 1
+    assert processor.asr_calls == 1
+    assert store.state.submission_uncertain is False

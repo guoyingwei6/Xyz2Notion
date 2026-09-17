@@ -227,6 +227,7 @@ class EpisodeAIProcessor:
         mindmap_data_source_id: str | None = None,
         provider_order: tuple[AsrProvider, ...] = tuple(AsrProvider),
         asr_budget: AsrBudget | None = None,
+        fallback_on_quota_exhaustion: bool = False,
     ) -> None:
         self.notion = notion
         self.state_store = state_store
@@ -239,6 +240,7 @@ class EpisodeAIProcessor:
         self.mindmap_data_source_id = mindmap_data_source_id
         self.provider_order = provider_order
         self.asr_budget = asr_budget
+        self.fallback_on_quota_exhaustion = fallback_on_quota_exhaustion
         self._checkpoint: EpisodeAIState | None = None
 
     def _save(self, page_id: str, state: EpisodeAIState) -> EpisodeAIState:
@@ -381,10 +383,27 @@ class EpisodeAIProcessor:
         for provider in self.provider_order:
             if clients[provider] is None:
                 continue
+            has_downstream = self.fallback_on_quota_exhaustion and any(
+                clients.get(p) is not None
+                for p in self.provider_order[self.provider_order.index(provider) + 1 :]
+            )
             if provider is AsrProvider.DASHSCOPE and isinstance(
                 self.dashscope, DashScopeParaformerClient
             ):
-                self.dashscope.ensure_free_tier()
+                try:
+                    self.dashscope.ensure_free_tier()
+                except AsrFreeTierPausedError as exc:
+                    if has_downstream:
+                        last_error = ProviderError(
+                            ProviderFailure(
+                                provider="dashscope",
+                                category=ProviderErrorCategory.UNAVAILABLE,
+                                message=str(exc),
+                                code="free_tier_unconfirmed",
+                            )
+                        )
+                        continue
+                    raise
             if self.asr_budget is not None:
                 self.asr_budget.reserve(candidate.page_id, candidate.duration_seconds)
             if provider is AsrProvider.DASHSCOPE:
@@ -407,6 +426,9 @@ class EpisodeAIProcessor:
                     if self._is_sensitive_asr_failure(exc) or state.submission_uncertain:
                         raise
                     if exc.failure.category is ProviderErrorCategory.QUOTA_EXHAUSTED:
+                        if has_downstream:
+                            last_error = exc
+                            continue
                         raise AsrFreeTierPausedError(
                             "ASR paused: confirmed DashScope free quotas are exhausted or "
                             "unavailable; no other ASR provider was called"

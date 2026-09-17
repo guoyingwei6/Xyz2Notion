@@ -59,6 +59,11 @@
           "title": "Dashscope Model",
           "type": "string"
         },
+        "fallback_on_quota_exhaustion": {
+          "default": true,
+          "title": "Fallback On Quota Exhaustion",
+          "type": "boolean"
+        },
         "local_whisper_model": {
           "default": "small",
           "enum": [
@@ -71,7 +76,9 @@
         },
         "provider_order": {
           "default": [
-            "dashscope"
+            "dashscope",
+            "siliconflow",
+            "local_whisper"
           ],
           "items": {
             "$ref": "#/$defs/AsrProvider"
